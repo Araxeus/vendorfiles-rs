@@ -9,8 +9,31 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  check:
-    name: Run checks
+  # One leg per platform: `github::credentials` compiles a different native store on each, and
+  # a store's `new` plus its read/write round trip is only exercised by the tests that run
+  # there. A Linux-only job would leave the macOS and Windows branches unbuilt until a release.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: Tests
+        run: cargo test --workspace
+
+  lint:
+    name: Format and lints
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,9 +44,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Cargo check
-        run: cargo check --workspace --all-targets
-
       - name: Rustfmt check
         run: cargo fmt --all --check
 
@@ -31,9 +51,6 @@ jobs:
         run: >
           cargo clippy --all-targets --all-features
           -- -W clippy::pedantic -W clippy::cargo -W clippy::nursery -D warnings
-
-      - name: Tests
-        run: cargo test --workspace
 
   clippy-sarif:
     name: Upload clippy results

@@ -90,14 +90,30 @@ mod tests {
         );
     }
 
+    /// Whether an error says the environment has no usable store, rather than that the code
+    /// asked for the wrong thing.
+    ///
+    /// A CI runner can lack an unlocked keychain or a session keyring; that is not a defect
+    /// here, and the tool already degrades to `GITHUB_TOKEN` when it happens.
+    fn is_environmental(error: &keyring_core::Error) -> bool {
+        matches!(
+            error,
+            keyring_core::Error::NoStorageAccess(_)
+                | keyring_core::Error::PlatformFailure(_)
+                | keyring_core::Error::NotSupportedByStore(_)
+        )
+    }
+
     #[test]
-    fn entries_can_be_built_without_touching_the_store() {
+    fn building_an_entry_does_not_create_a_credential() {
         // `build` is a specifier: it must not read or write the underlying credential.
         let handle = entry("vendorfiles-cli-test", "does-not-exist").expect("a store");
-        assert!(matches!(
-            handle.get_password(),
-            Err(keyring_core::Error::NoEntry)
-        ));
+        match handle.get_password() {
+            Err(keyring_core::Error::NoEntry) => {}
+            Err(other) if is_environmental(&other) => eprintln!("store unavailable: {other}"),
+            Err(other) => panic!("unexpected keyring error: {other}"),
+            Ok(_) => panic!("`build` must not materialise a credential"),
+        }
     }
 
     #[test]
@@ -105,18 +121,24 @@ mod tests {
         // Writing is the half that only shows up when a user runs `vendor login`, so exercise
         // it here — under a name of its own, never the real credential.
         let handle = entry("vendorfiles-cli-test", "round-trip").expect("a store");
-        handle
-            .set_password("ghp_roundtrip_0123456789")
-            .expect("write");
+        match handle.set_password("ghp_roundtrip_0123456789") {
+            Ok(()) => {}
+            Err(error) if is_environmental(&error) => {
+                eprintln!("store not writable here: {error}");
+                return;
+            }
+            Err(error) => panic!("unexpected keyring error: {error}"),
+        }
+
         assert_eq!(
-            handle.get_password().expect("read"),
+            handle.get_password().expect("read back what was written"),
             "ghp_roundtrip_0123456789"
         );
         handle.delete_credential().expect("delete");
-        assert!(matches!(
-            handle.get_password(),
-            Err(keyring_core::Error::NoEntry)
-        ));
+        assert!(
+            matches!(handle.get_password(), Err(keyring_core::Error::NoEntry)),
+            "the credential should be gone after deletion"
+        );
     }
 
     #[test]
