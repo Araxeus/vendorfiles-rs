@@ -33,8 +33,20 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 - [JSON Schema](#json-schema)
 - [Differences from the TypeScript version](#differences-from-the-typescript-version)
 - [Development](#development)
+- [License](#license)
 
 ## Installation
+
+**From a release:** download the archive for your platform from the
+[releases page](https://github.com/Araxeus/vendorfiles/releases) and put `vendor` on your
+`PATH`.
+That installs a binary named `vendor`. No system libraries are needed on any platform.
+
+**From Cargo:**
+
+```bash
+cargo install vendorfiles
+```
 
 **From source:**
 
@@ -43,12 +55,6 @@ git clone https://github.com/Araxeus/vendorfiles-rs
 cd vendorfiles-rs
 cargo install --path crates/vendor-cli
 ```
-
-That installs a binary named `vendor`. No system libraries are needed on any platform.
-
-**From a release:** download the archive for your platform from the
-[releases page](https://github.com/Araxeus/vendorfiles/releases) and put `vendor` on your
-`PATH`.
 
 **Build without installing:**
 
