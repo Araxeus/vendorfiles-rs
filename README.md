@@ -1,6 +1,6 @@
 # vendorfiles-rs <!-- omit from toc -->
 
-A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) — pull files from
+A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
 GitHub repositories and keep them up to date. Think of it like a package manager, but for
 individual files: CSS libraries, binaries, config files, whatever you need.
 
@@ -42,7 +42,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 `PATH`.
 That installs a binary named `vendor`. No system libraries are needed on any platform.
 
-**From Cargo:**
+**From [Cargo](https://crates.io/crates/vendorfiles):**
 
 ```bash
 cargo install vendorfiles
@@ -89,7 +89,7 @@ Your files are now in `./vendor/Coloris/`.
 ## Configuration
 
 Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, `vendor.yaml`,
-`vendor.json`, `package.json`. Only the current directory is searched — there is no upward
+`vendor.json`, `package.json`. Only the current directory is searched - there is no upward
 walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
 
 All examples below are JSON; TOML and YAML work identically. See [`examples/`](./examples/).
@@ -194,7 +194,7 @@ By default versions track GitHub releases. To track a file's latest commit inste
 ### GitHub Releases
 
 Download release assets with `{release}/` in the path. `{version}` expands to the semver core
-of the tag — the first `x.y.z` found, or the tag with leading `v`s stripped:
+of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 
 ```json
 {
@@ -212,7 +212,7 @@ of the tag — the first `x.y.z` found, or the tag with leading `v`s stripped:
 }
 ```
 
-**Extracting from archives** — give a list (keep names) or a map (rename):
+**Extracting from archives** - give a list (keep names) or a map (rename):
 
 ```json
 {
@@ -363,7 +363,7 @@ running without credentials. Tokens are resolved in this order:
 2. the platform's credential store
 3. anonymous
 
-Native stores are compiled in per platform — there is no cross-platform facade, and no system
+Native stores are compiled in per platform - there is no cross-platform facade, and no system
 library to install:
 
 | Platform | Store | Survives |
@@ -372,10 +372,10 @@ library to install:
 | macOS | login Keychain (`apple-native-keyring-store`) | until deleted |
 | Linux | Secret Service (`zbus-secret-service-keyring-store`) | until deleted |
 | Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`) | **until reboot** |
-| anything else | none — `GITHUB_TOKEN` only | — |
+| anything else | none - `GITHUB_TOKEN` only | - |
 
 On Linux the Secret Service is tried first, so a token persists wherever a keyring daemon is
-running — gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
+running - gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
 usually have none, and there the kernel keyutils store takes over: it always works, but it
 holds secrets in kernel memory.
 
@@ -398,11 +398,11 @@ WARNING: this system's credential store keeps secrets in kernel memory, so the t
 ```
 
 Two ways to get persistence if you see that: run a Secret Service daemon (installing
-`gnome-keyring` is usually enough — on a headless box it needs unlocking, see
+`gnome-keyring` is usually enough - on a headless box it needs unlocking, see
 [this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
 your shell profile or CI secrets.
 
-`login` is the one command that does not need a config file — it works from any directory.
+`login` is the one command that does not need a config file - it works from any directory.
 
 ## Lockfile
 
@@ -442,13 +442,13 @@ can validate and autocomplete it:
 ## Differences from the TypeScript version
 
 CLI help text, argument errors, exit codes, log wording, ANSI colours, lockfile bytes and
-config write-back formatting are all matched deliberately — the help fixtures in
+config write-back formatting are all matched deliberately - the help fixtures in
 [`crates/vendor-cli/tests/fixtures/help`](./crates/vendor-cli/tests/fixtures/help) are captured
 from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite.
 
 The main difference:
 Version lookups run concurrently, and dependencies download
-   in parallel (up to 8 at a time) while results are still committed strictly in config order —
+   in parallel (up to 8 at a time) while results are still committed strictly in config order -
    so the log is byte-identical to the original's but arrives sooner. Within one dependency the
    original's log order was left to chance; here it follows the `files` array.
 
@@ -475,7 +475,7 @@ The workspace is three crates:
 | --- | --- |
 | `crates/vendorfiles` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
 | `crates/vendor-cli` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
-| `xtask` | `cargo xtask release` — clean-tree check, version prompt, manifest update, format, commit, tag. |
+| `xtask` | `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
 
 See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
 parity contract.
