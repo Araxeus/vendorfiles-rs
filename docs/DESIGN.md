@@ -210,6 +210,26 @@ Verified against the installed `vendor@1.4.2` binary in isolated fixtures:
 * `{version}` substitution replaces only the **first** occurrence and uses the first
   `\d+\.\d+\.\d+` match in the tag, else the tag with leading `v`s stripped.
 
+### 5.1 How it was verified
+
+Every claim above was checked by running the installed `vendorfiles@1.4.2` binary and this
+build over identical fixtures in isolated temp directories, then diffing stdout, stderr, exit
+code and the complete resulting file tree (including binary payloads). Covered:
+
+* all seven help screens, every alias, `help <topic>`, and `-v`
+* every argument-error form Commander produces, and bare `vendor`
+* `sync` / `sync -f` / `outdated` / `update` / `update <name>` / `update --pr` / `install`
+  (URL, `owner/repo`, search) / `uninstall`, run repeatedly to catch idempotence drift
+* JSON (2-space and tab), YAML, TOML and `package.json` configs, including write-back
+* `default` / `defaultVendorOptions`, `hashVersionFile` (`true`, path, `false`), `releaseRegex`,
+  `locked`, `vendorFolder` overrides, `{vendorFolder}`, and `../` outputs
+* release assets, tar.gz and zip extraction, nested archive members with `{version}`, and the
+  zip-based `.crx`/`.xpi` packages
+* multi-dependency lockfiles, the trailing-newline asymmetry, and lockfile deletion
+* failure paths: missing repository file, missing release asset, nonexistent repo, bad tag
+* an unsorted three-dependency cold `sync` to prove log lines stay grouped per dependency and
+  in config order under the concurrent pipeline
+
 ## 6. Deliberate deviations
 
 1. **`install <new-dep>` works.** The TS tool throws `TypeError: Cannot read properties of
@@ -223,4 +243,15 @@ Verified against the installed `vendor@1.4.2` binary in isolated fixtures:
    macOS Keychain / Secret Service) instead of the TS tool's hostname-derived AES-CBC blob.
    Same service/user (`vendorfiles-cli` / `github_token`); a value that cannot be a GitHub
    token is treated as absent so a TS-era entry degrades to "not logged in" rather than 401.
-4. **TOML comments survive** a version bump (`toml_edit`); the TS tool drops them.
+4. **TOML comments survive** a version bump (`toml_edit`); the TS tool drops them. Removing a
+   dependency collapses the trailing blank lines that would otherwise accumulate.
+5. **Failures the TS tool never handled** — a nonexistent tag, for instance — print the message
+   the source already had for them and exit 1, instead of dumping an unhandled Octokit
+   rejection and exiting 127.
+6. **`vendor login` needs no config file**, and **`vendor update <name>` honours the `default`
+   block** (the TS tool read the un-merged config entry there and reported "No repository
+   found").
+7. **`vendor install owner/repo` keeps a configured dependency's own repository URL** rather
+   than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
+8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
+   working.
