@@ -34,7 +34,7 @@ fn native() -> keyring_core::Result<Arc<CredentialStore>> {
 /// Linux has two candidates, tried in order of how long they keep a secret.
 ///
 /// The Secret Service persists to disk, so a token stored there survives a reboot — but it needs
-/// a daemon (gnome-keyring, KWallet, KeePassXC) that a headless box, a minimal container or WSL
+/// a daemon (`gnome-keyring`, `KWallet`, `KeePassXC`) that a headless box, a minimal container or WSL
 /// may not have. keyutils always works but lives in kernel memory, so it comes second and
 /// [`transience_warning`] tells the user what they got.
 #[cfg(target_os = "linux")]
