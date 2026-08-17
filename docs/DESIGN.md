@@ -29,9 +29,10 @@ vendorfiles-rs/
 │   │       ├── model.rs      # FileEntry / FileTarget / VendorDependency / VendorConfig
 │   │       ├── template.rs   # {version} / {release} / {vendorFolder} substitution, trims
 │   │       ├── config/
-│   │       │   ├── mod.rs    # Workspace: discovery, defaults merge, mutation, write-back
-│   │       │   ├── format.rs # ConfigFormat, indent detection, per-format (de)serialisation
-│   │       │   └── document.rs # ConfigDocument: format-preserving editable document
+│   │       │   ├── mod.rs      # Workspace: discovery, defaults merge, mutation, write-back
+│   │       │   ├── format.rs   # ConfigFormat, detect-indent, per-format (de)serialisation
+│   │       │   ├── document.rs # ConfigDocument: format-preserving editable document
+│   │       │   └── yaml_emit.rs # block-style YAML matching the `yaml` npm package
 │   │       ├── lockfile.rs   # vendor-lock.json read/write, config→lock file mapping
 │   │       ├── fsx.rs        # delete-file-and-empty-parents, stream-to-file
 │   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction
@@ -39,15 +40,19 @@ vendorfiles-rs/
 │   │       │   ├── mod.rs    # GitHubClient: releases (cached), commits, search, downloads
 │   │       │   └── auth.rs   # token resolution, keyring, OAuth device flow
 │   │       └── ops/
-│   │           ├── mod.rs
-│   │           ├── install.rs
-│   │           ├── sync.rs
-│   │           └── uninstall.rs
+│   │           ├── mod.rs        # Session
+│   │           ├── install.rs    # prepare / download / commit
+│   │           ├── sync.rs       # the three-pass traversal
+│   │           ├── uninstall.rs
+│   │           └── version.rs    # version resolution, staleness check
 │   └── vendor-cli/           # binary `vendor`: clap derive, commander-compatible help/errors
 │       └── src/
-│           ├── main.rs
-│           ├── cli.rs
-│           └── help.rs       # verbatim commander help text + error rendering
+│           ├── main.rs       # exit codes, ERROR: prefix
+│           ├── cli.rs        # clap derive + Commander error wording
+│           ├── run.rs        # command dispatch
+│           ├── spec.rs       # the command grammar, for help routing and operand counting
+│           ├── help.rs       # help/version interception
+│           └── help/*.txt    # help text captured from vendorfiles@1.4.2
 └── xtask/                    # `cargo xtask release`
 ```
 
@@ -89,15 +94,25 @@ pub struct Workspace {
 }
 ```
 
-`Workspace` owns all config data for the process lifetime. Operations take `&mut Workspace`
-and *clone the single `VendorDependency`* they act on (a handful of small `String`s) rather
-than juggling a split borrow of `dependencies` against `file`. This keeps every signature
-lifetime-free and is measurably irrelevant next to a network round-trip.
+`Workspace` owns all config data for the process lifetime, inside a `Session` that pairs it
+with the client:
 
-Borrowed data is used where it is free and unambiguous: `&VendorDependency`,
-`&VendorConfig`, `&Path` flow down into pure helpers (`dependency_folder`, `lock_files_for`).
-The only shared mutable state is `RunOptions` (`--pr` mode) which is a process-global
-`OnceLock<RunOptions>` set once from `main`, mirroring the TS module-level singleton.
+```rust
+pub struct Session {
+    pub github: Arc<GitHubClient>,   // shared so download tasks can hold it
+    pub workspace: Workspace,        // owned; only ever reached through &mut self
+}
+```
+
+Operations *clone the single `RawDependency`* they act on (a handful of small `String`s)
+rather than juggling a split borrow of `dependencies` against `file`. This keeps every
+signature lifetime-free at a cost that is invisible next to a network round-trip, and turns
+`&mut self` into the mechanism that serialises config writes (see §4) — no lock required.
+
+Borrowed data is used where it is free and unambiguous: `&Dependency`, `&VendorConfig` and
+`&Path` flow down into pure helpers (`dependency_folder`, `config_files_to_lock_files`). The
+only process-global state is `--pr` mode, an `AtomicBool` set once from `main`, mirroring the
+TS module-level singleton.
 
 ### 3.3 Config document (write-back)
 
@@ -127,16 +142,19 @@ formats share one validation path and one set of error messages.
 
 ```rust
 pub struct GitHubClient {
-    api: octocrab::Octocrab,        // REST: releases, commits, search
-    http: reqwest::Client,          // streaming: raw contents + release assets
-    token: Option<SecretToken>,
-    releases: Mutex<HashMap<ReleaseKey, Arc<Release>>>,
+    api: octocrab::Octocrab,   // REST: releases, commits, search
+    http: reqwest::Client,     // streaming: raw contents + release assets
+    token: Option<Token>,      // redacted in Debug
+    releases: Mutex<IndexMap<ReleaseKey, Arc<OnceCell<Arc<Release>>>>>,
+    warned: Once,              // the rate-limit warning fires at most once
 }
 ```
 
-`Arc<Release>` so cache hits do not clone asset lists. The cache reproduces the TS
-lookup quirk: a `owner/name/tag` key also matches any cached entry for the same repo whose
-`tag_name` equals the requested tag.
+The cache stores a `OnceCell` *per key* rather than a value, so the concurrent version-resolution
+pass collapses duplicate lookups into one request instead of racing — the anonymous rate limit
+is 60 requests an hour, so a duplicate is not free. `Arc<Release>` means cache hits do not clone
+asset lists. The lookup also reproduces the TS quirk: a request for a tag is satisfied by any
+already-resolved release of the same repository whose `tag_name` matches.
 
 ### 3.5 Errors
 
