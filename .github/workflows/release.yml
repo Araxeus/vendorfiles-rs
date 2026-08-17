@@ -29,7 +29,7 @@ jobs:
             extension: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -53,6 +53,6 @@ jobs:
         run: Compress-Archive -Path target/release/vendor.exe ${{ steps.filename.outputs.FILENAME }} -Force
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ steps.filename.outputs.FILENAME }}
