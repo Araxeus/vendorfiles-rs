@@ -89,8 +89,14 @@ fn current_version(document: &toml_edit::DocumentMut) -> Result<Version> {
 }
 
 /// Updates `workspace.package.version` and the internal path-dependency pin that mirrors it.
+///
+/// Both edits keep the old value's surrounding whitespace and comments, so the diff is one
+/// number per line and nothing else.
 fn set_version(document: &mut toml_edit::DocumentMut, version: &Version) -> Result<()> {
-    document["workspace"]["package"]["version"] = toml_edit::value(version.to_string());
+    replace_keeping_decor(
+        &mut document["workspace"]["package"]["version"],
+        &version.to_string(),
+    );
 
     let pin = document
         .get_mut("workspace")
@@ -98,8 +104,25 @@ fn set_version(document: &mut toml_edit::DocumentMut, version: &Version) -> Resu
         .and_then(|d| d.get_mut("vendorfiles"))
         .and_then(|v| v.as_table_like_mut())
         .context("workspace.dependencies.vendorfiles is missing from Cargo.toml")?;
-    pin.insert("version", toml_edit::value(version.to_string()));
+    match pin.get_mut("version") {
+        Some(slot) => replace_keeping_decor(slot, &version.to_string()),
+        None => {
+            pin.insert("version", toml_edit::value(version.to_string()));
+        }
+    }
     Ok(())
+}
+
+/// Overwrites a TOML value in place, carrying its formatting across.
+fn replace_keeping_decor(slot: &mut toml_edit::Item, value: &str) {
+    match slot.as_value_mut() {
+        Some(existing) => {
+            let decor = existing.decor().clone();
+            *existing = toml_edit::Value::from(value);
+            *existing.decor_mut() = decor;
+        }
+        None => *slot = toml_edit::value(value),
+    }
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -136,4 +159,62 @@ fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<()> {
         bail!("{program} {} failed", args.join(" "));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bump, current_version, set_version, Level};
+    use semver::Version;
+
+    const MANIFEST: &str = "\
+[workspace]
+members = [\"a\"]
+
+[workspace.package]
+version = \"1.4.2\"      # bumped by xtask
+license = \"MIT\"
+
+[workspace.dependencies]
+vendorfiles = { path = \"crates/vendorfiles\", version = \"1.4.2\" }
+anyhow = \"1.0\"
+";
+
+    #[test]
+    fn levels_bump_the_right_component() {
+        let current = Version::parse("1.4.2").unwrap();
+        assert_eq!(bump(&current, Level::Patch).to_string(), "1.4.3");
+        assert_eq!(bump(&current, Level::Minor).to_string(), "1.5.0");
+        assert_eq!(bump(&current, Level::Major).to_string(), "2.0.0");
+    }
+
+    #[test]
+    fn the_current_version_comes_from_the_workspace_package() {
+        let document = MANIFEST.parse().unwrap();
+        assert_eq!(current_version(&document).unwrap().to_string(), "1.4.2");
+    }
+
+    #[test]
+    fn setting_the_version_updates_the_internal_pin_and_keeps_the_layout() {
+        let mut document: toml_edit::DocumentMut = MANIFEST.parse().unwrap();
+        set_version(&mut document, &Version::parse("1.5.0").unwrap()).unwrap();
+        let rendered = document.to_string();
+        assert!(
+            rendered.contains("version = \"1.5.0\"      # bumped by xtask"),
+            "{rendered}"
+        );
+        assert!(
+            rendered
+                .contains("vendorfiles = { path = \"crates/vendorfiles\", version = \"1.5.0\" }"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("anyhow = \"1.0\""), "{rendered}");
+    }
+
+    #[test]
+    fn a_manifest_without_the_pin_is_an_error() {
+        let mut document: toml_edit::DocumentMut = "[workspace.package]\nversion = \"1.0.0\"\n"
+            .parse()
+            .unwrap();
+        assert!(set_version(&mut document, &Version::parse("1.0.1").unwrap()).is_err());
+    }
 }
