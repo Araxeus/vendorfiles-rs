@@ -75,7 +75,9 @@ pub fn run() -> Result<()> {
 
     println!(
         "Committed and tagged version v{new_version} successfully.\n\
-         run 'git push origin main && git push --tags origin main' to push changes."
+         run 'git push origin main && git push --tags origin main' to push changes.\n\
+         run 'cargo publish --workspace' to publish crates.
+         "
     );
     Ok(())
 }
@@ -213,7 +215,7 @@ version = \"1.4.2\"      # bumped by xtask
 license = \"MIT\"
 
 [workspace.dependencies]
-vendorfiles = { path = \"crates/vendorfiles\", version = \"1.4.2\" }
+vendorfiles = { package = \"vendorfiles-core\", path = \"crates/vendorfiles-core\", version = \"1.4.2\" }
 anyhow = \"1.0\"
 ";
 
@@ -242,7 +244,7 @@ anyhow = \"1.0\"
         );
         assert!(
             rendered
-                .contains("vendorfiles = { path = \"crates/vendorfiles\", version = \"1.5.0\" }"),
+                .contains("vendorfiles = { package = \"vendorfiles-core\", path = \"crates/vendorfiles-core\", version = \"1.5.0\" }"),
             "{rendered}"
         );
         assert!(rendered.contains("anyhow = \"1.0\""), "{rendered}");

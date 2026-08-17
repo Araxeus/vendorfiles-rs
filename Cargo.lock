@@ -3032,6 +3032,19 @@ dependencies = [
 name = "vendorfiles"
 version = "2.0.1"
 dependencies = [
+ "anyhow",
+ "clap",
+ "indexmap",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vendorfiles-core",
+]
+
+[[package]]
+name = "vendorfiles-core"
+version = "2.0.1"
+dependencies = [
  "apple-native-keyring-store",
  "fancy-regex",
  "flate2",
@@ -3056,19 +3069,6 @@ dependencies = [
  "windows-native-keyring-store",
  "zbus-secret-service-keyring-store",
  "zip",
-]
-
-[[package]]
-name = "vendorfiles-cli"
-version = "2.0.1"
-dependencies = [
- "anyhow",
- "clap",
- "indexmap",
- "serde_json",
- "tempfile",
- "tokio",
- "vendorfiles",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/vendorfiles", "crates/vendor-cli", "xtask"]
+members = ["crates/vendorfiles", "crates/vendorfiles-core", "xtask"]
 resolver = "2"
 
 [workspace.package]
@@ -16,7 +16,7 @@ keywords = ["vendor", "package-manager", "github", "cli", "files"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-vendorfiles = { path = "crates/vendorfiles", version = "2.0.1" }
+vendorfiles = { package = "vendorfiles-core", path = "crates/vendorfiles-core", version = "2.0.1" }
 
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive", "string"] }
@@ -27,7 +27,7 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 indexmap = { version = "2.14.0", features = ["serde"] }
 indicatif = "0.18.6"
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
-# through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles`. Depending on
+# through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles-core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
 # on Linux, link libdbus for a Secret Service backend we do not use.
 keyring-core = "1.0.0"

@@ -36,7 +36,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --locked --package vendorfiles-cli
+        run: cargo build --release --locked --package vendorfiles
 
       - name: Get filename
         id: filename

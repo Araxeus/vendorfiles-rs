@@ -53,7 +53,7 @@ cargo install vendorfiles
 ```bash
 git clone https://github.com/Araxeus/vendorfiles-rs
 cd vendorfiles-rs
-cargo install --path crates/vendor-cli
+cargo install --path crates/vendorfiles
 ```
 
 **Build without installing:**
@@ -443,7 +443,7 @@ can validate and autocomplete it:
 
 CLI help text, argument errors, exit codes, log wording, ANSI colours, lockfile bytes and
 config write-back formatting are all matched deliberately - the help fixtures in
-[`crates/vendor-cli/tests/fixtures/help`](./crates/vendor-cli/tests/fixtures/help) are captured
+[`crates/vendorfiles/tests/fixtures/help`](./crates/vendorfiles/tests/fixtures/help) are captured
 from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite.
 
 The main difference:
@@ -473,8 +473,8 @@ The workspace is three crates:
 
 | Crate | Role |
 | --- | --- |
-| `crates/vendorfiles` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
-| `crates/vendor-cli` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
+| `crates/vendorfiles-core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
+| `crates/vendorfiles` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
 | `xtask` | `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
 
 See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full

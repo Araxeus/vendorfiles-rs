@@ -21,7 +21,7 @@ Everything shares a process-global mutable `runOptions` and a memoised `getConfi
 ```
 vendorfiles-rs/
 ├── crates/
-│   ├── vendorfiles/          # library: all behaviour, `thiserror` errors, no process exits
+│   ├── vendorfiles-core/     # library: all behaviour, `thiserror` errors, no process exits
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── error.rs      # VendorError — Display == user-facing message
@@ -47,7 +47,7 @@ vendorfiles-rs/
 │   │           ├── sync.rs       # the three-pass traversal
 │   │           ├── uninstall.rs
 │   │           └── version.rs    # version resolution, staleness check
-│   └── vendor-cli/           # binary `vendor`: clap derive, commander-compatible help/errors
+│   └── vendorfiles/          # binary `vendor`: clap derive, commander-compatible help/errors
 │       └── src/
 │           ├── main.rs       # exit codes, ERROR: prefix
 │           ├── cli.rs        # clap derive + Commander error wording
@@ -205,7 +205,7 @@ through `auth::resolve_token_async`, which hops to the blocking pool.
 ### 3.6 Errors
 
 `VendorError` (thiserror) in the library; every variant's `Display` is the exact string the
-TS tool prints after the `ERROR: ` prefix. `vendor-cli` uses `anyhow` at the boundary and
+TS tool prints after the `ERROR: ` prefix. `vendorfiles` uses `anyhow` at the boundary and
 renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency
