@@ -418,25 +418,29 @@ The intentional divergences:
    `TypeError: Cannot read properties of undefined (reading 'match')` when installing a repo
    that is not already in the config: it discards the URL and files it was given and never
    inserts the entry. This version installs the files and adds the dependency.
-2. **`vendor login` does not require a config file.** The original loaded the config from a
+2. **Failures the original never handled now print their intended message and exit 1.** Asking
+   for a tag that does not exist, for instance, crashed the original with an unhandled Octokit
+   rejection (a full error dump and exit code 127); here it prints the message the source
+   already had for it — `Release "v999.0.0" was not found in owner/repo`.
+3. **`vendor login` does not require a config file.** The original loaded the config from a
    `preAction` hook for every command, so `vendor login` failed outside a project.
-3. **Keyring storage is plaintext in the OS credential store**, under
+4. **Keyring storage is plaintext in the OS credential store**, under
    `vendorfiles-cli` / `github_token_plain`. The original encrypted the token with AES-CBC
    under a hostname-derived key and stored it as `github_token`; that entry is still read (and
    ignored when it holds ciphertext), so both tools can stay logged in independently.
-4. **Real `Authorization` headers.** The original passed the token as an endpoint *parameter*,
+5. **Real `Authorization` headers.** The original passed the token as an endpoint *parameter*,
    which ended up as a query field — its downloads were effectively anonymous.
-5. **`vendor update <name>` honours the `default` block.** The original read the raw config
+6. **`vendor update <name>` honours the `default` block.** The original read the raw config
    entry there, so a dependency that inherited `repository` or `files` from `default` failed
    with "No repository found for dependency".
-6. **TOML comments and layout survive a version bump** (via `toml_edit`). The original
+7. **TOML comments and layout survive a version bump** (via `toml_edit`). The original
    re-serialised the document and dropped them. JSON and YAML are still re-serialised, matching
    the original's output including detected indentation and trailing newline.
-7. **Cross-filesystem archive extraction works.** Moving an extracted file from the temp
+8. **Cross-filesystem archive extraction works.** Moving an extracted file from the temp
    directory falls back to copy-then-delete when `rename` cannot cross a mount point.
-8. **No on-disk HTTP cache.** The original cached API responses via `make-fetch-happen`, which
+9. **No on-disk HTTP cache.** The original cached API responses via `make-fetch-happen`, which
    only affected rate-limit consumption, not results.
-9. **More work happens at once.** Version lookups run concurrently, and dependencies download
+10. **More work happens at once.** Version lookups run concurrently, and dependencies download
    in parallel (up to 8 at a time) while results are still committed strictly in config order —
    so the log is byte-identical to the original's but arrives sooner. Within one dependency the
    original's log order was left to chance; here it follows the `files` array.

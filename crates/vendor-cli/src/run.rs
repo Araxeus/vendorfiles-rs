@@ -129,21 +129,29 @@ async fn install(
     name: Option<String>,
     files: Option<Vec<String>>,
 ) -> Result<()> {
-    let url = if is_github_url(source) {
-        source.to_owned()
+    // `lookup` is the URL the reference builds, warts and all — `owner/repo` becomes
+    // `https://www.github.com/owner/repo`, and that exact string is what it compares against
+    // config entries below. `stored` is the same repository without the `www.`, which is the
+    // form every documented example uses and the form the search path already returns.
+    let (lookup, stored) = if is_github_url(source) {
+        (source.to_owned(), source.to_owned())
     } else if is_owner_repo_shorthand(source) {
-        format!("https://www.github.com/{source}")
+        (
+            format!("https://www.github.com/{source}"),
+            format!("https://github.com/{source}"),
+        )
     } else {
-        session.github.find_repo_url(source).await?
+        let found = session.github.find_repo_url(source).await?;
+        (found.clone(), found)
     };
 
-    if !is_github_url(&url) {
-        bail!(VendorError::InvalidGitHubUrlQuoted(url));
+    if !is_github_url(&lookup) {
+        bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
     }
 
     let name = match name.filter(|n| !n.is_empty()) {
         Some(name) => name,
-        None => owner_and_name_from_repo_url(&url)?.name,
+        None => owner_and_name_from_repo_url(&lookup)?.name,
     };
 
     // Files may be inherited from an entry under this name, or from any entry pointing at the
@@ -157,7 +165,7 @@ async fn install(
                 .workspace
                 .dependencies
                 .values()
-                .find(|dependency| dependency.repository.as_deref() == Some(url.as_str()))
+                .find(|dependency| dependency.repository.as_deref() == Some(lookup.as_str()))
         })
         .cloned()
         .unwrap_or_default();
@@ -176,7 +184,9 @@ async fn install(
     }
 
     let entry = RawDependency {
-        repository: Some(url),
+        // An entry already in the config keeps its own URL; the reference works entirely from
+        // the config entry here, and rewriting a user's URL from a shorthand would be rude.
+        repository: existing.repository.clone().or(Some(stored)),
         files,
         ..existing
     };
