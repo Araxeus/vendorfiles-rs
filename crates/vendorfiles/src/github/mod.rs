@@ -5,6 +5,8 @@ pub mod auth;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, Once};
 
+use tokio::sync::OnceCell;
+
 use indexmap::IndexMap;
 use octocrab::models::repos::Release;
 use octocrab::Octocrab;
@@ -37,15 +39,21 @@ impl ReleaseKey {
     }
 }
 
+/// A release lookup that resolves at most once, however many callers await it.
+type ReleaseSlot = Arc<OnceCell<Arc<Release>>>;
+
 /// Client for everything the tool does against github.com.
 ///
 /// Releases are cached for the process lifetime so two dependencies tracking the same
-/// repository cost one request, as in the reference.
+/// repository cost one request, as in the reference. The cache stores a
+/// [`OnceCell`] per key rather than a value, so concurrent lookups of the same release
+/// collapse into a single request instead of racing — which matters because the anonymous
+/// rate limit is 60 requests an hour.
 pub struct GitHubClient {
     api: Octocrab,
     http: reqwest::Client,
     token: Option<Token>,
-    releases: Mutex<IndexMap<ReleaseKey, Arc<Release>>>,
+    releases: Mutex<IndexMap<ReleaseKey, ReleaseSlot>>,
     warned: Once,
 }
 
@@ -94,15 +102,25 @@ impl GitHubClient {
         }
     }
 
-    fn cached(&self, key: &ReleaseKey) -> Option<Arc<Release>> {
-        let releases = self.releases.lock().ok()?;
-        releases.get(key).cloned()
+    /// The slot for `key`, creating an empty one if this is the first request for it.
+    fn slot(&self, key: ReleaseKey) -> ReleaseSlot {
+        // A poisoned mutex only costs us the cache, never correctness.
+        self.releases.lock().map_or_else(
+            |_| ReleaseSlot::default(),
+            |mut releases| releases.entry(key).or_default().clone(),
+        )
     }
 
-    fn store(&self, key: ReleaseKey, release: Arc<Release>) {
-        if let Ok(mut releases) = self.releases.lock() {
-            releases.insert(key, release);
-        }
+    /// An already-resolved release for `repo` whose tag is `tag`, if one was fetched earlier.
+    ///
+    /// This is the reference's `startsWith` scan: a `getLatestRelease` result serves a later
+    /// lookup by tag when the tags happen to agree.
+    fn resolved_by_tag(&self, repo_key: &str, tag: &str) -> Option<Arc<Release>> {
+        let releases = self.releases.lock().ok()?;
+        releases.iter().find_map(|(key, slot)| {
+            let release = slot.get()?;
+            (key.repo() == repo_key && release.tag_name == tag).then(|| release.clone())
+        })
     }
 
     /// Looks a release up by tag, reusing any cached release of the same repo with that tag.
@@ -116,30 +134,26 @@ impl GitHubClient {
     /// the request.
     pub async fn release_by_tag(&self, repo: &Repository, tag: &str) -> Result<Arc<Release>> {
         let repo_key = repo.to_string();
-        let key = ReleaseKey::Tag {
-            repo: repo_key.clone(),
-            tag: tag.to_owned(),
-        };
-        if let Ok(releases) = self.releases.lock() {
-            for (cached_key, release) in releases.iter() {
-                if *cached_key == key || (cached_key.repo() == repo_key && release.tag_name == tag)
-                {
-                    return Ok(release.clone());
-                }
-            }
+        if let Some(release) = self.resolved_by_tag(&repo_key, tag) {
+            return Ok(release);
         }
 
-        self.warn_if_anonymous();
-        let release = Arc::new(
+        let slot = self.slot(ReleaseKey::Tag {
+            repo: repo_key,
+            tag: tag.to_owned(),
+        });
+        slot.get_or_try_init(|| async {
+            self.warn_if_anonymous();
             self.api
                 .repos(&repo.owner, &repo.name)
                 .releases()
                 .get_by_tag(tag)
                 .await
-                .map_err(VendorError::from)?,
-        );
-        self.store(key, release.clone());
-        Ok(release)
+                .map(Arc::new)
+                .map_err(VendorError::from)
+        })
+        .await
+        .cloned()
     }
 
     /// The latest release, or the newest one matching `release_regex` when given.
@@ -156,24 +170,21 @@ impl GitHubClient {
         if let Some(regex) = release_regex {
             return self.release_by_regex(repo, regex).await;
         }
-        let key = ReleaseKey::Latest {
+        let slot = self.slot(ReleaseKey::Latest {
             repo: repo.to_string(),
-        };
-        if let Some(cached) = self.cached(&key) {
-            return Ok(cached);
-        }
-
-        self.warn_if_anonymous();
-        let release = Arc::new(
+        });
+        slot.get_or_try_init(|| async {
+            self.warn_if_anonymous();
             self.api
                 .repos(&repo.owner, &repo.name)
                 .releases()
                 .get_latest()
                 .await
-                .map_err(VendorError::from)?,
-        );
-        self.store(key, release.clone());
-        Ok(release)
+                .map(Arc::new)
+                .map_err(VendorError::from)
+        })
+        .await
+        .cloned()
     }
 
     /// The first release (newest first) whose tag or title matches `release_regex`.
@@ -183,43 +194,41 @@ impl GitHubClient {
     /// Returns [`VendorError::NoMatchingRelease`] when nothing matches, or
     /// [`VendorError::RequestFailed`] if the release list cannot be fetched.
     pub async fn release_by_regex(&self, repo: &Repository, regex: &str) -> Result<Arc<Release>> {
-        let key = ReleaseKey::Regex {
+        let slot = self.slot(ReleaseKey::Regex {
             repo: repo.to_string(),
             regex: regex.to_owned(),
-        };
-        if let Some(cached) = self.cached(&key) {
-            return Ok(cached);
-        }
-
-        self.warn_if_anonymous();
-        // `fancy_regex` accepts the JavaScript patterns users already have, lookaround included.
-        let compiled =
-            fancy_regex::Regex::new(regex).map_err(|e| VendorError::Http(e.to_string()))?;
-        let page = self
-            .api
-            .repos(&repo.owner, &repo.name)
-            .releases()
-            .list()
-            .per_page(100)
-            .send()
-            .await
-            .map_err(VendorError::from)?;
-
-        let matches = |text: &str| compiled.is_match(text).unwrap_or(false);
-        let matched = page.items.into_iter().find(|release| {
-            matches(&release.tag_name) || matches(release.name.as_deref().unwrap_or(""))
         });
+        slot.get_or_try_init(|| async {
+            self.warn_if_anonymous();
+            // `fancy_regex` accepts the JavaScript patterns users already have, lookaround
+            // included.
+            let compiled =
+                fancy_regex::Regex::new(regex).map_err(|e| VendorError::Http(e.to_string()))?;
+            let page = self
+                .api
+                .repos(&repo.owner, &repo.name)
+                .releases()
+                .list()
+                .per_page(100)
+                .send()
+                .await
+                .map_err(VendorError::from)?;
 
-        let Some(release) = matched else {
-            return Err(VendorError::NoMatchingRelease {
-                regex: regex.to_owned(),
-                owner: repo.owner.clone(),
-                repo: repo.name.clone(),
-            });
-        };
-        let release = Arc::new(release);
-        self.store(key, release.clone());
-        Ok(release)
+            let matches = |text: &str| compiled.is_match(text).unwrap_or(false);
+            page.items
+                .into_iter()
+                .find(|release| {
+                    matches(&release.tag_name) || matches(release.name.as_deref().unwrap_or(""))
+                })
+                .map(Arc::new)
+                .ok_or_else(|| VendorError::NoMatchingRelease {
+                    regex: regex.to_owned(),
+                    owner: repo.owner.clone(),
+                    repo: repo.name.clone(),
+                })
+        })
+        .await
+        .cloned()
     }
 
     /// The SHA of the most recent commit touching `path`.

@@ -10,7 +10,6 @@ use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{Result, VendorError};
-use crate::ui;
 
 /// Lexically normalises a path: drops `.`, resolves `..`, and unifies separators.
 ///
@@ -137,31 +136,27 @@ pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> 
 
 /// Streams an HTTP response body to `save_path`, creating parent directories.
 ///
-/// `log` mirrors the reference's flag: when set, a success prints `INFO: Saved <path>` and a
-/// failure is fatal; when clear, both are silent (the caller reports the follow-on failure).
+/// `report_failures` mirrors the reference's `log` flag, which decided both whether to announce
+/// the file and whether a write error was fatal. Announcing is now the caller's job — it
+/// batches the lines so `sync` can keep them in dependency order — but the error behaviour is
+/// preserved: a silent write failure is swallowed so the caller reports the follow-on error
+/// (a temp archive that fails to save shows up as "cannot be extracted").
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::SaveFailed`] if the body cannot be written and `log` is set; with
-/// `log` clear, write failures are swallowed so the caller can report the follow-on error.
+/// Returns [`VendorError::SaveFailed`] if the body cannot be written and `report_failures` is
+/// set; otherwise write failures are swallowed.
 pub async fn stream_to_file(
     response: reqwest::Response,
     save_path: &Path,
-    log: bool,
+    report_failures: bool,
 ) -> Result<()> {
-    let result = write_stream(response, save_path).await;
-    match result {
-        Ok(()) => {
-            if log {
-                ui::info(format!("Saved {}", save_path.display()));
-            }
-            Ok(())
-        }
-        Err(source) if log => Err(VendorError::SaveFailed {
+    match write_stream(response, save_path).await {
+        Err(source) if report_failures => Err(VendorError::SaveFailed {
             path: save_path.display().to_string(),
             source,
         }),
-        Err(_) => Ok(()),
+        Ok(()) | Err(_) => Ok(()),
     }
 }
 

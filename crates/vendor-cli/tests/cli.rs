@@ -319,6 +319,55 @@ fn a_missing_file_makes_sync_consider_the_dependency_stale() {
 }
 
 #[test]
+fn sync_reports_dependencies_in_config_order() {
+    // The download stage overlaps across dependencies; the commit stage must not.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let names = ["zeta", "alpha", "middle", "beta"];
+    let entries: Vec<String> = names
+        .iter()
+        .map(|name| {
+            format!(
+                r#"    "{name}": {{
+      "version": "v1",
+      "repository": "https://github.com/example/{name}",
+      "files": ["one"]
+    }}"#
+            )
+        })
+        .collect();
+    std::fs::write(
+        dir.path().join("vendor.json"),
+        format!(
+            "{{\n  \"vendorDependencies\": {{\n{}\n  }}\n}}\n",
+            entries.join(",\n")
+        ),
+    )
+    .expect("writing config");
+
+    for name in names {
+        let folder = dir.path().join("vendor").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("one"), name).unwrap();
+        std::fs::write(
+            folder.join("vendor-lock.json"),
+            format!(
+                "{{\n  \"{name}\": {{\n    \"repository\": \"https://github.com/example/{name}\",\n    \"version\": \"v1\",\n    \"files\": {{\n      \"one\": \"one\"\n    }}\n  }}\n}}\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    let out = vendor(dir.path(), &["sync"]);
+    let expected = names.iter().fold(String::new(), |mut acc, name| {
+        use std::fmt::Write as _;
+        let _ = writeln!(acc, "\u{1b}[36mINFO: {name} is up to date\u{1b}[0m");
+        acc
+    });
+    assert_eq!(stdout(&out), expected);
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
 fn uninstall_removes_files_the_config_entry_and_the_lockfile() {
     let dir = up_to_date_project();
     let out = vendor(dir.path(), &["uninstall", "Coloris"]);

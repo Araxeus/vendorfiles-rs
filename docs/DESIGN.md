@@ -146,13 +146,49 @@ renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency
 
-* Across dependencies: version resolution runs concurrently (single-flight per repo via the
-  release cache), then installs run **in config order** so log output stays deterministic and
-  matches the TS tool.
-* Within a dependency: all plain files download concurrently, then all release assets are
-  fetched/extracted concurrently — exactly the two `Promise.all` batches in `commands.ts`.
-* Downloads stream to disk (`reqwest` byte stream → `tokio::fs::File`); nothing is buffered
-  whole in memory except archives that must be sniffed and extracted.
+The TS tool is sequential across dependencies and concurrent within one. Going wider without
+changing what the user sees required splitting an install into three stages, in `ops::install`:
+
+| Stage | Borrow | Concurrency |
+| --- | --- | --- |
+| `Session::prepare` | `&self` | resolve version + staleness; read-only |
+| `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
+| `Session::commit` | `&mut self` | strictly ordered: print, write lockfile, write config |
+
+`sync` then:
+
+1. resolves every version with one `join_all` — single-flight per release key, so two
+   dependencies on the same repo still cost one request;
+2. `tokio::spawn`s a download task per dependency (a semaphore caps in-flight work);
+3. awaits those handles **in order**, committing each as it arrives.
+
+Because step 3 awaits in order, output still streams out dependency by dependency in exactly
+the TS tool's sequence while later dependencies are still downloading. The `&mut self` on
+`commit` is what serialises config writes — no lock needed, and the borrow checker enforces it.
+
+`Arc<GitHubClient>` is the only shared ownership in the design; everything else is a borrow
+from `Session`. The log lines a download would have printed are returned from the stage rather
+than printed inside it, which is what makes the ordering property structural rather than
+incidental.
+
+Within a dependency, plain files download concurrently and then release assets do — the two
+`Promise.all` batches in `commands.ts`. Their log lines come back in declaration order instead
+of completion order, a strict narrowing of what the TS tool could emit.
+
+On the first error, remaining download tasks are aborted, so nothing downloads that will never
+be committed.
+
+Downloads stream to disk (`reqwest` byte stream → `tokio::fs::File`); nothing is buffered whole
+in memory except archives that must be sniffed and extracted.
+
+Measured against `vendorfiles@1.4.2` on a config with 8 dependencies:
+
+| | TypeScript | Rust |
+| --- | --- | --- |
+| `sync` (nothing downloaded yet) | 3127 ms | 893 ms |
+| `sync` (everything up to date) | 721 ms | 66 ms |
+| `outdated` | 3426 ms | 908 ms |
+| `--version` | 706 ms | 54 ms |
 
 ## 5. Parity contract
 

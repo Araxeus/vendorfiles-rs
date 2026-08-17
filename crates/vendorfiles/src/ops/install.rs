@@ -1,6 +1,15 @@
 //! `install` — resolve a version, refresh the dependency folder, update config and lockfile.
+//!
+//! An install is split into three stages so `sync` can overlap the slow one across
+//! dependencies without disturbing log order:
+//!
+//! 1. [`Session::prepare`] — decide the version and whether anything is stale. Read-only.
+//! 2. [`download`] — fetch and extract into the dependency folder, collecting the log lines it
+//!    *would* have printed. Owns everything it needs, so it can run on its own task.
+//! 3. [`Session::commit`] — print those lines, write the lockfile, update the config. Ordered.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::archive;
 use crate::error::{Result, VendorError};
@@ -27,6 +36,27 @@ pub struct InstallOptions {
     pub show_outdated_only: bool,
 }
 
+/// A dependency with its version decided and its staleness known.
+///
+/// Fully owned, so the download stage can be moved onto a task.
+#[derive(Debug)]
+pub struct Prepared {
+    pub dependency: Dependency,
+    pub options: InstallOptions,
+    pub folder: PathBuf,
+    pub lockfile_path: PathBuf,
+    pub version: String,
+    pub needs_update: bool,
+}
+
+impl Prepared {
+    /// Whether the download stage has any work to do.
+    #[must_use]
+    pub const fn has_work(&self) -> bool {
+        self.needs_update && !self.options.show_outdated_only
+    }
+}
+
 impl Session {
     /// Installs (or refreshes) a single dependency.
     ///
@@ -38,66 +68,18 @@ impl Session {
     /// Returns whichever [`VendorError`](crate::VendorError) the version lookup, the downloads,
     /// the archive extraction or the config/lockfile write produced.
     pub async fn install(&mut self, dependency: Dependency, options: InstallOptions) -> OpResult {
-        let folder = self
-            .workspace
-            .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
-        let lockfile_path = Self::lockfile_path(&folder);
-
-        let new_version = self.decide_version(&dependency, &options).await?;
-        let needs_update = options.force
-            || self
-                .needs_update(&dependency.name, &lockfile_path, &new_version)
-                .await;
-
-        if options.show_outdated_only {
-            if needs_update {
-                report_outdated(&dependency, &new_version);
-            }
-            return Ok(None);
-        }
-
-        if !needs_update {
-            ui::info(format!("{} is up to date", dependency.name));
-            return Ok(None);
-        }
-
-        tokio::fs::create_dir_all(&folder).await?;
-        self.remove_previously_installed(&dependency.name, &folder, &lockfile_path)
-            .await?;
-        download_all(&self.github, &dependency, &folder, &new_version).await?;
-
-        write_lockfile(
-            &dependency.name,
-            VendorLock {
-                repository: dependency.repository.clone(),
-                version: new_version.clone(),
-                files: config_files_to_lock_files(&dependency.files, &new_version),
-            },
-            &lockfile_path,
-        )
-        .await?;
-
-        let old_version = dependency.version.clone();
-        if old_version.as_deref() != Some(new_version.as_str()) {
-            self.record_version(&dependency, &new_version).await?;
-        }
-
-        if options.should_update {
-            ui::success(format!(
-                "Updated {} from {} to {}",
-                dependency.name,
-                display_version(old_version.as_deref()),
-                new_version
-            ));
-            return Ok(Some(new_version));
-        }
-
-        ui::success(format!("Installed {} {}", dependency.name, new_version));
-        Ok(None)
+        let version = self.decide_version(&dependency, &options).await?;
+        let prepared = self.prepare(dependency, options, version).await;
+        let (prepared, logs) = download(Arc::clone(&self.github), prepared).await?;
+        self.commit(prepared, logs).await
     }
 
     /// Picks the version to install: the explicit one, the configured one, or a fresh lookup.
-    async fn decide_version(
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the release or commit lookup produced when one was needed.
+    pub async fn decide_version(
         &self,
         dependency: &Dependency,
         options: &InstallOptions,
@@ -115,25 +97,104 @@ impl Session {
         }
     }
 
-    /// Deletes whatever the previous install left behind, per the lockfile.
-    async fn remove_previously_installed(
+    /// Works out where the dependency lives and whether it is stale. Touches nothing.
+    pub async fn prepare(
         &self,
-        name: &str,
-        folder: &Path,
-        lockfile_path: &Path,
-    ) -> Result<()> {
-        for file in files_from_lockfile(lockfile_path, name).await {
-            if join_normalized(folder, &[file.as_str()]).exists() {
-                delete_file_and_empty_folders(folder, &file).await?;
-            }
+        dependency: Dependency,
+        options: InstallOptions,
+        version: String,
+    ) -> Prepared {
+        let folder = self
+            .workspace
+            .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
+        let lockfile_path = Self::lockfile_path(&folder);
+        let needs_update = options.force
+            || self
+                .needs_update(&dependency.name, &lockfile_path, &version)
+                .await;
+
+        Prepared {
+            dependency,
+            options,
+            folder,
+            lockfile_path,
+            version,
+            needs_update,
         }
-        Ok(())
+    }
+
+    /// Reports the outcome and makes it durable: log lines, lockfile, config.
+    ///
+    /// Everything here is ordered and sequential, which is what keeps `sync`'s output identical
+    /// to the reference's even though the downloads overlapped.
+    ///
+    /// # Errors
+    ///
+    /// Returns a write error if the lockfile or the config file cannot be updated.
+    pub async fn commit(&mut self, prepared: Prepared, logs: Vec<String>) -> OpResult {
+        let Prepared {
+            dependency,
+            options,
+            lockfile_path,
+            version,
+            needs_update,
+            folder: _,
+        } = prepared;
+
+        if options.show_outdated_only {
+            if needs_update {
+                report_outdated(&dependency, &version);
+            }
+            return Ok(None);
+        }
+
+        if !needs_update {
+            ui::info(format!("{} is up to date", dependency.name));
+            return Ok(None);
+        }
+
+        for line in logs {
+            ui::info(line);
+        }
+
+        write_lockfile(
+            &dependency.name,
+            VendorLock {
+                repository: dependency.repository.clone(),
+                version: version.clone(),
+                files: config_files_to_lock_files(&dependency.files, &version),
+            },
+            &lockfile_path,
+        )
+        .await?;
+
+        let old_version = dependency.version.clone();
+        if old_version.as_deref() != Some(version.as_str()) {
+            self.record_version(&dependency, &version).await?;
+        }
+
+        if options.should_update {
+            ui::success(format!(
+                "Updated {} from {} to {}",
+                dependency.name,
+                display_version(old_version.as_deref()),
+                version
+            ));
+            return Ok(Some(version));
+        }
+
+        ui::success(format!("Installed {} {}", dependency.name, version));
+        Ok(None)
     }
 
     /// Writes the new version back to the config file, adding the dependency if it is new.
     ///
     /// Registering a new dependency is a deliberate divergence: the reference crashes here
     /// because it never inserts the entry the `install` command was asked to create.
+    ///
+    /// The in-memory `dependencies` map is left alone for entries that already existed. The
+    /// reference keeps a deep copy of them, so a version written mid-run is never visible to
+    /// the staleness checks of later dependencies — and neither is it here.
     async fn record_version(&mut self, dependency: &Dependency, new_version: &str) -> Result<()> {
         let name = dependency.name.clone();
         if self.workspace.dependencies.contains_key(&name) {
@@ -156,10 +217,7 @@ impl Session {
                 .file
                 .document
                 .upsert_dependency(&name, &entry)?;
-            self.workspace.dependencies.insert(name.clone(), entry);
-        }
-        if let Some(entry) = self.workspace.dependencies.get_mut(&name) {
-            entry.version = Some(new_version.to_owned());
+            self.workspace.dependencies.insert(name, entry);
         }
         self.workspace.file.write().await
     }
@@ -180,35 +238,87 @@ fn report_outdated(dependency: &Dependency, new_version: &str) {
     }
 }
 
+/// Fetches everything a prepared dependency needs, returning it with its pending log lines.
+///
+/// Deliberately a free function taking an `Arc`: it borrows nothing from the session, so `sync`
+/// can run one of these per dependency on its own task while committing earlier ones.
+///
+/// # Errors
+///
+/// Returns whatever the downloads, the archive extraction or the pruning of the previous
+/// install produced.
+pub async fn download(
+    github: Arc<GitHubClient>,
+    prepared: Prepared,
+) -> Result<(Prepared, Vec<String>)> {
+    if !prepared.has_work() {
+        return Ok((prepared, Vec::new()));
+    }
+
+    tokio::fs::create_dir_all(&prepared.folder).await?;
+    remove_previously_installed(
+        &prepared.dependency.name,
+        &prepared.folder,
+        &prepared.lockfile_path,
+    )
+    .await?;
+
+    let logs = download_all(
+        &github,
+        &prepared.dependency,
+        &prepared.folder,
+        &prepared.version,
+    )
+    .await?;
+    Ok((prepared, logs))
+}
+
+/// Deletes whatever the previous install left behind, per the lockfile.
+async fn remove_previously_installed(
+    name: &str,
+    folder: &Path,
+    lockfile_path: &Path,
+) -> Result<()> {
+    for file in files_from_lockfile(lockfile_path, name).await {
+        if join_normalized(folder, &[file.as_str()]).exists() {
+            delete_file_and_empty_folders(folder, &file).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Downloads every declared file: repository files first, then release assets.
 ///
-/// Each batch runs concurrently, matching the reference's two `Promise.all` phases.
+/// Each batch runs concurrently, matching the reference's two `Promise.all` phases. The log
+/// lines come back in declaration order rather than completion order, which the reference
+/// leaves to chance.
 async fn download_all(
     github: &GitHubClient,
     dependency: &Dependency,
     folder: &Path,
     version: &str,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let (release_files, repo_files): (Vec<FileSpec>, Vec<FileSpec>) =
         flatten_files(&dependency.files)
             .into_iter()
             .partition(|spec| is_release_path(&spec.input));
 
-    futures_util::future::try_join_all(
+    let mut logs = futures_util::future::try_join_all(
         repo_files
             .iter()
             .map(|spec| download_repo_file(github, dependency, folder, version, spec)),
     )
     .await?;
 
-    futures_util::future::try_join_all(
+    let release_logs = futures_util::future::try_join_all(
         release_files
             .iter()
             .map(|spec| download_release_file(github, dependency, folder, version, spec)),
     )
     .await?;
 
-    Ok(())
+    logs.extend(release_logs.into_iter().flatten());
+    Ok(logs)
 }
 
 /// Downloads one file from the repository tree at `version`.
@@ -218,7 +328,7 @@ async fn download_repo_file(
     folder: &Path,
     version: &str,
     spec: &FileSpec,
-) -> Result<()> {
+) -> Result<String> {
     let FileTarget::Rename(output) = &spec.output else {
         let rendered = serde_json::to_string(&(&spec.input, &spec.output))
             .unwrap_or_else(|_| spec.input.clone());
@@ -236,7 +346,8 @@ async fn download_repo_file(
         })?;
 
     let save_path = join_normalized(folder, &[output.as_str()]);
-    stream_to_file(response, &save_path, true).await
+    stream_to_file(response, &save_path, true).await?;
+    Ok(format!("Saved {}", save_path.display()))
 }
 
 /// Downloads one release asset, extracting it when the target names archive members.
@@ -246,7 +357,7 @@ async fn download_release_file(
     folder: &Path,
     version: &str,
     spec: &FileSpec,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let asset = strip_release_prefix(&replace_version(&spec.input, version));
     let response = github
         .download_release_asset(
@@ -262,7 +373,8 @@ async fn download_release_file(
             unreachable!("extraction_pairs returns None only for Rename");
         };
         let save_path = join_normalized(folder, &[replace_version(output, version).as_str()]);
-        return stream_to_file(response, &save_path, true).await;
+        stream_to_file(response, &save_path, true).await?;
+        return Ok(vec![format!("Saved {}", save_path.display())]);
     };
 
     let temp = tempfile::Builder::new()
@@ -279,13 +391,14 @@ async fn download_release_file(
         .map_err(|e| VendorError::Http(e.to_string()))?
         .map_err(|_| VendorError::CannotExtract(asset.clone()))?;
 
+    let mut logs = Vec::with_capacity(pairs.len());
     for (from, to) in pairs {
         let source = join_normalized(&extracted, &[replace_version(&from, version).as_str()]);
         let destination = join_normalized(folder, &[replace_version(&to, version).as_str()]);
         move_extracted(&source, &destination).await?;
-        ui::info(format!("Saved {}", destination.display()));
+        logs.push(format!("Saved {}", destination.display()));
     }
-    Ok(())
+    Ok(logs)
 }
 
 /// Moves an extracted member into the dependency folder.
