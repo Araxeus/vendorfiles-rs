@@ -7,6 +7,7 @@ use std::io::{BufRead, Write};
 use secrecy::ExposeSecret;
 
 use crate::error::{Result, VendorError};
+use crate::github::credentials;
 use crate::ui;
 
 /// Keyring service name — shared with the reference implementation.
@@ -60,20 +61,18 @@ pub fn is_plausible_token(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn keyring_entry() -> Option<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
-}
-
 /// Reads the token from the OS keyring, if one is stored and usable.
 ///
 /// Falls back to the reference tool's entry so a machine that only ever used the TypeScript
 /// CLI still works — unless the stored value is that tool's ciphertext, which cannot be a
 /// token and is treated as "not logged in" rather than sent upstream to fail with a 401.
+///
+/// That fallback only finds anything on Windows and macOS: on Linux the reference stored its
+/// token in the Secret Service, which is a different backend from the keyutils store here.
 #[must_use]
 pub fn keyring_token() -> Option<Token> {
     let read = |user: &str| {
-        keyring::Entry::new(KEYRING_SERVICE, user)
-            .ok()?
+        credentials::entry(KEYRING_SERVICE, user)?
             .get_password()
             .ok()
             .filter(|value| is_plausible_token(value))
@@ -105,11 +104,16 @@ pub async fn resolve_token_async() -> Option<Token> {
 
 /// Stores a token in the OS keyring, warning (but not failing) if that is not possible.
 ///
-/// A keyring that refuses the write is not fatal: the token still authenticates this run.
+/// A keyring that refuses the write is not fatal: the token still authenticates this run. A
+/// store that accepts the write but will not keep it earns a warning of its own — see
+/// [`credentials::transience_warning`].
 pub fn save_token(token: &Token) {
-    let stored = keyring_entry().is_some_and(|entry| entry.set_password(token.expose()).is_ok());
+    let stored = credentials::entry(KEYRING_SERVICE, KEYRING_USER)
+        .is_some_and(|entry| entry.set_password(token.expose()).is_ok());
     if !stored {
         ui::warning("Failed to save token to keyring");
+    } else if let Some(caveat) = credentials::transience_warning() {
+        ui::warning(caveat);
     }
 }
 
@@ -120,10 +124,9 @@ pub fn save_token(token: &Token) {
 /// Returns [`VendorError::InvalidToken`], [`VendorError::TokenRateLimited`] or
 /// [`VendorError::AuthUnknownFailure`] depending on how GitHub rejects the token.
 pub async fn login_with_token(token: &str) -> Result<()> {
-    let response = reqwest::Client::new()
+    let response = super::http::client()?
         .head("https://api.github.com")
         .header(reqwest::header::AUTHORIZATION, format!("bearer {token}"))
-        .header(reqwest::header::USER_AGENT, super::USER_AGENT)
         .header(reqwest::header::CACHE_CONTROL, "no-store")
         .send()
         .await
@@ -191,7 +194,7 @@ fn wait_for_enter() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_plausible_token, Token};
+    use super::{Token, is_plausible_token};
 
     #[test]
     fn plausible_tokens_exclude_base64_ciphertext() {

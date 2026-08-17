@@ -150,10 +150,10 @@ fn resolve_start_path(config_location: Option<&str>) -> PathBuf {
 /// Finds the first config file at `folder_or_file`, returning its path and contents.
 async fn find_config_file(folder_or_file: &Path) -> Option<(PathBuf, String)> {
     let as_str = folder_or_file.to_string_lossy();
-    if CONFIG_FILE_NAMES.iter().any(|name| as_str.ends_with(name)) {
-        if let Ok(text) = tokio::fs::read_to_string(folder_or_file).await {
-            return Some((folder_or_file.to_path_buf(), text));
-        }
+    if CONFIG_FILE_NAMES.iter().any(|name| as_str.ends_with(name))
+        && let Ok(text) = tokio::fs::read_to_string(folder_or_file).await
+    {
+        return Some((folder_or_file.to_path_buf(), text));
     }
     for name in CONFIG_FILE_NAMES {
         let candidate = folder_or_file.join(name);

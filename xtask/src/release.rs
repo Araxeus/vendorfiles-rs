@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
-use dialoguer::{theme::ColorfulTheme, Select};
+use anyhow::{Context, Result, bail};
+use dialoguer::{Select, theme::ColorfulTheme};
 use semver::Version;
 
 /// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
@@ -163,7 +163,7 @@ fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bump, current_version, set_version, Level};
+    use super::{Level, bump, current_version, set_version};
     use semver::Version;
 
     const MANIFEST: &str = "\

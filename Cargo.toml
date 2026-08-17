@@ -5,12 +5,12 @@ resolver = "2"
 [workspace.package]
 version = "1.4.2"
 authors = ["Araxeus"]
-edition = "2021"
-rust-version = "1.82"
+edition = "2024"
+rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/Araxeus/vendorfiles"
-homepage = "https://github.com/Araxeus/vendorfiles"
-documentation = "https://github.com/Araxeus/vendorfiles#readme"
+repository = "https://github.com/Araxeus/vendorfiles-rs"
+homepage = "https://github.com/Araxeus/vendorfiles-rs"
+documentation = "https://github.com/Araxeus/vendorfiles-rs#readme"
 readme = "README.md"
 keywords = ["vendor", "package-manager", "github", "cli", "files"]
 categories = ["command-line-utilities", "development-tools"]
@@ -18,46 +18,59 @@ categories = ["command-line-utilities", "development-tools"]
 [workspace.dependencies]
 vendorfiles = { path = "crates/vendorfiles", version = "1.4.2" }
 
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive", "string"] }
-dialoguer = { version = "0.11", default-features = false }
-fancy-regex = "0.14"
-flate2 = "1.0"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
-indexmap = { version = "2.7", features = ["serde"] }
-keyring = { version = "3.6", features = [
-    "apple-native",
-    "windows-native",
-    # Blocking Secret Service backend: no nested async runtime, and `crypto-rust` encrypts
-    # the secret in transit over the bus without pulling in OpenSSL.
-    "sync-secret-service",
-    "crypto-rust",
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive", "string"] }
+dialoguer = { version = "0.12.0", default-features = false }
+fancy-regex = "0.19.0"
+flate2 = "1.1.9"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+indexmap = { version = "2.14.0", features = ["serde"] }
+# Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
+# through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles`. Depending on
+# the `keyring` facade instead would compile every backend's support code on every target and,
+# on Linux, link libdbus for a Secret Service backend we do not use.
+keyring-core = "1.0.0"
+# `keychain` selects the macOS login keychain; the iOS-only `protected` store stays out.
+apple-native-keyring-store = { version = "1.0.2", default-features = false, features = [
+    "keychain",
 ] }
-octocrab = { version = "0.44", default-features = false, features = [
+linux-keyutils-keyring-store = "1.0.0"
+# `search` (the default) would add a `regex` dependency for enumerating credentials, which
+# nothing here does.
+windows-native-keyring-store = { version = "1.1.0", default-features = false }
+octocrab = { version = "0.54.1", default-features = false, features = [
     "default-client",
     "follow-redirect",
     "retry",
     "rustls",
     "rustls-ring",
+    # Required even though no GitHub App JWT is ever signed here; the pure-Rust backend keeps
+    # aws-lc-rs out of the tree.
+    "jwt-rust-crypto",
     "timeout",
 ] }
-open = "5.3"
-regex = "1.11"
-reqwest = { version = "0.12", default-features = false, features = [
-    "rustls-tls",
-    "stream",
+open = "5.4.1"
+regex = "1.13.1"
+# `rustls-no-provider` rather than `rustls`: the latter hard-wires the aws-lc-rs provider,
+# which would compile a second crypto backend alongside the `ring` one octocrab uses (and drag
+# in aws-lc-sys's C build). `github::http` installs `ring` as the process default instead.
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "rustls-no-provider",
+    "http2",
+    "system-proxy",
     "gzip",
-    "json",
+    "stream",
 ] }
-secrecy = "0.10"
-semver = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["preserve_order"] }
+rustls = { version = "0.23.4", default-features = false, features = ["ring", "std"] }
+secrecy = "0.10.3"
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
-tar = "0.4"
-tempfile = "3.15"
-thiserror = "2.0"
-tokio = { version = "1.43", features = [
+tar = "0.4.46"
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = [
     "rt-multi-thread",
     "macros",
     "fs",
@@ -65,8 +78,8 @@ tokio = { version = "1.43", features = [
     "time",
     "sync",
 ] }
-toml_edit = { version = "0.22", features = ["serde"] }
-zip = { version = "2.2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+toml_edit = { version = "0.25.13", features = ["serde"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 
 [profile.release]
 lto = "thin"

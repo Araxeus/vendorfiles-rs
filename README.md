@@ -44,10 +44,7 @@ cd vendorfiles-rs
 cargo install --path crates/vendor-cli
 ```
 
-That installs a binary named `vendor`.
-
-On Linux the keyring backend links libdbus, so install its headers first — e.g.
-`sudo apt-get install libdbus-1-dev`.
+That installs a binary named `vendor`. No system libraries are needed on any platform.
 
 **From a release:** download the archive for your platform from the
 [releases page](https://github.com/Araxeus/vendorfiles/releases) and put `vendor` on your
@@ -357,11 +354,21 @@ Anonymous requests to the GitHub API are limited to 60 per hour, so `vendor` war
 running without credentials. Tokens are resolved in this order:
 
 1. `GITHUB_TOKEN` environment variable
-2. OS keyring — Windows Credential Manager, macOS Keychain, or Secret Service on Linux
+2. the platform's credential store
 3. anonymous
 
-`vendor login` stores a token in the keyring, either by verifying one you paste
-(`vendor login <token>`) or through GitHub's OAuth device flow:
+Exactly one native store is compiled in per platform — there is no cross-platform facade, and
+no system library to install:
+
+| Platform | Store | Survives |
+| --- | --- | --- |
+| Windows | Credential Manager (`windows-native-keyring-store`) | until deleted |
+| macOS | login Keychain (`apple-native-keyring-store`) | until deleted |
+| Linux | kernel keyutils (`linux-keyutils-keyring-store`) | **until reboot** |
+| anything else | none — `GITHUB_TOKEN` only | — |
+
+`vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
+through GitHub's OAuth device flow:
 
 ```text
 $ vendor login
@@ -370,6 +377,15 @@ Then press [Enter] to continue in your web browser
 Opening your web browser...
 SUCCESS: Logged in successfully
 ```
+
+On Linux the keyutils store keeps secrets in kernel memory, so `login` says so rather than
+letting the next boot look mysteriously anonymous:
+
+```text
+WARNING: this system's credential store keeps secrets in kernel memory, so the token will be gone after a reboot
+```
+
+Set `GITHUB_TOKEN` instead if you want something that outlives a reboot there.
 
 `login` is the one command that does not need a config file — it works from any directory.
 
@@ -429,8 +445,10 @@ The intentional divergences:
    `preAction` hook for every command, so `vendor login` failed outside a project.
 4. **Keyring storage is plaintext in the OS credential store**, under
    `vendorfiles-cli` / `github_token_plain`. The original encrypted the token with AES-CBC
-   under a hostname-derived key and stored it as `github_token`; that entry is still read (and
-   ignored when it holds ciphertext), so both tools can stay logged in independently.
+   under a hostname-derived key and stored it as `github_token`; on Windows and macOS that
+   entry is still read (and ignored when it holds ciphertext), so both tools can stay logged in
+   independently. On Linux the two tools use different backends entirely — keyutils here,
+   Secret Service there — so neither sees the other's token.
 5. **Real `Authorization` headers.** The original passed the token as an endpoint *parameter*,
    which ended up as a query field — its downloads were effectively anonymous.
 6. **`vendor update <name>` honours the `default` block.** The original read the raw config

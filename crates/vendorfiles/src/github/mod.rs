@@ -1,6 +1,8 @@
 //! The GitHub API surface the tool needs, plus streaming downloads.
 
 pub mod auth;
+pub mod credentials;
+pub mod http;
 
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, Once};
@@ -8,8 +10,8 @@ use std::sync::{Arc, Mutex, Once};
 use tokio::sync::OnceCell;
 
 use indexmap::IndexMap;
-use octocrab::models::repos::Release;
 use octocrab::Octocrab;
+use octocrab::models::repos::Release;
 use serde::Deserialize;
 
 use crate::error::{Result, VendorError};
@@ -17,9 +19,7 @@ use crate::model::Repository;
 use crate::ui;
 
 pub use auth::Token;
-
-/// Sent on every request; the GitHub API rejects requests without one.
-pub const USER_AGENT: &str = concat!("vendorfiles/", env!("CARGO_PKG_VERSION"));
+pub use http::USER_AGENT;
 
 const API_ROOT: &str = "https://api.github.com";
 
@@ -77,14 +77,10 @@ impl GitHubClient {
             builder = builder.personal_token(token.expose().to_owned());
         }
         let api = builder.build().map_err(VendorError::from)?;
-        let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .map_err(|e| VendorError::Http(e.to_string()))?;
 
         Ok(Self {
             api,
-            http,
+            http: http::client()?,
             token,
             releases: Mutex::new(IndexMap::new()),
             warned: Once::new(),

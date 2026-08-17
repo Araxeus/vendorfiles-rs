@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use crate::config::format::{to_json_string, to_yaml_string, ConfigFormat, Indent};
+use crate::config::format::{ConfigFormat, Indent, to_json_string, to_yaml_string};
 use crate::error::{Result, VendorError};
 use crate::model::RawDependency;
 

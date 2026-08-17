@@ -41,15 +41,15 @@ pub fn intercept(args: &[String]) -> Intercept {
     }
 
     // `help [command]` is a command, not a flag.
-    if let Some(index) = args.iter().position(|a| a == "help") {
-        if command_index.is_none_or(|c| index <= c) {
-            return args
-                .get(index + 1)
-                .map_or(Intercept::Print(spec::ROOT_HELP), |topic| {
-                    spec::find(topic)
-                        .map_or(Intercept::UsageError, |found| Intercept::Print(found.help))
-                });
-        }
+    if let Some(index) = args.iter().position(|a| a == "help")
+        && command_index.is_none_or(|c| index <= c)
+    {
+        return args
+            .get(index + 1)
+            .map_or(Intercept::Print(spec::ROOT_HELP), |topic| {
+                spec::find(topic)
+                    .map_or(Intercept::UsageError, |found| Intercept::Print(found.help))
+            });
     }
 
     match (command_index, command) {
@@ -72,7 +72,7 @@ pub fn intercept(args: &[String]) -> Intercept {
 
 #[cfg(test)]
 mod tests {
-    use super::{intercept, Intercept};
+    use super::{Intercept, intercept};
     use crate::spec;
 
     fn args(list: &[&str]) -> Vec<String> {

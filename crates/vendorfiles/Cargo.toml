@@ -18,11 +18,12 @@ fancy-regex.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
 indexmap.workspace = true
-keyring.workspace = true
+keyring-core.workspace = true
 octocrab.workspace = true
 open.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,6 +34,18 @@ thiserror.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
 zip.workspace = true
+
+# One native credential store per platform. `keyring_core::set_default_store` is told which one
+# to use in `github::auth`; on any other target the keyring is simply unavailable and token
+# resolution falls back to `GITHUB_TOKEN`.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-keyutils-keyring-store.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

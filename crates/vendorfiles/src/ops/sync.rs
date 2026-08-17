@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::{Result, VendorError};
 use crate::model::Dependency;
-use crate::ops::install::{download, Prepared};
+use crate::ops::install::{Prepared, download};
 use crate::ops::{InstallOptions, Session};
 use crate::ui;
 

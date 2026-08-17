@@ -164,7 +164,7 @@ pub async fn files_from_lockfile(path: &Path, name: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_files_to_lock_files, flat_files, to_json, Lockfile, VendorLock};
+    use super::{Lockfile, VendorLock, config_files_to_lock_files, flat_files, to_json};
     use crate::model::{FileEntry, FileTarget};
 
     fn files(json: &str) -> Vec<FileEntry> {

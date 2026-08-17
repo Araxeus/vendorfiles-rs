@@ -278,14 +278,15 @@ impl RawDependency {
                 name: name.to_owned(),
             });
         }
-        if let Some(regex) = self.release_regex.as_deref() {
-            // `fancy_regex`, not `regex`: users write JavaScript patterns, which may use
-            // lookaround (the reference README suggests `^v(?!.*-(?:alpha|beta)).*`).
-            if !regex.is_empty() && fancy_regex::Regex::new(regex).is_err() {
-                return Err(VendorError::InvalidReleaseRegexKey {
-                    name: name.to_owned(),
-                });
-            }
+        // `fancy_regex`, not `regex`: users write JavaScript patterns, which may use
+        // lookaround (the reference README suggests `^v(?!.*-(?:alpha|beta)).*`).
+        if let Some(regex) = self.release_regex.as_deref()
+            && !regex.is_empty()
+            && fancy_regex::Regex::new(regex).is_err()
+        {
+            return Err(VendorError::InvalidReleaseRegexKey {
+                name: name.to_owned(),
+            });
         }
         Ok(())
     }
@@ -371,7 +372,7 @@ impl Dependency {
 
 #[cfg(test)]
 mod tests {
-    use super::{flatten_files, FileEntry, FileTarget, HashVersionFile, RawDependency};
+    use super::{FileEntry, FileTarget, HashVersionFile, RawDependency, flatten_files};
 
     fn dep(json: &str) -> RawDependency {
         serde_json::from_str(json).expect("valid dependency")
@@ -468,12 +469,13 @@ mod tests {
         let d =
             dep(r#"{"repository":"https://github.com/a/b","files":["x"],"hashVersionFile":false}"#);
         assert_eq!(d.hash_version_file, Some(HashVersionFile::Flag(false)));
-        assert!(d
-            .resolve("b")
-            .unwrap()
-            .hash_version_target()
-            .unwrap()
-            .is_none());
+        assert!(
+            d.resolve("b")
+                .unwrap()
+                .hash_version_target()
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

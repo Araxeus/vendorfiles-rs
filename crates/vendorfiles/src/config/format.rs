@@ -135,7 +135,7 @@ fn indents_map(text: &str, ignore_single_spaces: bool) -> Option<Indent> {
     let (&(is_space, amount), _) =
         indents
             .iter()
-            .max_by_key(|(&(is_space, amount), &(used, weight))| {
+            .max_by_key(|&(&(is_space, amount), &(used, weight))| {
                 // Deterministic tie-break so the result never depends on hash order.
                 (used, weight, u32::from(is_space), amount)
             })?;
@@ -188,7 +188,7 @@ pub fn final_newline(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{final_newline, to_json_string, ConfigFormat, Indent};
+    use super::{ConfigFormat, Indent, final_newline, to_json_string};
     use std::path::Path;
 
     #[test]

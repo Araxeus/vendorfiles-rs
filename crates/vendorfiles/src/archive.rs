@@ -152,7 +152,7 @@ pub fn crx_payload_offset(bytes: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{crx_payload_offset, extract, sniff, ArchiveKind, TAR_MAGIC_OFFSET};
+    use super::{ArchiveKind, TAR_MAGIC_OFFSET, crx_payload_offset, extract, sniff};
     use std::io::Write;
 
     #[test]

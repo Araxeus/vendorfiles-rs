@@ -4,7 +4,7 @@
 //! normalisation must match Node's `path.join` / `fs.realpath` rather than Rust's defaults —
 //! in particular Rust's `canonicalize` returns `\\?\C:\…` on Windows, which Node never prints.
 
-use std::path::{Component, Path, PathBuf, MAIN_SEPARATOR};
+use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
 
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
@@ -67,18 +67,22 @@ pub fn join_normalized(base: &Path, parts: &[&str]) -> PathBuf {
     normalize(Path::new(&joined))
 }
 
+/// Whether `text` begins with a plain drive root such as `C:\`.
+fn starts_with_drive(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+        && chars.next() == Some(':')
+        && chars.next() == Some('\\')
+}
+
 /// Strips Windows' `\\?\` verbatim prefix from a simple drive path.
 #[must_use]
 pub fn simplify(path: PathBuf) -> PathBuf {
     let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\") {
-        let mut chars = rest.chars();
-        let is_drive = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
-            && chars.next() == Some(':')
-            && matches!(chars.next(), Some('\\'));
-        if is_drive {
-            return PathBuf::from(rest);
-        }
+    if let Some(rest) = text.strip_prefix(r"\\?\")
+        && starts_with_drive(rest)
+    {
+        return PathBuf::from(rest);
     }
     path
 }

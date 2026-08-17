@@ -32,7 +32,7 @@ pub mod ui;
 
 pub use config::{ConfigFile, ConfigFormat, Workspace};
 pub use error::{Result, VendorError};
-pub use github::{auth, GitHubClient};
+pub use github::{GitHubClient, auth};
 pub use model::{Dependency, FileEntry, FileTarget, RawDependency, Repository, VendorConfig};
 pub use ops::{InstallOptions, Session, SyncOptions};
 

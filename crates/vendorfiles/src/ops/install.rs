@@ -16,10 +16,10 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    config_files_to_lock_files, files_from_lockfile, write_lockfile, VendorLock,
+    VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
 };
-use crate::model::{flatten_files, Dependency, FileSpec, FileTarget, RawDependency};
-use crate::ops::{display_version, OpResult, Session};
+use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
+use crate::ops::{OpResult, Session, display_version};
 use crate::template::{is_release_path, replace_version, strip_release_prefix};
 use crate::ui;
 

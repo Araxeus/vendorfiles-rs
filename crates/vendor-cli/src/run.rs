@@ -1,10 +1,10 @@
 //! Command dispatch — the layer between parsed arguments and the library's operations.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use vendorfiles::error::VendorError;
 use vendorfiles::model::RawDependency;
 use vendorfiles::template::{is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url};
-use vendorfiles::{auth, GitHubClient, InstallOptions, Session, SyncOptions, Workspace};
+use vendorfiles::{GitHubClient, InstallOptions, Session, SyncOptions, Workspace, auth};
 
 use crate::cli::{Cli, Command};
 
