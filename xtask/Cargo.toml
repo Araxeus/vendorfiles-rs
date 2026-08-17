@@ -18,5 +18,6 @@ publish = false
 anyhow.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
+indicatif.workspace = true
 semver.workspace = true
 toml_edit.workspace = true

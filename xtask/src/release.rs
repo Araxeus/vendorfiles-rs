@@ -2,9 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use dialoguer::{Select, theme::ColorfulTheme};
+use indicatif::{ProgressBar, ProgressStyle};
 use semver::Version;
 
 /// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
@@ -49,12 +51,27 @@ pub fn run() -> Result<()> {
     println!("Updated Cargo.toml to version {new_version}");
 
     // Refresh Cargo.lock so the commit is self-consistent.
-    run_command(&root, "cargo", &["check", "--workspace", "--quiet"])?;
-    run_command(&root, "cargo", &["fmt", "--all"])?;
+    run_command(
+        &root,
+        "Refreshing Cargo.lock",
+        "cargo",
+        &["check", "--workspace", "--quiet"],
+    )?;
+    run_command(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
 
-    run_command(&root, "git", &["add", "."])?;
-    run_command(&root, "git", &["commit", "-m", &format!("v{new_version}")])?;
-    run_command(&root, "git", &["tag", &format!("v{new_version}")])?;
+    run_command(&root, "Staging changes", "git", &["add", "."])?;
+    run_command(
+        &root,
+        &format!("Committing v{new_version}"),
+        "git",
+        &["commit", "-m", &format!("v{new_version}")],
+    )?;
+    run_command(
+        &root,
+        &format!("Tagging v{new_version}"),
+        "git",
+        &["tag", &format!("v{new_version}")],
+    )?;
 
     println!(
         "Committed and tagged version v{new_version} successfully.\n\
@@ -149,15 +166,36 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(program)
+/// Runs a command under a spinner, so a slow step (`cargo check`) never looks like a hang.
+///
+/// The child's output is captured rather than inherited — otherwise it would fight the spinner
+/// for the same lines — and is replayed only when the command fails.
+fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result<()> {
+    let spinner = ProgressBar::new_spinner().with_message(label.to_owned());
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg} {elapsed}")
+            .expect("the spinner template is valid"),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+
+    let started = Instant::now();
+    let output = Command::new(program)
         .args(args)
         .current_dir(root)
-        .status()
-        .with_context(|| format!("running {program} {}", args.join(" ")))?;
-    if !status.success() {
-        bail!("{program} {} failed", args.join(" "));
+        .output()
+        .with_context(|| format!("running {program} {}", args.join(" ")));
+    spinner.finish_and_clear();
+
+    let output = output?;
+    if !output.status.success() {
+        bail!(
+            "{program} {} failed:\n{}{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
+    println!("✔ {label} ({:.1?})", started.elapsed());
     Ok(())
 }
 
