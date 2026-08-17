@@ -39,12 +39,15 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 **From source:**
 
 ```bash
-git clone https://github.com/Araxeus/vendorfiles
+git clone https://github.com/Araxeus/vendorfiles-rs
 cd vendorfiles-rs
 cargo install --path crates/vendor-cli
 ```
 
 That installs a binary named `vendor`.
+
+On Linux the keyring backend links libdbus, so install its headers first — e.g.
+`sudo apt-get install libdbus-1-dev`.
 
 **From a release:** download the archive for your platform from the
 [releases page](https://github.com/Araxeus/vendorfiles/releases) and put `vendor` on your

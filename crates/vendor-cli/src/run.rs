@@ -22,7 +22,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
 
     let config_location = cli.config.flatten();
     let workspace = Workspace::load(config_location.as_deref()).await?;
-    let github = GitHubClient::new(auth::resolve_token())?;
+    let github = GitHubClient::new(auth::resolve_token_async().await)?;
     let mut session = Session::new(github, workspace);
 
     match cli.command {

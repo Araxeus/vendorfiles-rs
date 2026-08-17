@@ -28,7 +28,10 @@ indexmap = { version = "2.7", features = ["serde"] }
 keyring = { version = "3.6", features = [
     "apple-native",
     "windows-native",
+    # Blocking Secret Service backend: no nested async runtime, and `crypto-rust` encrypts
+    # the secret in transit over the bus without pulling in OpenSSL.
     "sync-secret-service",
+    "crypto-rust",
 ] }
 octocrab = { version = "0.44", default-features = false, features = [
     "default-client",

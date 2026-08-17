@@ -35,6 +35,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
+
       - name: Build
         run: cargo build --release --locked --package vendorfiles-cli
 

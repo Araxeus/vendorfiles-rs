@@ -93,6 +93,16 @@ pub fn resolve_token() -> Option<Token> {
         .or_else(keyring_token)
 }
 
+/// [`resolve_token`] without stalling the async runtime.
+///
+/// Reading the OS credential store is a blocking IPC call — on Linux it can even prompt the
+/// user to unlock the keyring — so it belongs on the blocking pool.
+pub async fn resolve_token_async() -> Option<Token> {
+    tokio::task::spawn_blocking(resolve_token)
+        .await
+        .unwrap_or(None)
+}
+
 /// Stores a token in the OS keyring, warning (but not failing) if that is not possible.
 ///
 /// A keyring that refuses the write is not fatal: the token still authenticates this run.
@@ -126,7 +136,7 @@ pub async fn login_with_token(token: &str) -> Result<()> {
         _ => {}
     }
 
-    save_token(&Token::new(token));
+    store(Token::new(token)).await;
     ui::success("Token saved successfully");
     Ok(())
 }
@@ -163,9 +173,14 @@ pub async fn login_with_device_flow() -> Result<()> {
         .await
         .map_err(|e| VendorError::DeviceFlow(e.to_string()))?;
 
-    save_token(&Token::new(auth.access_token.expose_secret()));
+    store(Token::new(auth.access_token.expose_secret())).await;
     ui::success("Logged in successfully");
     Ok(())
+}
+
+/// [`save_token`] off the async runtime, for the same reason as [`resolve_token_async`].
+async fn store(token: Token) {
+    let _ = tokio::task::spawn_blocking(move || save_token(&token)).await;
 }
 
 fn wait_for_enter() {
