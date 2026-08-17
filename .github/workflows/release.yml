@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  release:
+    name: release ${{ matrix.name }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos
+            extension: tar.gz
+          - os: ubuntu-latest
+            name: linux
+            extension: tar.gz
+          - os: windows-latest
+            name: windows
+            extension: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --package vendorfiles-cli
+
+      - name: Get filename
+        id: filename
+        shell: sh
+        run: echo "FILENAME=vendor_${GITHUB_REF#refs/tags/}_${{ matrix.name }}.${{ matrix.extension }}" >> $GITHUB_OUTPUT
+
+      - name: Tar (Unix)
+        if: matrix.os != 'windows-latest'
+        run: tar czf ${{ steps.filename.outputs.FILENAME }} -C target/release vendor
+
+      - name: Zip (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/vendor.exe ${{ steps.filename.outputs.FILENAME }} -Force
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.filename.outputs.FILENAME }}

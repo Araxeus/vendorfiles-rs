@@ -1,0 +1,38 @@
+[package]
+name = "vendorfiles"
+description = "Library powering the vendorfiles CLI: pull files from GitHub repositories and keep them up to date"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+fancy-regex.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+indexmap.workspace = true
+keyring.workspace = true
+octocrab.workspace = true
+open.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml_edit.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

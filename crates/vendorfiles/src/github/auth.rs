@@ -1,0 +1,194 @@
+//! GitHub authentication: token resolution and the OAuth device flow.
+//!
+//! Resolution order is `GITHUB_TOKEN` → OS keyring → anonymous.
+
+use std::io::{BufRead, Write};
+
+use secrecy::ExposeSecret;
+
+use crate::error::{Result, VendorError};
+use crate::ui;
+
+/// Keyring service name — shared with the reference implementation.
+const KEYRING_SERVICE: &str = "vendorfiles-cli";
+/// Keyring entry name.
+///
+/// Deliberately *not* the reference's `github_token`. That entry holds an AES-CBC blob keyed
+/// on the machine's hostname; writing a plaintext token there would leave the TypeScript tool
+/// unable to decrypt its own credential. A distinct entry lets both tools stay logged in.
+const KEYRING_USER: &str = "github_token_plain";
+/// The reference tool's entry, read only so a stale value can be recognised and ignored.
+const LEGACY_KEYRING_USER: &str = "github_token";
+/// The OAuth app the device flow authenticates against.
+pub const OAUTH_CLIENT_ID: &str = "39d3104ecbbfd876dfa5";
+
+/// A GitHub token, kept out of `Debug` output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Token(String);
+
+impl Token {
+    /// Wraps a token string.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The raw token, for use in an `Authorization` header.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(***)")
+    }
+}
+
+/// Whether a stored secret can be a GitHub token.
+///
+/// The reference stored an AES-CBC blob under the same keyring entry. Base64 ciphertext
+/// almost always contains characters no GitHub token uses, so treating such a value as
+/// "absent" downgrades a stale entry to anonymous access instead of a confusing 401.
+#[must_use]
+pub fn is_plausible_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() >= 20
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn keyring_entry() -> Option<keyring::Entry> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
+}
+
+/// Reads the token from the OS keyring, if one is stored and usable.
+///
+/// Falls back to the reference tool's entry so a machine that only ever used the TypeScript
+/// CLI still works — unless the stored value is that tool's ciphertext, which cannot be a
+/// token and is treated as "not logged in" rather than sent upstream to fail with a 401.
+#[must_use]
+pub fn keyring_token() -> Option<Token> {
+    let read = |user: &str| {
+        keyring::Entry::new(KEYRING_SERVICE, user)
+            .ok()?
+            .get_password()
+            .ok()
+            .filter(|value| is_plausible_token(value))
+    };
+    read(KEYRING_USER)
+        .or_else(|| read(LEGACY_KEYRING_USER))
+        .map(Token::new)
+}
+
+/// Resolves the token to use: `GITHUB_TOKEN`, then the keyring, then none.
+#[must_use]
+pub fn resolve_token() -> Option<Token> {
+    std::env::var("GITHUB_TOKEN")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(Token::new)
+        .or_else(keyring_token)
+}
+
+/// Stores a token in the OS keyring, warning (but not failing) if that is not possible.
+///
+/// A keyring that refuses the write is not fatal: the token still authenticates this run.
+pub fn save_token(token: &Token) {
+    let stored = keyring_entry().is_some_and(|entry| entry.set_password(token.expose()).is_ok());
+    if !stored {
+        ui::warning("Failed to save token to keyring");
+    }
+}
+
+/// Verifies a token against the API and stores it.
+///
+/// # Errors
+///
+/// Returns [`VendorError::InvalidToken`], [`VendorError::TokenRateLimited`] or
+/// [`VendorError::AuthUnknownFailure`] depending on how GitHub rejects the token.
+pub async fn login_with_token(token: &str) -> Result<()> {
+    let response = reqwest::Client::new()
+        .head("https://api.github.com")
+        .header(reqwest::header::AUTHORIZATION, format!("bearer {token}"))
+        .header(reqwest::header::USER_AGENT, super::USER_AGENT)
+        .header(reqwest::header::CACHE_CONTROL, "no-store")
+        .send()
+        .await
+        .map_err(|e| VendorError::Http(e.to_string()))?;
+
+    match response.status().as_u16() {
+        401 => return Err(VendorError::InvalidToken),
+        403 => return Err(VendorError::TokenRateLimited),
+        status if !(200..300).contains(&status) => return Err(VendorError::AuthUnknownFailure),
+        _ => {}
+    }
+
+    save_token(&Token::new(token));
+    ui::success("Token saved successfully");
+    Ok(())
+}
+
+/// Runs the OAuth device flow, storing the resulting token.
+///
+/// The prompts reproduce the reference's wording and its "press Enter, then we open the
+/// browser" sequencing.
+///
+/// # Errors
+///
+/// Returns [`VendorError::DeviceFlow`] if the code request or the poll for authorisation fails.
+pub async fn login_with_device_flow() -> Result<()> {
+    let crab = octocrab::Octocrab::builder()
+        .base_uri("https://github.com")
+        .map_err(VendorError::from)?
+        .add_header(reqwest::header::ACCEPT, "application/json".to_owned())
+        .build()
+        .map_err(VendorError::from)?;
+
+    let codes = crab
+        .authenticate_as_device(&OAUTH_CLIENT_ID.into(), std::iter::empty::<&str>())
+        .await
+        .map_err(|e| VendorError::DeviceFlow(e.to_string()))?;
+
+    println!("First, copy your one-time code: {}", codes.user_code);
+    println!("Then press [Enter] to continue in your web browser");
+    wait_for_enter();
+    println!("Opening your web browser...");
+    let _ = open::that_detached(&codes.verification_uri);
+
+    let auth = codes
+        .poll_until_available(&crab, &OAUTH_CLIENT_ID.into())
+        .await
+        .map_err(|e| VendorError::DeviceFlow(e.to_string()))?;
+
+    save_token(&Token::new(auth.access_token.expose_secret()));
+    ui::success("Logged in successfully");
+    Ok(())
+}
+
+fn wait_for_enter() {
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_plausible_token, Token};
+
+    #[test]
+    fn plausible_tokens_exclude_base64_ciphertext() {
+        assert!(is_plausible_token("ghp_0123456789abcdefghijklmnop"));
+        assert!(is_plausible_token("github_pat_11ABCDEFG0abcdefghij"));
+        assert!(!is_plausible_token("Zm9vYmFy+YmFyL2Zvbw=="));
+        assert!(!is_plausible_token(""));
+        assert!(!is_plausible_token("short"));
+    }
+
+    #[test]
+    fn tokens_do_not_leak_through_debug() {
+        assert_eq!(format!("{:?}", Token::new("ghp_secret")), "Token(***)");
+    }
+}

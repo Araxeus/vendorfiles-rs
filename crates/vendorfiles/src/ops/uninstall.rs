@@ -1,0 +1,79 @@
+//! `uninstall` — remove a dependency's files, its lock entry, and its config entry.
+
+use crate::error::{Result, VendorError};
+use crate::fsx::delete_file_and_empty_folders;
+use crate::lockfile::{
+    config_files_to_lock_files, flat_files, read_lockfile, to_json, write_string,
+};
+use crate::ops::Session;
+use crate::ui;
+
+impl Session {
+    /// Removes a dependency entirely.
+    ///
+    /// Files are deleted on a best-effort basis — a file the user already removed must not
+    /// stop the config entry from going away.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::DependencyNotFound`] when the config has no such entry, or a write
+    /// error if the lockfile or config cannot be updated.
+    pub async fn uninstall(&mut self, name: &str) -> Result<()> {
+        let dependency = self
+            .workspace
+            .dependencies
+            .get(name)
+            .cloned()
+            .ok_or_else(|| VendorError::DependencyNotFound {
+                name: name.to_owned(),
+                path: self.workspace.file.display_path(),
+            })?;
+
+        let folder = self
+            .workspace
+            .dependency_folder(dependency.vendor_folder.as_deref(), name);
+        let lockfile_path = Self::lockfile_path(&folder);
+
+        let lockfile = read_lockfile(&lockfile_path).await.ok();
+        if let Some(locked) = lockfile.as_ref().and_then(|l| l.get(name)) {
+            for file in flat_files(&locked.files) {
+                let _ = delete_file_and_empty_folders(&folder, &file).await;
+            }
+        }
+
+        let declared = config_files_to_lock_files(
+            dependency.files.as_deref().unwrap_or_default(),
+            dependency.version.as_deref().unwrap_or_default(),
+        );
+        for file in flat_files(&declared) {
+            let _ = delete_file_and_empty_folders(&folder, &file).await;
+        }
+
+        if let Some(mut lockfile) = lockfile.filter(|l| l.contains_key(name)) {
+            if lockfile.len() == 1 {
+                let _ = tokio::fs::remove_file(&lockfile_path).await;
+                if is_empty_dir(&folder).await {
+                    let _ = tokio::fs::remove_dir_all(&folder).await;
+                }
+            } else {
+                lockfile.shift_remove(name);
+                // The reference writes this one without a trailing newline.
+                write_string(&lockfile_path, &to_json(&lockfile)?).await?;
+            }
+        }
+
+        self.workspace.dependencies.shift_remove(name);
+        self.workspace.file.document.remove_dependency(name);
+        self.workspace.file.write().await?;
+
+        ui::success(format!("Uninstalled {name}"));
+        Ok(())
+    }
+}
+
+async fn is_empty_dir(path: &std::path::Path) -> bool {
+    match tokio::fs::read_dir(path).await {
+        Ok(mut entries) => entries.next_entry().await.ok().flatten().is_none(),
+        Err(_) => false,
+    }
+}

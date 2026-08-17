@@ -1,0 +1,21 @@
+Usage: vendor install|add [options] <url/name> [version]
+
+Install a dependency. origin can be a GitHub repo URL or owner/repo format or
+name of repo to search for.
+Files have to be provided with -f or --files <files...>
+
+Arguments:
+  url/name                GitHub repo URL or owner/repo format or name of repo
+                          to search for
+  version                 Version to install
+
+Options:
+  -n, --name [name]       Name to write in dependencies
+  -f, --files <files...>  Files to install
+  -h, --help              display help for command
+
+Examples:
+    vendor install React -n MyReact -f README.md
+    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE
+    vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
+

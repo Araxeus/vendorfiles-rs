@@ -1,0 +1,11 @@
+Usage: vendor outdated|o [options]
+
+List outdated dependencies
+
+Options:
+  -h, --help  display help for command
+
+Examples:
+    vendor outdated
+    vendor o
+

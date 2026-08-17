@@ -1,0 +1,14 @@
+Usage: vendor login|auth [options] [token]
+
+Login to GitHub to increase rate limit
+
+Arguments:
+  token       GitHub token (leave empty to login via browser)
+
+Options:
+  -h, --help  display help for command
+
+Examples:
+    vendor login
+    vendor auth <token>
+

@@ -1,0 +1,15 @@
+Usage: vendor command [options]
+
+Options:
+  -c, --config [file/folder path]             Config file path / Folder containing the config file
+  -v, --version                               output the current version
+  -h, --help                                  display help for command
+
+Commands:
+  sync|s [options]                            Sync config file
+  update|upgrade [options] [names...]         Update outdated dependencies
+  outdated|o                                  List outdated dependencies
+  install|add [options] <url/name> [version]  Install a dependency
+  uninstall|remove [names...]                 Uninstall dependencies
+  login|auth [token]                          Login to GitHub
+  help [command]                              display help for command

@@ -1,0 +1,14 @@
+Usage: vendor uninstall|remove [options] [names...]
+
+Uninstall all/selected dependencies
+
+Arguments:
+  names       Package names to uninstall
+
+Options:
+  -h, --help  display help for command
+
+Examples:
+    vendor uninstall React
+    vendor remove React youtube-music
+

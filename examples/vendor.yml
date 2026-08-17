@@ -1,0 +1,18 @@
+vendorConfig:
+  vendorFolder: vendor
+vendorDependencies:
+  fzf:
+    version: 0.37.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - LICENSE
+      - '{release}/fzf-{version}-windows_amd64.zip':
+          - fzf.exe
+      - '{release}/fzf-{version}-windows_amd64.zip':
+          fzf.exe: custom-fzf.exe
+    vendorFolder: '{vendorFolder}/fzf-yml'
+  micro:
+    repository: https://github.com/zyedidia/micro
+    files:
+      - '{release}/micro-{version}-win64.zip':
+          micro-{version}/micro.exe: micro.exe
