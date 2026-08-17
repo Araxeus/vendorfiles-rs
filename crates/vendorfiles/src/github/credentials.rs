@@ -93,7 +93,30 @@ mod tests {
     #[test]
     fn entries_can_be_built_without_touching_the_store() {
         // `build` is a specifier: it must not read or write the underlying credential.
-        assert!(entry("vendorfiles-cli-test", "does-not-exist").is_some());
+        let handle = entry("vendorfiles-cli-test", "does-not-exist").expect("a store");
+        assert!(matches!(
+            handle.get_password(),
+            Err(keyring_core::Error::NoEntry)
+        ));
+    }
+
+    #[test]
+    fn secrets_round_trip_through_the_platform_store() {
+        // Writing is the half that only shows up when a user runs `vendor login`, so exercise
+        // it here — under a name of its own, never the real credential.
+        let handle = entry("vendorfiles-cli-test", "round-trip").expect("a store");
+        handle
+            .set_password("ghp_roundtrip_0123456789")
+            .expect("write");
+        assert_eq!(
+            handle.get_password().expect("read"),
+            "ghp_roundtrip_0123456789"
+        );
+        handle.delete_credential().expect("delete");
+        assert!(matches!(
+            handle.get_password(),
+            Err(keyring_core::Error::NoEntry)
+        ));
     }
 
     #[test]

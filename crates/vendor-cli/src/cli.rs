@@ -5,7 +5,7 @@
 
 // `Option<Option<T>>` is how clap models an option whose value is itself optional
 // (`-n` alone versus `-n name`), which Commander's `[name]` syntax requires.
-#![allow(clippy::option_option)]
+#![expect(clippy::option_option)]
 
 use clap::{Parser, Subcommand};
 

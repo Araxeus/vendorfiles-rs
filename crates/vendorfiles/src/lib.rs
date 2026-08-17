@@ -16,7 +16,8 @@
 
 #![forbid(unsafe_code)]
 // `octocrab` and `reqwest` legitimately pull in overlapping minor versions of shared crates;
-// nothing in this workspace can resolve that.
+// nothing in this workspace can resolve that. Kept as `allow`, not `expect`: a dependency bump
+// that happens to unify them should not fail the build.
 #![allow(clippy::multiple_crate_versions)]
 
 pub mod archive;

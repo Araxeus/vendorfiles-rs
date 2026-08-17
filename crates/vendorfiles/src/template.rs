@@ -4,7 +4,9 @@
 //! implementation uses JavaScript's `String.prototype.replace` with a string pattern.
 
 // `{version}`, `{release}/` and `{vendorFolder}` are config placeholders, not format arguments.
-#![allow(clippy::literal_string_with_formatting_args)]
+// `expect` rather than `allow`: if the last placeholder literal ever leaves this module, the
+// exemption should go with it.
+#![expect(clippy::literal_string_with_formatting_args)]
 
 use std::sync::LazyLock;
 

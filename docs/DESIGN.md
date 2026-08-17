@@ -38,7 +38,9 @@ vendorfiles-rs/
 │   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction
 │   │       ├── github/
 │   │       │   ├── mod.rs    # GitHubClient: releases (cached), commits, search, downloads
-│   │       │   └── auth.rs   # token resolution, keyring, OAuth device flow
+│   │       │   ├── auth.rs   # token resolution, OAuth device flow
+│   │       │   ├── credentials.rs # the platform's native credential store
+│   │       │   └── http.rs   # the reqwest client + its rustls provider
 │   │       └── ops/
 │   │           ├── mod.rs        # Session
 │   │           ├── install.rs    # prepare / download / commit
@@ -150,13 +152,48 @@ pub struct GitHubClient {
 }
 ```
 
+`reqwest` is built with `rustls-no-provider` and `github::http` installs `ring` as the process
+provider. Its `rustls` feature would hard-wire aws-lc-rs, compiling a second crypto backend
+next to the `ring` one octocrab already uses; `cargo tree` shows neither aws-lc, OpenSSL, nor
+native-tls in the graph.
+
 The cache stores a `OnceCell` *per key* rather than a value, so the concurrent version-resolution
 pass collapses duplicate lookups into one request instead of racing — the anonymous rate limit
 is 60 requests an hour, so a duplicate is not free. `Arc<Release>` means cache hits do not clone
 asset lists. The lookup also reproduces the TS quirk: a request for a tag is satisfied by any
 already-resolved release of the same repository whose `tag_name` matches.
 
-### 3.5 Errors
+### 3.5 Credential storage
+
+There is no cross-platform keyring facade in the dependency graph. `keyring-core` supplies the
+`Entry` API and exactly one store crate is compiled in per target, through
+`[target.'cfg(target_os = "…")'.dependencies]`:
+
+| Target | Crate | `persistence()` |
+| --- | --- | --- |
+| Windows | `windows-native-keyring-store` | `UntilDelete` |
+| macOS | `apple-native-keyring-store` (`keychain`) | `UntilDelete` |
+| Linux | `linux-keyutils-keyring-store` | `UntilReboot` |
+| other | — | store unavailable |
+
+Two consequences worth being deliberate about:
+
+* The `keyring` facade would compile every backend's glue on every target and, on Linux, link
+  libdbus for a Secret Service backend this tool does not use. Nothing here needs a system
+  library on any platform now.
+* keyutils keeps secrets in kernel memory. `github::credentials::transience_warning` reads the
+  store's own `persistence()` and `vendor login` prints the caveat, so a token that will not
+  survive a reboot says so at the moment it is stored rather than by looking anonymous later.
+
+`credentials` builds entries from a store handle it owns (`CredentialStoreApi::build`) rather
+than registering one with `keyring_core::set_default_store`. That keeps a process-global — and
+its initialise-before-first-use ordering hazard — out of the design; the store opens lazily,
+once, behind a `OnceLock`.
+
+Keyring access is blocking IPC (on Linux it can prompt to unlock), so the CLI reaches it
+through `auth::resolve_token_async`, which hops to the blocking pool.
+
+### 3.6 Errors
 
 `VendorError` (thiserror) in the library; every variant's `Display` is the exact string the
 TS tool prints after the `ERROR: ` prefix. `vendor-cli` uses `anyhow` at the boundary and
@@ -273,3 +310,6 @@ code and the complete resulting file tree (including binary payloads). Covered:
    than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
+9. **Credential storage is one native store per platform** (§3.5), so on Linux the token lives
+   in keyutils rather than the Secret Service. Neither tool sees the other's token there, and
+   `login` warns that a keyutils token does not survive a reboot.
