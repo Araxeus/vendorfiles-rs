@@ -45,6 +45,7 @@ windows-native-keyring-store.workspace = true
 apple-native-keyring-store.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store.workspace = true
 linux-keyutils-keyring-store.workspace = true
 
 [dev-dependencies]

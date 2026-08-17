@@ -67,8 +67,8 @@ pub fn is_plausible_token(value: &str) -> bool {
 /// CLI still works — unless the stored value is that tool's ciphertext, which cannot be a
 /// token and is treated as "not logged in" rather than sent upstream to fail with a 401.
 ///
-/// That fallback only finds anything on Windows and macOS: on Linux the reference stored its
-/// token in the Secret Service, which is a different backend from the keyutils store here.
+/// On Linux that fallback only reaches the reference's token when a Secret Service daemon is
+/// running, since the keyutils fallback store is a different backend entirely.
 #[must_use]
 pub fn keyring_token() -> Option<Token> {
     let read = |user: &str| {

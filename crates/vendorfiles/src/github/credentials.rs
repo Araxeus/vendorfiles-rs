@@ -1,10 +1,10 @@
 //! The platform's native credential store.
 //!
 //! Rather than the `keyring` facade — which compiles every backend's support code on every
-//! target, and on Linux links libdbus for a Secret Service backend this tool does not use —
-//! exactly one store crate is pulled in per platform through `[target.'cfg(…)'.dependencies]`.
-//! On a target with no store compiled in, [`entry`] yields `None` and token resolution simply
-//! falls back to `GITHUB_TOKEN`.
+//! target, and on Linux links libdbus — the store crates are pulled in per platform through
+//! `[target.'cfg(…)'.dependencies]`: the Credential Manager on Windows, the login Keychain on
+//! macOS, and on Linux the Secret Service with a keyutils fallback. On a target with no store
+//! compiled in, [`entry`] yields `None` and token resolution falls back to `GITHUB_TOKEN`.
 //!
 //! Entries are built from a store handle this module owns rather than through
 //! `keyring_core::set_default_store`, so there is no process-global to initialise in the right
@@ -31,9 +31,18 @@ fn native() -> keyring_core::Result<Arc<CredentialStore>> {
     Ok(apple_native_keyring_store::keychain::Store::new()?)
 }
 
+/// Linux has two candidates, tried in order of how long they keep a secret.
+///
+/// The Secret Service persists to disk, so a token stored there survives a reboot — but it needs
+/// a daemon (gnome-keyring, KWallet, KeePassXC) that a headless box, a minimal container or WSL
+/// may not have. keyutils always works but lives in kernel memory, so it comes second and
+/// [`transience_warning`] tells the user what they got.
 #[cfg(target_os = "linux")]
 fn native() -> keyring_core::Result<Arc<CredentialStore>> {
-    Ok(linux_keyutils_keyring_store::Store::new()?)
+    match zbus_secret_service_keyring_store::Store::new() {
+        Ok(store) => Ok(store),
+        Err(_) => Ok(linux_keyutils_keyring_store::Store::new()?),
+    }
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -142,6 +151,21 @@ mod tests {
     }
 
     #[test]
+    fn the_warning_says_exactly_what_the_store_reports() {
+        let Some(store) = open() else { return };
+        let durable = matches!(
+            store.persistence(),
+            keyring_core::api::CredentialPersistence::UntilDelete
+        );
+        assert_eq!(
+            durable,
+            transience_warning().is_none(),
+            "a durable store must warn about nothing, and a transient one must warn ({})",
+            store.vendor()
+        );
+    }
+
+    #[test]
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn desktop_keychains_are_durable() {
         assert_eq!(transience_warning(), None);
@@ -149,10 +173,22 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn the_keyutils_store_is_reported_as_lost_on_reboot() {
-        assert!(
-            transience_warning().is_some_and(|w| w.contains("reboot")),
-            "keyutils should warn about reboots"
-        );
+    fn the_persistent_store_wins_when_the_system_offers_one() {
+        let Some(store) = open() else { return };
+        if zbus_secret_service_keyring_store::Store::new().is_ok() {
+            assert!(
+                store.vendor().contains("Secret Service"),
+                "keyutils was chosen despite a working Secret Service: {}",
+                store.vendor()
+            );
+            assert_eq!(transience_warning(), None);
+        } else {
+            // No daemon here, so the session-scoped store is the honest answer — and it has to
+            // say so.
+            assert!(
+                transience_warning().is_some_and(|w| w.contains("reboot")),
+                "the keyutils fallback must warn about reboots"
+            );
+        }
     }
 }

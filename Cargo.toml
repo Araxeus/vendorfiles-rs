@@ -34,6 +34,14 @@ keyring-core = "1.0.0"
 apple-native-keyring-store = { version = "1.0.2", default-features = false, features = [
     "keychain",
 ] }
+# Preferred on Linux: the Secret Service persists to disk, so a token survives a reboot. The
+# `zbus` implementation rather than the `dbus` one keeps this pure Rust — no libdbus to link.
+# `rt-async-io-crypto-rust` drives zbus's blocking API on its own async-io executor, so it never
+# interacts with the tool's tokio runtime, and encrypts the bus session without OpenSSL.
+zbus-secret-service-keyring-store = { version = "1.0.1", default-features = false, features = [
+    "rt-async-io-crypto-rust",
+] }
+# The fallback when no Secret Service is running (headless boxes, minimal containers, WSL).
 linux-keyutils-keyring-store = "1.0.0"
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.

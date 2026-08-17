@@ -357,15 +357,21 @@ running without credentials. Tokens are resolved in this order:
 2. the platform's credential store
 3. anonymous
 
-Exactly one native store is compiled in per platform — there is no cross-platform facade, and
-no system library to install:
+Native stores are compiled in per platform — there is no cross-platform facade, and no system
+library to install:
 
 | Platform | Store | Survives |
 | --- | --- | --- |
 | Windows | Credential Manager (`windows-native-keyring-store`) | until deleted |
 | macOS | login Keychain (`apple-native-keyring-store`) | until deleted |
-| Linux | kernel keyutils (`linux-keyutils-keyring-store`) | **until reboot** |
+| Linux | Secret Service (`zbus-secret-service-keyring-store`) | until deleted |
+| Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`) | **until reboot** |
 | anything else | none — `GITHUB_TOKEN` only | — |
+
+On Linux the Secret Service is tried first, so a token persists wherever a keyring daemon is
+running — gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
+usually have none, and there the kernel keyutils store takes over: it always works, but it
+holds secrets in kernel memory.
 
 `vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
 through GitHub's OAuth device flow:
@@ -378,14 +384,17 @@ Opening your web browser...
 SUCCESS: Logged in successfully
 ```
 
-On Linux the keyutils store keeps secrets in kernel memory, so `login` says so rather than
-letting the next boot look mysteriously anonymous:
+`login` asks the store it used how long it keeps things, so when you land on the keyutils
+fallback it tells you rather than letting the next boot look mysteriously anonymous:
 
 ```text
 WARNING: this system's credential store keeps secrets in kernel memory, so the token will be gone after a reboot
 ```
 
-Set `GITHUB_TOKEN` instead if you want something that outlives a reboot there.
+Two ways to get persistence if you see that: run a Secret Service daemon (installing
+`gnome-keyring` is usually enough — on a headless box it needs unlocking, see
+[this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
+your shell profile or CI secrets.
 
 `login` is the one command that does not need a config file — it works from any directory.
 
@@ -445,10 +454,10 @@ The intentional divergences:
    `preAction` hook for every command, so `vendor login` failed outside a project.
 4. **Keyring storage is plaintext in the OS credential store**, under
    `vendorfiles-cli` / `github_token_plain`. The original encrypted the token with AES-CBC
-   under a hostname-derived key and stored it as `github_token`; on Windows and macOS that
-   entry is still read (and ignored when it holds ciphertext), so both tools can stay logged in
-   independently. On Linux the two tools use different backends entirely — keyutils here,
-   Secret Service there — so neither sees the other's token.
+   under a hostname-derived key and stored it as `github_token`; that entry is still read (and
+   ignored when it holds ciphertext), so both tools can stay logged in independently. On a Linux
+   box with no keyring daemon the two tools use different backends — keyutils here, Secret
+   Service there — so neither sees the other's token.
 5. **Real `Authorization` headers.** The original passed the token as an endpoint *parameter*,
    which ended up as a query field — its downloads were effectively anonymous.
 6. **`vendor update <name>` honours the `default` block.** The original read the raw config

@@ -173,17 +173,26 @@ There is no cross-platform keyring facade in the dependency graph. `keyring-core
 | --- | --- | --- |
 | Windows | `windows-native-keyring-store` | `UntilDelete` |
 | macOS | `apple-native-keyring-store` (`keychain`) | `UntilDelete` |
-| Linux | `linux-keyutils-keyring-store` | `UntilReboot` |
+| Linux, first choice | `zbus-secret-service-keyring-store` | `UntilDelete` |
+| Linux, fallback | `linux-keyutils-keyring-store` | `UntilReboot` |
 | other | — | store unavailable |
+
+Linux is the only target with a choice to make, and it is made at runtime: the Secret Service
+persists to disk but needs a daemon that headless boxes, minimal containers and WSL usually
+lack, so `native()` tries it first and falls back to keyutils. The `zbus` implementation is
+used rather than the `dbus` one because it is pure Rust — `cargo tree` shows no libdbus — and
+its `rt-async-io-crypto-rust` feature drives zbus's blocking API on its own async-io executor,
+so it never interacts with the tool's tokio runtime.
 
 Two consequences worth being deliberate about:
 
 * The `keyring` facade would compile every backend's glue on every target and, on Linux, link
   libdbus for a Secret Service backend this tool does not use. Nothing here needs a system
   library on any platform now.
-* keyutils keeps secrets in kernel memory. `github::credentials::transience_warning` reads the
-  store's own `persistence()` and `vendor login` prints the caveat, so a token that will not
-  survive a reboot says so at the moment it is stored rather than by looking anonymous later.
+* `github::credentials::transience_warning` reads the chosen store's own `persistence()`, so
+  landing on the keyutils fallback tells the user their token will not outlive a reboot at the
+  moment it is stored, rather than by looking anonymous later. Nothing hard-codes which store
+  that is: the warning follows whatever `native()` actually opened.
 
 `credentials` builds entries from a store handle it owns (`CredentialStoreApi::build`) rather
 than registering one with `keyring_core::set_default_store`. That keeps a process-global — and
@@ -310,6 +319,6 @@ code and the complete resulting file tree (including binary payloads). Covered:
    than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
-9. **Credential storage is one native store per platform** (§3.5), so on Linux the token lives
-   in keyutils rather than the Secret Service. Neither tool sees the other's token there, and
-   `login` warns that a keyutils token does not survive a reboot.
+9. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+   daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
+   the other's token, and `login` warns that it will not survive a reboot.
