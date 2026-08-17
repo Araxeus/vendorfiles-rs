@@ -1,5 +1,9 @@
 # vendorfiles-rs <!-- omit from toc -->
 
+[![crates.io Version](https://img.shields.io/crates/v/vendorfiles)](https://crates.io/crates/vendorfiles)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Araxeus/vendorfiles/blob/main/LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Araxeus/vendorfiles)
+
 A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
 GitHub repositories and keep them up to date. Think of it like a package manager, but for
 individual files: CSS libraries, binaries, config files, whatever you need.
