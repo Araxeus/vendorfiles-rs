@@ -142,14 +142,17 @@ impl ConfigDocument {
         }
     }
 
-    /// Renders the document back to text (without the trailing newline).
+    /// Renders the document back to text, before the file's own trailing newline is restored.
     ///
     /// # Errors
     ///
     /// Returns [`VendorError::SerializeConfig`] if the document cannot be encoded.
     pub fn render(&self, format: ConfigFormat, indent: &Indent) -> Result<String> {
         match (self, format) {
-            (Self::Toml(doc), _) => Ok(doc.to_string()),
+            // Removing a table leaves its leading blank line behind, which would otherwise
+            // accumulate one per uninstall. Collapse the trailing run to a single newline,
+            // which is also what the reference's TOML emitter produces.
+            (Self::Toml(doc), _) => Ok(format!("{}\n", doc.to_string().trim_end_matches('\n'))),
             (Self::Structural(value), ConfigFormat::Json) => to_json_string(value, indent),
             (Self::Structural(value), ConfigFormat::Yml | ConfigFormat::Toml) => {
                 to_yaml_string(value, indent)
@@ -241,6 +244,19 @@ mod tests {
         assert_eq!(
             out,
             "vendorConfig:\n  vendorFolder: ./v\nvendorDependencies:\n  b:\n    version: v2\n"
+        );
+    }
+
+    #[test]
+    fn toml_removal_does_not_leave_a_growing_run_of_blank_lines() {
+        let source = "[vendorDependencies.a]\nversion = \"v1\"\n\n[vendorDependencies.b]\nversion = \"v2\"\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.remove_dependency("a");
+        d.remove_dependency("b");
+        assert_eq!(
+            d.render(ConfigFormat::Toml, &Indent::default_two_spaces())
+                .unwrap(),
+            "\n"
         );
     }
 
