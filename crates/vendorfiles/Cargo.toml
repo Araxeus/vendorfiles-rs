@@ -18,7 +18,7 @@ name = "vendor"
 path = "src/main.rs"
 
 [dependencies]
-vendorfiles.workspace = true
+vendorfiles_core.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true

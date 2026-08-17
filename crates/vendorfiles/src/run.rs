@@ -1,10 +1,12 @@
 //! Command dispatch — the layer between parsed arguments and the library's operations.
 
 use anyhow::{Result, bail};
-use vendorfiles::error::VendorError;
-use vendorfiles::model::RawDependency;
-use vendorfiles::template::{is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url};
-use vendorfiles::{GitHubClient, InstallOptions, Session, SyncOptions, Workspace, auth};
+use vendorfiles_core::error::VendorError;
+use vendorfiles_core::model::RawDependency;
+use vendorfiles_core::template::{
+    is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
+};
+use vendorfiles_core::{GitHubClient, InstallOptions, Session, SyncOptions, Workspace, auth};
 
 use crate::cli::{Cli, Command};
 
@@ -39,7 +41,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::Update { names, pr } => {
             if names.is_empty() {
                 // `--pr` only applies to a full update, matching the reference.
-                vendorfiles::ui::set_pr_mode(pr);
+                vendorfiles_core::ui::set_pr_mode(pr);
                 session
                     .sync(SyncOptions {
                         should_update: true,
@@ -174,7 +176,7 @@ async fn install(
         Some(files) => Some(
             files
                 .into_iter()
-                .map(vendorfiles::FileEntry::Simple)
+                .map(vendorfiles_core::FileEntry::Simple)
                 .collect(),
         ),
         None => existing.files.clone(),

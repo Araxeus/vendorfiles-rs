@@ -21,7 +21,7 @@ Everything shares a process-global mutable `runOptions` and a memoised `getConfi
 ```
 vendorfiles-rs/
 ├── crates/
-│   ├── vendorfiles-core/     # library: all behaviour, `thiserror` errors, no process exits
+│   ├── vendorfiles_core/     # library: all behaviour, `thiserror` errors, no process exits
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── error.rs      # VendorError — Display == user-facing message

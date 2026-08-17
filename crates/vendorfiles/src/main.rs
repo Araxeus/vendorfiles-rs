@@ -30,7 +30,7 @@ async fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Intercept::Version => {
-            println!("{}", vendorfiles::VERSION);
+            println!("{}", vendorfiles_core::VERSION);
             return ExitCode::SUCCESS;
         }
         Intercept::UsageError => {
@@ -53,7 +53,7 @@ async fn main() -> ExitCode {
     match run::dispatch(parsed).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            vendorfiles::ui::error(format!("{error}"));
+            vendorfiles_core::ui::error(format!("{error}"));
             ExitCode::from(FAILURE)
         }
     }

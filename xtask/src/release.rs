@@ -120,9 +120,9 @@ fn set_version(document: &mut toml_edit::DocumentMut, version: &Version) -> Resu
     let pin = document
         .get_mut("workspace")
         .and_then(|w| w.get_mut("dependencies"))
-        .and_then(|d| d.get_mut("vendorfiles"))
+        .and_then(|d| d.get_mut("vendorfiles_core"))
         .and_then(|v| v.as_table_like_mut())
-        .context("workspace.dependencies.vendorfiles is missing from Cargo.toml")?;
+        .context("workspace.dependencies.vendorfiles_core is missing from Cargo.toml")?;
     match pin.get_mut("version") {
         Some(slot) => replace_keeping_decor(slot, &version.to_string()),
         None => {
@@ -215,7 +215,7 @@ version = \"1.4.2\"      # bumped by xtask
 license = \"MIT\"
 
 [workspace.dependencies]
-vendorfiles = { package = \"vendorfiles-core\", path = \"crates/vendorfiles-core\", version = \"1.4.2\" }
+vendorfiles_core = { path = \"crates/vendorfiles_core\", version = \"1.4.2\" }
 anyhow = \"1.0\"
 ";
 
@@ -243,8 +243,9 @@ anyhow = \"1.0\"
             "{rendered}"
         );
         assert!(
-            rendered
-                .contains("vendorfiles = { package = \"vendorfiles-core\", path = \"crates/vendorfiles-core\", version = \"1.5.0\" }"),
+            rendered.contains(
+                "vendorfiles_core = { path = \"crates/vendorfiles_core\", version = \"1.5.0\" }"
+            ),
             "{rendered}"
         );
         assert!(rendered.contains("anyhow = \"1.0\""), "{rendered}");

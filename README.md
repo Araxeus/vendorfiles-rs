@@ -473,7 +473,7 @@ The workspace is three crates:
 
 | Crate | Role |
 | --- | --- |
-| `crates/vendorfiles-core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
+| `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
 | `crates/vendorfiles` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
 | `xtask` | `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
 

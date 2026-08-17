@@ -1,12 +1,12 @@
-//! `vendorfiles` — pull files from GitHub repositories and keep them up to date.
+//! `vendorfiles_core` — pull files from GitHub repositories and keep them up to date.
 //!
 //! This crate holds all behaviour; the `vendor` binary is a thin shell that owns the terminal
 //! contract (help text, exit codes, the `ERROR:` prefix). Nothing here exits the process or
 //! prints usage, which is what makes the operations testable in-process.
 //!
 //! ```no_run
-//! # async fn run() -> Result<(), vendorfiles::VendorError> {
-//! use vendorfiles::{GitHubClient, Session, SyncOptions, Workspace, auth};
+//! # async fn run() -> Result<(), vendorfiles_core::VendorError> {
+//! use vendorfiles_core::{GitHubClient, Session, SyncOptions, Workspace, auth};
 //!
 //! let workspace = Workspace::load(None).await?;
 //! let github = GitHubClient::new(auth::resolve_token())?;
