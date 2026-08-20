@@ -44,12 +44,6 @@ impl Session {
     }
 }
 
-/// Formats an optional version the way JavaScript interpolates `undefined`.
-#[must_use]
-pub fn display_version(version: Option<&str>) -> &str {
-    version.unwrap_or("undefined")
-}
-
 /// Result of resolving what a dependency's version *should* be.
 #[derive(Debug, Clone)]
 pub struct VersionDecision {

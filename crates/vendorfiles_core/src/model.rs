@@ -262,6 +262,30 @@ impl RawDependency {
         );
     }
 
+    /// Clears every field whose value the `default` block already supplies.
+    ///
+    /// Used before writing a newly installed dependency back to the config, so the entry
+    /// carries only what is actually specific to it rather than restating the defaults.
+    pub fn strip_defaults(&mut self, defaults: &DefaultOptions) {
+        macro_rules! clear_if_default {
+            ($($field:ident),+ $(,)?) => {$(
+                if self.$field.is_some() && self.$field == defaults.$field {
+                    self.$field = None;
+                }
+            )+};
+        }
+        clear_if_default!(
+            repository,
+            files,
+            version,
+            hash_version_file,
+            vendor_folder,
+            release_regex,
+            locked,
+            name,
+        );
+    }
+
     /// Reproduces `validateVendorDependency`, including its exact messages.
     ///
     /// # Errors
