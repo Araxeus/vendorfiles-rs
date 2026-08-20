@@ -77,6 +77,7 @@ impl ConfigFile {
 pub struct Workspace {
     pub config: VendorConfig,
     pub dependencies: IndexMap<String, RawDependency>,
+    pub defaults: DefaultOptions,
     pub file: ConfigFile,
 }
 
@@ -110,6 +111,7 @@ impl Workspace {
         Ok(Self {
             config,
             dependencies,
+            defaults,
             file: ConfigFile {
                 settings: ConfigFileSettings {
                     format,

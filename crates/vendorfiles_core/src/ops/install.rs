@@ -19,7 +19,7 @@ use crate::lockfile::{
     VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
-use crate::ops::{OpResult, Session, display_version};
+use crate::ops::{OpResult, Session};
 use crate::template::{is_release_path, replace_version, strip_release_prefix};
 use crate::ui;
 
@@ -174,12 +174,13 @@ impl Session {
         }
 
         if options.should_update {
-            ui::success(format!(
-                "Updated {} from {} to {}",
-                dependency.name,
-                display_version(old_version.as_deref()),
-                version
-            ));
+            match old_version.as_deref() {
+                Some(old) => ui::success(format!(
+                    "Updated {} from {old} to {version}",
+                    dependency.name
+                )),
+                None => ui::success(format!("Installed {} {version}", dependency.name)),
+            }
             return Ok(Some(version));
         }
 
@@ -203,7 +204,7 @@ impl Session {
                 .document
                 .set_dependency_version(&name, new_version);
         } else {
-            let entry = RawDependency {
+            let mut entry = RawDependency {
                 version: Some(new_version.to_owned()),
                 repository: Some(dependency.repository.clone()),
                 files: Some(dependency.files.clone()),
@@ -213,10 +214,19 @@ impl Session {
                 locked: dependency.locked.then_some(true),
                 name: None,
             };
+            // The resolved dependency has the `default` block folded into it. Writing those
+            // values back would restate the defaults in every entry, so drop them again —
+            // `load` will fold them in next time just the same.
+            let written = {
+                let mut written = entry.clone();
+                written.strip_defaults(&self.workspace.defaults);
+                written
+            };
             self.workspace
                 .file
                 .document
-                .upsert_dependency(&name, &entry)?;
+                .upsert_dependency(&name, &written)?;
+            entry.version = Some(new_version.to_owned());
             self.workspace.dependencies.insert(name, entry);
         }
         self.workspace.file.write().await

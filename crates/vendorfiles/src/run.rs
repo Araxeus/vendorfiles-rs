@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 use vendorfiles_core::error::VendorError;
-use vendorfiles_core::model::RawDependency;
+use vendorfiles_core::model::{DefaultOptions, RawDependency};
 use vendorfiles_core::template::{
     is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
 };
@@ -123,6 +123,23 @@ async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn merge_install_entry(
+    existing: RawDependency,
+    defaults: &DefaultOptions,
+    repository: String,
+    files: Option<Vec<vendorfiles_core::FileEntry>>,
+) -> RawDependency {
+    let mut entry = RawDependency {
+        // An entry already in the config keeps its own URL; rewriting a user's URL from a
+        // shorthand would be rude.
+        repository: existing.repository.clone().or(Some(repository)),
+        files,
+        ..existing
+    };
+    entry.apply_defaults(defaults);
+    entry
+}
+
 /// `vendor install <url/name> [version]`.
 async fn install(
     session: &mut Session,
@@ -185,13 +202,7 @@ async fn install(
         bail!(VendorError::MissingFilesOption);
     }
 
-    let entry = RawDependency {
-        // An entry already in the config keeps its own URL; the reference works entirely from
-        // the config entry here, and rewriting a user's URL from a shorthand would be rude.
-        repository: existing.repository.clone().or(Some(stored)),
-        files,
-        ..existing
-    };
+    let entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
     let dependency = entry.resolve(&name)?;
 
     session
@@ -205,4 +216,105 @@ async fn install(
         )
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_install_entry;
+    use vendorfiles_core::model::{DefaultOptions, RawDependency};
+
+    fn defaults(json: &str) -> DefaultOptions {
+        serde_json::from_str(json).expect("valid default block")
+    }
+
+    fn files(list: &[&str]) -> Vec<vendorfiles_core::FileEntry> {
+        list.iter()
+            .map(|f| vendorfiles_core::FileEntry::Simple((*f).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_dependency_the_config_never_listed_still_inherits_the_default_block() {
+        // The reported bug: the first `vendor add` ignored `default.vendorFolder`, so the file
+        // landed in a folder named after the dependency, and the second run - which read the
+        // entry back from the config with defaults applied - used a different folder.
+        let entry = merge_install_entry(
+            RawDependency::default(),
+            &defaults(r#"{"vendorFolder": "{vendorFolder}", "locked": false}"#),
+            "https://github.com/mvdan/sh".to_owned(),
+            Some(files(&["{release}/shfmt_v{version}_windows_amd64.exe"])),
+        );
+        assert_eq!(entry.vendor_folder.as_deref(), Some("{vendorFolder}"));
+        assert_eq!(entry.locked, Some(false));
+    }
+
+    #[test]
+    fn the_second_run_resolves_to_the_same_entry_as_the_first() {
+        let block = defaults(r#"{"vendorFolder": "{vendorFolder}"}"#);
+        let repository = "https://github.com/mvdan/sh".to_owned();
+        let requested = Some(files(&["{release}/shfmt_v{version}_windows_amd64.exe"]));
+
+        let first = merge_install_entry(
+            RawDependency::default(),
+            &block,
+            repository.clone(),
+            requested.clone(),
+        );
+        // What the first run wrote to the config, as `Workspace::load` would hand it back:
+        // only the keys specific to the dependency, with the defaults folded in again.
+        let mut from_config = RawDependency {
+            version: Some("v3.13.1".to_owned()),
+            repository: Some(repository.clone()),
+            files: requested.clone(),
+            ..RawDependency::default()
+        };
+        from_config.apply_defaults(&block);
+        let second = merge_install_entry(from_config, &block, repository, requested);
+
+        assert_eq!(first.vendor_folder, second.vendor_folder);
+        assert_eq!(first.files, second.files);
+        assert_eq!(first.repository, second.repository);
+    }
+
+    #[test]
+    fn an_explicit_value_beats_the_default_block() {
+        let entry = merge_install_entry(
+            RawDependency {
+                vendor_folder: Some("./somewhere-else".to_owned()),
+                ..RawDependency::default()
+            },
+            &defaults(r#"{"vendorFolder": "{vendorFolder}"}"#),
+            "https://github.com/a/b".to_owned(),
+            Some(files(&["LICENSE"])),
+        );
+        assert_eq!(entry.vendor_folder.as_deref(), Some("./somewhere-else"));
+    }
+
+    #[test]
+    fn a_configured_repository_url_is_not_rewritten_by_the_shorthand() {
+        let entry = merge_install_entry(
+            RawDependency {
+                repository: Some("https://github.com/mvdan/sh".to_owned()),
+                ..RawDependency::default()
+            },
+            &DefaultOptions::default(),
+            "https://www.github.com/mvdan/sh".to_owned(),
+            Some(files(&["LICENSE"])),
+        );
+        assert_eq!(
+            entry.repository.as_deref(),
+            Some("https://github.com/mvdan/sh")
+        );
+    }
+
+    #[test]
+    fn files_fall_back_to_the_default_block_when_none_are_given() {
+        let entry = merge_install_entry(
+            RawDependency::default(),
+            &defaults(r#"{"files": ["LICENSE"]}"#),
+            "https://github.com/a/b".to_owned(),
+            None,
+        );
+        assert_eq!(entry.files, Some(files(&["LICENSE"])));
+    }
 }
