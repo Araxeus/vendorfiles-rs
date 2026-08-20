@@ -219,6 +219,22 @@ fn is_falsy(value: &serde_json::Value) -> bool {
     }
 }
 
+/// Anchors a configured folder.
+///
+/// A relative folder hangs off the config file's directory, so a checked-in project keeps
+/// working wherever it is cloned. An absolute one names a destination outside the project and
+/// is taken at its word.
+fn anchor_folder(base: &Path, folder: &str) -> PathBuf {
+    let path = Path::new(folder);
+    // `has_root` rather than `is_absolute` so a leading separator counts on Windows too;
+    // `C:relative`, which has no root, stays relative on both.
+    if path.has_root() {
+        normalize(path)
+    } else {
+        join_normalized(base, &[folder])
+    }
+}
+
 /// The folder a dependency's files land in.
 ///
 /// A dependency's own `vendorFolder` (with `{vendorFolder}` expanded) is used verbatim;
@@ -232,13 +248,8 @@ pub fn dependency_folder(
 ) -> PathBuf {
     let base = config_path.parent().unwrap_or_else(|| Path::new("."));
     vendor_folder.map_or_else(
-        || join_normalized(base, &[config.vendor_folder.as_str(), name]),
-        |folder| {
-            join_normalized(
-                base,
-                &[replace_vendor_folder(folder, &config.vendor_folder).as_str()],
-            )
-        },
+        || join_normalized(&anchor_folder(base, &config.vendor_folder), &[name]),
+        |folder| anchor_folder(base, &replace_vendor_folder(folder, &config.vendor_folder)),
     )
 }
 
@@ -334,5 +345,78 @@ mod tests {
             dependency_folder(&config, config_path, Some("{vendorFolder}/sub"), "fzf"),
             Path::new("/proj").join("vendor").join("sub")
         );
+    }
+
+    #[test]
+    fn a_rooted_vendor_folder_is_used_as_given() {
+        // Joining this onto the config's directory would give /root/root/.local/bin.
+        let config = VendorConfig {
+            vendor_folder: "/root/.local/bin".to_owned(),
+        };
+        let config_path = Path::new("/root/vendor.yml");
+        let expected = Path::new("/root").join(".local").join("bin");
+
+        // Inherited through `default.vendorFolder: '{vendorFolder}'`...
+        assert_eq!(
+            dependency_folder(
+                &config,
+                config_path,
+                Some("{vendorFolder}"),
+                "ls-interactive"
+            ),
+            expected
+        );
+        // ...set directly on the dependency...
+        assert_eq!(
+            dependency_folder(
+                &config,
+                config_path,
+                Some("/root/.local/bin"),
+                "ls-interactive"
+            ),
+            expected
+        );
+        // ...and from the global folder, which still gets the dependency name appended.
+        assert_eq!(
+            dependency_folder(&config, config_path, None, "ls-interactive"),
+            expected.join("ls-interactive")
+        );
+    }
+
+    #[test]
+    fn a_rooted_folder_is_still_normalised() {
+        let config = VendorConfig {
+            vendor_folder: "/opt/./tools/../bin".to_owned(),
+        };
+        assert_eq!(
+            dependency_folder(
+                &config,
+                Path::new("/proj/vendor.yml"),
+                Some("{vendorFolder}"),
+                "x"
+            ),
+            Path::new("/opt").join("bin")
+        );
+    }
+
+    #[test]
+    fn a_relative_vendor_folder_still_follows_the_config_file() {
+        // The common case must not move: everything relative stays relative to the config.
+        let config = VendorConfig {
+            vendor_folder: "./vendor".to_owned(),
+        };
+        for folder in ["./vendor", "vendor", "../shared", "sub/dir"] {
+            let resolved = dependency_folder(
+                &config,
+                Path::new("/proj/nested/vendor.yml"),
+                Some(folder),
+                "x",
+            );
+            assert!(
+                resolved.starts_with("/proj"),
+                "{folder} should resolve under the config directory, got {}",
+                resolved.display()
+            );
+        }
     }
 }
