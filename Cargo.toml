@@ -75,6 +75,10 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 ] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std"] }
 secrecy = "0.10.3"
+# Swapping a running binary is platform work: on Windows the file is locked, so the old image has
+# to be moved aside and deleted after exit. `vendor` uses it when an install lands on top of
+# itself.
+self-replace = "1.5.0"
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }

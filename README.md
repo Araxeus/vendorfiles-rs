@@ -32,6 +32,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
   - [Locking Dependencies](#locking-dependencies)
   - [Default Options](#default-options)
 - [Commands](#commands)
+- [Keeping vendor updated](#keeping-vendor-updated)
 - [Authentication](#authentication)
 - [Lockfile](#lockfile)
 - [JSON Schema](#json-schema)
@@ -366,6 +367,49 @@ vendor login
 ```
 
 Every failure exits with code `1`; success exits `0`.
+
+## Keeping vendor updated
+
+`vendor` can vendor itself. Add it once:
+
+```bash
+vendor add vendorfiles
+```
+
+That writes an entry pointing at this repository's release asset for your platform, with
+`vendorFolder` set to the directory the running binary sits in:
+
+```json
+{
+    "vendorDependencies": {
+        "vendorfiles-rs": {
+            "version": "v2.0.4",
+            "repository": "https://github.com/Araxeus/vendorfiles-rs",
+            "files": [
+                {
+                    "{release}/vendor_v{version}_windows.zip": ["vendor.exe"]
+                }
+            ],
+            "vendorFolder": "C:\tools\bin"
+        }
+    }
+}
+```
+
+On Linux and macOS the asset is `vendor_v{version}_linux.tar.gz` or
+`vendor_v{version}_macos.tar.gz` and the member inside it is `vendor`. `vendor add vendorfiles-rs`
+and `vendor add vendor` write the same entry.
+
+From then on `vendor update` upgrades the tool along with everything else, and `vendor outdated`
+tells you when a release is waiting. Because the file being installed *is* the running binary, it
+cannot simply be written over — Windows keeps the image locked, and replacing it underneath a live
+process is unsafe everywhere. `vendor` notices that the destination is itself and swaps it in place
+instead: the new build is staged beside the old one, the old image is moved aside, and the
+operating system deletes it once the process exits. Clearing a previous install skips the running
+binary for the same reason.
+
+`vendor uninstall vendorfiles-rs` drops the entry and its lockfile but leaves the binary where it
+is — stopping tracking should not remove the tool you are running.
 
 ## Authentication
 

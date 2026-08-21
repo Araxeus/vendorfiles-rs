@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::archive;
 use crate::error::{Result, VendorError};
-use crate::fsx::{delete_file_and_empty_folders, join_normalized, stream_to_file};
+use crate::fsx::{self, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
     VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
@@ -308,9 +308,16 @@ async fn remove_previously_installed(
     lockfile_path: &Path,
 ) -> Result<()> {
     for file in files_from_lockfile(lockfile_path, name).await {
-        if join_normalized(folder, &[file.as_str()]).exists() {
-            delete_file_and_empty_folders(folder, &file).await?;
+        let path = join_normalized(folder, &[file.as_str()]);
+        if !path.exists() {
+            continue;
         }
+        // The running binary cannot be deleted while it runs — on Windows the attempt fails
+        // outright — and it does not need to be: the download that follows replaces it in place.
+        if fsx::is_running_executable(&path) {
+            continue;
+        }
+        delete_file_and_empty_folders(folder, &file).await?;
     }
     Ok(())
 }
@@ -468,6 +475,11 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
     };
 
     tokio::fs::metadata(source).await.map_err(&fail)?;
+    if fsx::is_running_executable(destination) {
+        // The archive member is a new copy of this very binary: hand the swap to `self-replace`
+        // rather than trying to move onto an image the operating system has open.
+        return fsx::replace_running_executable(source).await;
+    }
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(&fail)?;
     }

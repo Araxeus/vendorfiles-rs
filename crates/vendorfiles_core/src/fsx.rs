@@ -102,6 +102,72 @@ pub fn real_path(path: &Path) -> Result<PathBuf> {
         })
 }
 
+/// Whether `path` is the binary that is currently running.
+///
+/// Compared canonically, so `./vendor.exe`, a relative path and a symlink all recognise the same
+/// file. A path that does not exist yet cannot be the running binary, so anything that fails to
+/// resolve is simply `false`.
+#[must_use]
+pub fn is_running_executable(path: &Path) -> bool {
+    let Ok(current) = std::env::current_exe() else {
+        return false;
+    };
+    match (std::fs::canonicalize(path), std::fs::canonicalize(&current)) {
+        (Ok(candidate), Ok(current)) => candidate == current,
+        _ => false,
+    }
+}
+
+/// Replaces the running binary with the file at `staged`, consuming it.
+///
+/// A running executable cannot simply be overwritten — on Windows its image is locked for the
+/// lifetime of the process — so the swap is left to `self-replace`, which moves the old image
+/// aside and has the operating system delete it once this process exits.
+///
+/// # Errors
+///
+/// Returns [`VendorError::SaveFailed`] if the swap fails; the running binary is left intact.
+pub async fn replace_running_executable(staged: &Path) -> Result<()> {
+    let staged = staged.to_path_buf();
+    let display = staged.display().to_string();
+    tokio::task::spawn_blocking(move || {
+        // `self-replace` does not document what it does with permissions, so the staged file is
+        // given the mode of the binary it is about to become rather than whatever it inherited
+        // from the archive or the temporary directory.
+        copy_executable_mode(&staged)?;
+        let outcome = self_replace::self_replace(&staged);
+        // Its contract: the caller owns the staged file afterwards, success or not.
+        let _ = std::fs::remove_file(&staged);
+        outcome
+    })
+    .await
+    .map_err(|joined| VendorError::Http(joined.to_string()))?
+    .map_err(|source| VendorError::SaveFailed {
+        path: display,
+        source,
+    })
+}
+
+/// Gives `staged` the permissions of the running binary.
+#[cfg(unix)]
+fn copy_executable_mode(staged: &Path) -> std::result::Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let current = std::env::current_exe()?;
+    let mode = std::fs::metadata(&current)?.permissions().mode();
+    std::fs::set_permissions(staged, std::fs::Permissions::from_mode(mode))
+}
+
+/// Windows decides executability by extension, so there is nothing to copy.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "matches the unix signature, which can fail"
+)]
+const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io::Error> {
+    Ok(())
+}
+
 /// Deletes `relative_path` under `root`, then prunes the directories it leaves empty.
 ///
 /// Stops at `root` and at the first non-empty directory. Fails if the file is not there,
@@ -171,6 +237,32 @@ async fn write_stream(
     save_path: &Path,
     transfer: Option<&Transfer<'_>>,
 ) -> std::result::Result<(), std::io::Error> {
+    if is_running_executable(save_path) {
+        // Streaming straight onto the running binary would fail on Windows and corrupt the
+        // image everywhere else; stage it beside the target and let the swap be atomic.
+        let staged = staged_beside(save_path);
+        write_bytes(response, &staged, transfer).await?;
+        return replace_running_executable(&staged)
+            .await
+            .map_err(std::io::Error::other);
+    }
+    write_bytes(response, save_path, transfer).await
+}
+
+/// A temporary path next to `target`, so the swap never crosses a filesystem.
+fn staged_beside(target: &Path) -> PathBuf {
+    let directory = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .map_or_else(|| "vendor".into(), |name| name.to_string_lossy());
+    directory.join(format!(".{name}.vendorfiles-update"))
+}
+
+async fn write_bytes(
+    response: reqwest::Response,
+    save_path: &Path,
+    transfer: Option<&Transfer<'_>>,
+) -> std::result::Result<(), std::io::Error> {
     if let Some(parent) = save_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -189,8 +281,53 @@ async fn write_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::{join_normalized, normalize, simplify};
+    use super::{is_running_executable, join_normalized, normalize, simplify, staged_beside};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn the_running_binary_recognises_itself() {
+        let current = std::env::current_exe().expect("a test binary is running");
+        assert!(is_running_executable(&current));
+    }
+
+    #[test]
+    fn the_running_binary_is_recognised_through_a_relative_path() {
+        // Installing writes a joined path, not a canonical one, so the comparison has to
+        // resolve both sides.
+        let current = std::env::current_exe().unwrap();
+        let directory = current.parent().unwrap();
+        let indirect = directory.join(".").join(current.file_name().unwrap());
+        assert!(is_running_executable(&indirect));
+    }
+
+    #[test]
+    fn an_ordinary_file_is_not_the_running_binary() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert!(!is_running_executable(file.path()));
+    }
+
+    #[test]
+    fn a_path_that_does_not_exist_is_not_the_running_binary() {
+        // A first install has nothing at the destination yet, and must not be mistaken for a
+        // self-update.
+        assert!(!is_running_executable(Path::new("no/such/vendor.exe")));
+        assert!(!is_running_executable(Path::new("")));
+    }
+
+    #[test]
+    fn the_staging_path_sits_beside_its_target() {
+        let staged = staged_beside(Path::new("/tools/bin/vendor.exe"));
+        assert_eq!(staged.parent(), Some(Path::new("/tools/bin")));
+        assert_ne!(staged.file_name(), Some(std::ffi::OsStr::new("vendor.exe")));
+        // Beside it, so the swap is a rename within one filesystem rather than a copy across.
+        assert!(
+            staged
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("vendor.exe")
+        );
+    }
 
     #[test]
     fn normalize_resolves_dot_segments() {
