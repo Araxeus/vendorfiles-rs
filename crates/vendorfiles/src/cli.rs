@@ -82,6 +82,9 @@ pub enum Command {
         name: Option<Option<String>>,
         #[arg(short = 'f', long = "files", num_args = 1.., value_name = "files")]
         files: Option<Vec<String>>,
+        /// Re-check the program registry rather than trusting the cached copy.
+        #[arg(long = "refresh")]
+        refresh: bool,
     },
 
     /// Uninstall all/selected dependencies.

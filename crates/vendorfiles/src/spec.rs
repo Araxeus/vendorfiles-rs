@@ -181,6 +181,12 @@ pub const COMMANDS: &[CommandSpec] = &[
                 arity: Arity::Many,
                 display: "-f, --files <files...>",
             },
+            OptionSpec {
+                short: None,
+                long: "--refresh",
+                arity: Arity::None,
+                display: "--refresh",
+            },
         ],
         help: include_str!("help/install.txt"),
     },

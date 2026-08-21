@@ -11,6 +11,8 @@ use vendorfiles_core::{GitHubClient, InstallOptions, Session, SyncOptions, Works
 
 use crate::cli::{Cli, Command};
 use crate::known;
+use vendorfiles_core::registry;
+use vendorfiles_core::ui;
 
 /// Loads the workspace and runs the requested command.
 ///
@@ -85,8 +87,17 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             version,
             name,
             files,
+            refresh,
         } => {
-            install(&mut session, &source, version, name.flatten(), files).await?;
+            install(
+                &mut session,
+                &source,
+                version,
+                name.flatten(),
+                files,
+                refresh,
+            )
+            .await?;
         }
 
         Command::Uninstall { names } => {
@@ -161,6 +172,7 @@ async fn install(
     version: Option<String>,
     name: Option<String>,
     files: Option<Vec<String>>,
+    refresh: bool,
 ) -> Result<()> {
     // `lookup` is the URL the reference builds, warts and all — `owner/repo` becomes
     // `https://www.github.com/owner/repo`, and that exact string is what it compares against
@@ -174,8 +186,29 @@ async fn install(
         None
     };
 
+    // Then the hosted registry, which is what makes `vendor add fd` work without a repository or
+    // a `--files` list. A registry that cannot be reached is a miss, not a failure: the search
+    // below still works, and so does `vendor add owner/repo`.
+    let bare_name = files.is_none()
+        && known.is_none()
+        && !is_github_url(source)
+        && !is_owner_repo_shorthand(source);
+    let listed = if bare_name {
+        match registry::lookup(source, refresh).await {
+            Ok(entry) => entry,
+            Err(error) => {
+                ui::warning(error);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let (lookup, stored) = if let Some(known) = known.as_ref() {
         (known.repository.to_owned(), known.repository.to_owned())
+    } else if let Some(listed) = listed.as_ref() {
+        (listed.repository.clone(), listed.repository.clone())
     } else if is_github_url(source) {
         (source.to_owned(), source.to_owned())
     } else if is_owner_repo_shorthand(source) {
@@ -194,7 +227,12 @@ async fn install(
 
     let name = match name.filter(|n| !n.is_empty()) {
         Some(name) => name,
-        None => owner_and_name_from_repo_url(&lookup)?.name,
+        // A registry entry names itself, so `vendor add rg` keys the entry `rg` rather than
+        // `ripgrep`.
+        None => match listed.as_ref() {
+            Some(listed) => listed.name.clone(),
+            None => owner_and_name_from_repo_url(&lookup)?.name,
+        },
     };
 
     // Files may be inherited from an entry under this name, or from any entry pointing at the
@@ -220,11 +258,13 @@ async fn install(
                 .map(vendorfiles_core::FileEntry::Simple)
                 .collect(),
         ),
-        // An entry already in the config describes itself; otherwise a known name does.
+        // An entry already in the config describes itself; otherwise a known name or the
+        // registry does.
         None => existing
             .files
             .clone()
-            .or_else(|| known.as_ref().map(|known| known.files.clone())),
+            .or_else(|| known.as_ref().map(|known| known.files.clone()))
+            .or_else(|| listed.as_ref().map(|listed| listed.files.clone())),
     };
     if files.as_ref().is_none_or(Vec::is_empty) {
         bail!(VendorError::MissingFilesOption);

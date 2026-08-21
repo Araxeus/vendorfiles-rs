@@ -165,6 +165,24 @@ pub enum VendorError {
     #[error("Token is rate limited")]
     TokenRateLimited,
 
+    // ---- registry -----------------------------------------------------------------
+    #[error("Could not reach the program registry: {0}")]
+    RegistryUnreachable(String),
+
+    #[error("The program registry could not be read: {0}")]
+    RegistryUnreadable(String),
+
+    #[error(
+        "The program registry is version {found}, but this vendor understands {supported}. Update vendor to install by name."
+    )]
+    RegistryTooNew { found: u32, supported: u32 },
+
+    #[error("The registry entry for '{name}' is unusable: {reason}")]
+    RegistryInvalidEntry { name: String, reason: String },
+
+    #[error("'{name}' is in the registry but has no release for {host}")]
+    RegistryUnsupportedHost { name: String, host: String },
+
     #[error("Something went wrong, try again later")]
     AuthUnknownFailure,
 

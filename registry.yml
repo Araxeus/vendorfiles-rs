@@ -1,0 +1,89 @@
+# Programs `vendor add <name>` can install without being told a repository or its asset names.
+#
+# To add one, open a pull request against this file. CI parses it and resolves every entry for
+# every host, so a typo fails the build rather than reaching anyone.
+#
+# Test your entry before opening the PR:
+#
+#     VENDOR_REGISTRY=./registry.yml vendor add <name>
+#
+# Placeholders
+#   {release}  marks a release asset (config syntax, left as-is in the entry that gets written)
+#   {version}  the semver core of the tag: `v10.4.2` and `10.4.2` both give `10.4.2`
+#   {target}   the triple this host maps to under `targets`
+#   {ext}      `.zip` on Windows, `.tar.gz` elsewhere
+#   {exe}      `.exe` on Windows, empty elsewhere
+#
+# Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
+# linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
+#
+# An entry says *what* to download. It cannot say where files land — there is no `vendorFolder`
+# here, and unknown keys are refused.
+
+version: 1
+
+programs:
+  # Most Rust projects name assets by target triple and ship the binary inside a directory of
+  # the same name, which the compact form covers in a few lines.
+  fd:
+    aliases: [fdfind, fd-find]
+    repository: https://github.com/sharkdp/fd
+    asset: "{release}/fd-v{version}-{target}{ext}"
+    member: "fd-v{version}-{target}/fd{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # ripgrep tags releases without a leading `v`, so the asset carries {version} bare.
+  rg:
+    aliases: [ripgrep]
+    repository: https://github.com/BurntSushi/ripgrep
+    asset: "{release}/ripgrep-{version}-{target}{ext}"
+    member: "ripgrep-{version}-{target}/rg{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  bat:
+    repository: https://github.com/sharkdp/bat
+    asset: "{release}/bat-v{version}-{target}{ext}"
+    member: "bat-v{version}-{target}/bat{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # fzf names assets `os_arch` rather than by triple, and puts the binary at the archive root,
+  # so each host is spelled out.
+  fzf:
+    repository: https://github.com/junegunn/fzf
+    targets:
+      windows-x86_64:
+        asset: "{release}/fzf-{version}-windows_amd64.zip"
+        member: "fzf.exe"
+      windows-aarch64:
+        asset: "{release}/fzf-{version}-windows_arm64.zip"
+        member: "fzf.exe"
+      macos-x86_64:
+        asset: "{release}/fzf-{version}-darwin_amd64.tar.gz"
+        member: "fzf"
+      macos-aarch64:
+        asset: "{release}/fzf-{version}-darwin_arm64.tar.gz"
+        member: "fzf"
+      linux-x86_64:
+        asset: "{release}/fzf-{version}-linux_amd64.tar.gz"
+        member: "fzf"
+      linux-aarch64:
+        asset: "{release}/fzf-{version}-linux_arm64.tar.gz"
+        member: "fzf"

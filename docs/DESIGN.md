@@ -391,6 +391,13 @@ code and the complete resulting file tree (including binary payloads). Covered:
    overwrite anywhere; `remove_previously_installed` skips it for the same reason. The staged file
    is given the running binary's mode, since the crate does not document what it does with
    permissions.
-12. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+12. **Programs installable by name.** `registry.yml` at the repository root maps a name or alias to
+   a repository and a per-host release asset, fetched from `raw.githubusercontent.com` (no API rate
+   limit, and an `ETag` for cheap revalidation) and cached for a day, so the usual `add` makes no
+   request. Only `install` reads it; an unreachable registry warns and falls through to the search.
+   `{target}`/`{ext}`/`{exe}` are expanded from the *host key being resolved* rather than from
+   `cfg!`, which is what lets one machine validate every platform's entry in CI. Entries carry no
+   `vendorFolder` and refuse unknown keys, so remote data cannot decide where files land.
+13. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.
