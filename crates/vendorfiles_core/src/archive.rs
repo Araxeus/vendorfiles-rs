@@ -181,7 +181,7 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
             let bytes = std::fs::read(archive)?;
             let start = crx_payload_offset(&bytes)
                 .ok_or_else(|| VendorError::Http("unsupported CRX header".to_owned()))?;
-            zip_names(std::io::Cursor::new(bytes[start..].to_vec()))
+            zip_names(std::io::Cursor::new(&bytes[start..]))
         }
         Some(ArchiveKind::Tar) => tar_names(BufReader::new(file)),
         Some(ArchiveKind::Gzip) => {

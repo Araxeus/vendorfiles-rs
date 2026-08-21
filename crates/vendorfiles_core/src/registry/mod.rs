@@ -525,6 +525,42 @@ programs:
         println!("verified {checked} asset names against live releases");
     }
 
+    /// The host whose asset holds archive members, preferring the platform running the test.
+    ///
+    /// A host whose target is a bare binary has nothing to look inside — the asset *is* the file,
+    /// already checked by name — so keep looking rather than giving up on the entry, which may mix
+    /// bare binaries and archives across platforms. Returns the host, its asset, and the members
+    /// the entry claims are inside it.
+    fn member_bearing_host(
+        canonical: &str,
+        program: &super::schema::Program,
+        local_host: &str,
+        problems: &mut Vec<String>,
+    ) -> Option<(String, String, indexmap::IndexMap<String, String>)> {
+        use crate::model::FileTarget;
+
+        let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
+        hosts.sort_by_key(|host| *host != local_host);
+
+        for host in hosts {
+            let entry = match super::resolve::for_host(canonical, program, host) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {error}"));
+                    continue;
+                }
+            };
+            let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+                continue;
+            };
+            let (asset, target) = files.iter().next().expect("one asset");
+            if let FileTarget::ExtractMap(members) = target {
+                return Some((host.to_owned(), asset.clone(), members.clone()));
+            }
+        }
+        None
+    }
+
     /// One platform per entry, checked all the way into the archive.
     ///
     /// Verifying every host would mean downloading every asset for every platform — gigabytes. One
@@ -537,7 +573,6 @@ programs:
     #[tokio::test]
     #[ignore = "downloads release assets"]
     async fn the_shipped_registry_names_members_that_exist() {
-        use crate::model::FileTarget;
         use crate::template::{
             owner_and_name_from_repo_url, replace_version, strip_release_prefix,
         };
@@ -556,32 +591,9 @@ programs:
             if program.path.is_some() {
                 continue; // A repository file: no archive to look inside.
             }
-            // The runner's own platform first, so the common case is the one exercised; then
-            // whatever else the entry covers. A host whose target is a bare binary has no member
-            // to look inside — the asset *is* the file, already checked by name — so keep looking
-            // rather than giving up on the entry, which may mix bare binaries and archives.
-            let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
-            hosts.sort_by_key(|host| *host != local_host.as_str());
-
-            let mut archive_target = None;
-            for host in hosts {
-                let entry = match super::resolve::for_host(canonical, program, host) {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        problems.push(format!("{canonical} for {host}: {error}"));
-                        continue;
-                    }
-                };
-                let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
-                    continue;
-                };
-                let (asset, target) = files.iter().next().expect("one asset");
-                if let FileTarget::ExtractMap(members) = target {
-                    archive_target = Some((host.to_owned(), asset.clone(), members.clone()));
-                    break;
-                }
-            }
-            let Some((host, asset, wanted_members)) = archive_target else {
+            let Some((host, asset, wanted_members)) =
+                member_bearing_host(canonical, program, &local_host, &mut problems)
+            else {
                 continue; // Bare binaries on every platform: no archive to look inside.
             };
 
@@ -629,9 +641,17 @@ programs:
                 }
             };
 
+            // Compared the way installation resolves them, not by raw spelling: the install path
+            // looks a member up through `join_normalized`, so an archive that lists `./bin/tool`
+            // still yields `bin/tool` on disk. Matching that here keeps the gate from failing an
+            // entry that installs perfectly well.
+            let held_paths: Vec<_> = held
+                .iter()
+                .map(|held| crate::fsx::normalize(std::path::Path::new(held)))
+                .collect();
             for member in wanted_members.keys() {
                 let expected = replace_version(member, &tag);
-                if held.iter().any(|held| held == &expected) {
+                if held_paths.contains(&crate::fsx::normalize(std::path::Path::new(&expected))) {
                     checked += 1;
                 } else {
                     problems.push(format!(
