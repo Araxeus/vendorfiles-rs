@@ -192,8 +192,10 @@ programs:
 
     /// The same schema compiled as Draft 2020-12.
     ///
-    /// Building it is itself a test: a `$ref` that resolves to nothing, or a keyword the draft
-    /// does not define, fails here rather than silently doing nothing in an editor.
+    /// Building it catches a `$ref` that resolves to nothing and a known keyword given a value
+    /// it does not take. It does *not* catch a misspelled keyword: the draft says an
+    /// unrecognised one is an annotation, so `minumLength` compiles and quietly constrains
+    /// nothing. Only the cases below, which run documents through the schema, notice that.
     fn compiled_schema() -> jsonschema::Validator {
         jsonschema::draft202012::new(&published_schema())
             .expect("registry.schema.json compiles as Draft 2020-12")
@@ -328,9 +330,14 @@ nope: 1
         );
     }
 
-    /// A repository file takes no `targets`, so the `allOf` rule has to let it through — and the
-    /// shipped registry has no such entry to prove it with.
-    const PATH_FORM: &str = r"
+    /// Entries the schema has to let through, for the rules that are easier to overshoot than to
+    /// miss. The explicit form is absent because `registry.yml` covers it: `fzf` names an asset
+    /// per host.
+    const ACCEPTED: &[(&str, &str)] = &[
+        ("the compact form", COMPACT),
+        (
+            "a repository file, which takes no targets",
+            r"
 version: 1
 programs:
   starship-preset:
@@ -338,14 +345,27 @@ programs:
     path: docs/public/presets/toml/nerd-font-symbols.toml
     hashVersionFile: true
     as: starship.toml
-";
+",
+        ),
+        (
+            "a release entry saying outright that it is not tracked by commit",
+            r#"
+version: 1
+programs:
+  untracked:
+    repository: https://github.com/example/untracked
+    hashVersionFile: false
+    asset: "{release}/untracked-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+    ];
 
-    /// The compact form and the path form, from the fixtures above; the explicit form arrives
-    /// with `registry.yml`, where `fzf` names an asset per host.
     #[test]
-    fn the_compact_and_path_forms_satisfy_the_published_schema() {
+    fn the_published_schema_accepts_every_form_an_entry_can_take() {
         let validator = compiled_schema();
-        for (what, document) in [("the compact form", COMPACT), ("the path form", PATH_FORM)] {
+        for (what, document) in ACCEPTED {
             let value = as_json(document);
             assert!(
                 validator.is_valid(&value),
@@ -493,6 +513,32 @@ programs:
       linux-x86_64:
         asset: "{release}/mixed-linux.tar.gz"
       macos-aarch64: aarch64-apple-darwin
+"#,
+        ),
+        (
+            "a shared member with no shared asset to point into",
+            r#"
+version: 1
+programs:
+  memberful:
+    repository: https://github.com/example/memberful
+    member: inner/bin
+    targets:
+      linux-x86_64:
+        asset: "{release}/memberful-linux.tar.gz"
+"#,
+        ),
+        (
+            "a release entry tracked by commit, which has none",
+            r#"
+version: 1
+programs:
+  tracked:
+    repository: https://github.com/example/tracked
+    hashVersionFile: true
+    asset: "{release}/tracked-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
 "#,
         ),
         (

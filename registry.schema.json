@@ -46,7 +46,7 @@
           "minLength": 1
         },
         "hashVersionFile": {
-          "description": "Track a repository file by commit rather than by tag.",
+          "description": "Track a repository file by commit rather than by tag. Only `path` entries have a commit to track, so `true` needs one.",
           "type": "boolean"
         },
         "asset": {
@@ -89,12 +89,23 @@
         {
           "if": { "not": { "required": ["asset"] } },
           "then": {
+            "not": { "required": ["member"] },
             "properties": {
               "targets": {
-                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright.",
+                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright — and each names its own `member`, the shared one having no asset to point into.",
                 "additionalProperties": { "$ref": "#/$defs/explicit" }
               }
             }
+          }
+        },
+        {
+          "if": {
+            "required": ["hashVersionFile"],
+            "properties": { "hashVersionFile": { "const": true } }
+          },
+          "then": {
+            "description": "`true` tracks the first file's commit, which only a repository `path` has. A release asset would send the lookup after a path containing `{release}/`.",
+            "required": ["path"]
           }
         }
       ]
