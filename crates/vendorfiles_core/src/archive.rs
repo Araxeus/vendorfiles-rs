@@ -129,15 +129,26 @@ fn ungzip(archive: &Path, file: File, dest: &Path) -> Result<()> {
 
 /// An xz stream is a `.tar.xz` when it decompresses to a tar; otherwise it is a lone file.
 ///
-/// Decompressed whole rather than streamed: `lzma-rs` decodes into a writer, and an archive is
-/// already read into memory to be sniffed.
+/// `lzma-rs` decodes into a writer rather than offering a reader, so unlike the gzip path this
+/// cannot be a pure stream. It decodes to a **temporary file** instead of a buffer: compression
+/// ratios are unbounded, so a modest asset can hold a payload far larger than memory.
 fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
-    let mut decoded = Vec::new();
-    lzma_rs::xz_decompress(&mut BufReader::new(file), &mut decoded)
-        .map_err(|source| VendorError::Http(source.to_string()))?;
+    let mut decoded = tempfile::Builder::new()
+        .prefix("vendorfiles-xz-")
+        .tempfile()?;
+    {
+        let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
+        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
+            .map_err(|source| VendorError::Http(source.to_string()))?;
+        writer.flush()?;
+    }
 
-    if is_tar(&decoded) {
-        tar::Archive::new(std::io::Cursor::new(decoded)).unpack(dest)?;
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut decoded.reopen()?, &mut head)?;
+    head.truncate(read);
+
+    if is_tar(&head) {
+        tar::Archive::new(BufReader::new(decoded.reopen()?)).unpack(dest)?;
         return Ok(());
     }
 
@@ -146,7 +157,8 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
         |n| n.to_string_lossy().into_owned(),
     );
     let stem = name.strip_suffix(".xz").unwrap_or(name.as_str());
-    std::fs::write(dest.join(stem), decoded)?;
+    let mut out = File::create(dest.join(stem))?;
+    std::io::copy(&mut decoded.reopen()?, &mut out)?;
     Ok(())
 }
 

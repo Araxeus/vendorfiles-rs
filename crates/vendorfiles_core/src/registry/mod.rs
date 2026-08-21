@@ -132,7 +132,7 @@ async fn fetch(refresh: bool) -> Result<String> {
                         path: file.clone(),
                         source,
                     })?;
-            let _ = filetime_now(&file).await;
+            let _ = touch(&file);
             Ok(text)
         }
         Ok(Fetched {
@@ -221,11 +221,22 @@ async fn get(url: &str, etag: Option<&str>) -> Result<Fetched> {
 
 /// Writes the registry and its `ETag`, ignoring failures — a cache that cannot be written only
 /// costs the next run a request.
+///
+/// The registry lands via a sibling file and a rename. Writing in place truncates first, so a
+/// full disk or a killed process would leave a half-written file carrying a fresh timestamp, and
+/// nothing would look at it again for [`cache::TTL`]. The `ETag` needs no such care: a damaged
+/// one simply fails to match and costs one full download.
 async fn store(directory: &Path, file: &Path, tag: &Path, text: &str, etag: Option<&str>) {
     if tokio::fs::create_dir_all(directory).await.is_err() {
         return;
     }
-    let _ = tokio::fs::write(file, text).await;
+    let staging = file.with_extension("yml.writing");
+    if tokio::fs::write(&staging, text).await.is_err()
+        || tokio::fs::rename(&staging, file).await.is_err()
+    {
+        let _ = tokio::fs::remove_file(&staging).await;
+        return;
+    }
     match etag {
         Some(etag) => {
             let _ = tokio::fs::write(tag, etag).await;
@@ -236,20 +247,15 @@ async fn store(directory: &Path, file: &Path, tag: &Path, text: &str, etag: Opti
     }
 }
 
-/// Marks a file as touched now, by rewriting it in place.
-async fn filetime_now(file: &Path) -> Result<()> {
-    let text = tokio::fs::read_to_string(file)
-        .await
-        .map_err(|source| VendorError::ReadFile {
-            path: file.to_path_buf(),
-            source,
-        })?;
-    tokio::fs::write(file, text)
-        .await
-        .map_err(|source| VendorError::WriteFile {
-            path: file.to_path_buf(),
-            source,
-        })
+/// Marks the cache as current, without touching its contents.
+///
+/// Rewriting the file to move its timestamp would risk corrupting a copy that is known to be
+/// good, which is the one thing this is trying to avoid.
+fn touch(file: &Path) -> std::io::Result<()> {
+    std::fs::File::options()
+        .write(true)
+        .open(file)?
+        .set_modified(std::time::SystemTime::now())
 }
 
 #[cfg(test)]
@@ -282,6 +288,52 @@ programs:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
 "#;
+
+    #[tokio::test]
+    async fn storing_the_cache_leaves_no_half_written_file() {
+        // Written via a sibling and renamed, so an interrupted write cannot leave a corrupt copy
+        // wearing a fresh timestamp — which nothing would re-fetch for a day.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("registry.yml");
+        let tag = dir.path().join("registry.etag");
+
+        super::store(dir.path(), &file, &tag, "version: 1\n", Some("\"abc\"")).await;
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "version: 1\n");
+        assert_eq!(std::fs::read_to_string(&tag).unwrap(), "\"abc\"");
+
+        let leftovers: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
+            .filter(|name| name.contains("writing"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staging file left behind: {leftovers:?}"
+        );
+
+        // An absent `ETag` clears the old one rather than leaving a stale match behind.
+        super::store(dir.path(), &file, &tag, "version: 1\n", None).await;
+        assert!(!tag.exists());
+    }
+
+    #[test]
+    fn marking_the_cache_current_does_not_touch_its_contents() {
+        // The old implementation rewrote the file to move its timestamp, risking the very
+        // corruption it was trying to avoid.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("registry.yml");
+        std::fs::write(&file, "version: 1\nprograms: {}\n").unwrap();
+        let before = std::fs::metadata(&file).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        super::touch(&file).expect("touchable");
+
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "version: 1\nprograms: {}\n"
+        );
+        assert!(std::fs::metadata(&file).unwrap().modified().unwrap() >= before);
+    }
 
     #[test]
     fn a_name_resolves_to_itself() {
@@ -390,6 +442,86 @@ programs:
             }
         }
         assert!(checked > 0, "the registry should not be empty");
+    }
+
+    /// Every entry, checked against the release GitHub actually publishes.
+    ///
+    /// Ignored by default because it needs the network. The offline gate above proves an entry is
+    /// *well formed*; only this proves the asset it names still exists. Run it with
+    /// `cargo test -p vendorfiles_core --lib registry -- --ignored --nocapture`, which is what the
+    /// `registry` workflow does whenever `registry.yml` changes.
+    ///
+    /// Archive *members* are still unverified: checking those means downloading every asset for
+    /// every platform, which is gigabytes.
+    #[tokio::test]
+    #[ignore = "queries the GitHub API"]
+    async fn the_shipped_registry_names_assets_that_exist() {
+        use crate::model::FileTarget;
+        use crate::template::{
+            owner_and_name_from_repo_url, replace_version, strip_release_prefix,
+        };
+
+        let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
+        let github =
+            crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
+        let mut problems: Vec<String> = Vec::new();
+        let mut checked = 0_usize;
+
+        for name in registry.names() {
+            let (canonical, program) = registry.find(name).expect("just listed");
+            if program.path.is_some() {
+                continue; // A repository file, not a release.
+            }
+            let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
+            let release = match github
+                .latest_release(&repo, program.release_regex.as_deref())
+                .await
+            {
+                Ok(release) => release,
+                Err(error) => {
+                    problems.push(format!("{canonical}: no usable release ({error})"));
+                    continue;
+                }
+            };
+            let published: Vec<&str> = release.assets.iter().map(|a| a.name.as_str()).collect();
+
+            for host in program.targets.keys() {
+                let entry = match super::resolve::for_host(canonical, program, host) {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        problems.push(format!("{canonical} for {host}: {error}"));
+                        continue;
+                    }
+                };
+                let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+                    problems.push(format!("{canonical} for {host}: unexpected files shape"));
+                    continue;
+                };
+                let (asset, target) = files.iter().next().expect("one asset");
+                // The same substitution the install path performs, so this checks the real name.
+                let wanted = strip_release_prefix(&replace_version(asset, &release.tag_name));
+                if published.contains(&wanted.as_str()) {
+                    checked += 1;
+                } else {
+                    problems.push(format!(
+                        "{canonical} for {host}: '{wanted}' is not in {} — published: {}",
+                        release.tag_name,
+                        published.join(", ")
+                    ));
+                }
+                // A bare binary has no member to look inside, so nothing more to say about it.
+                let _ = matches!(target, FileTarget::Rename(_));
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "{} asset(s) verified, {} problem(s):\n  {}",
+            checked,
+            problems.len(),
+            problems.join("\n  ")
+        );
+        println!("verified {checked} asset names against live releases");
     }
 
     #[test]

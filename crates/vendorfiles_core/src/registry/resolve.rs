@@ -60,10 +60,11 @@ pub struct Entry {
 /// escape the vendor folder.
 pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
     if let Some(path) = program.path.as_ref() {
-        if !program.targets.is_empty() {
+        if !program.targets.is_empty() || program.asset.is_some() || program.member.is_some() {
             return Err(VendorError::RegistryInvalidEntry {
                 name: name.to_owned(),
-                reason: "'path' vendors a repository file, so it cannot also list 'targets'"
+                reason: "'path' vendors a repository file, so it cannot also define 'asset', \
+                         'member' or 'targets'"
                     .to_owned(),
             });
         }
@@ -411,6 +412,29 @@ programs:
             files.get("themes/powerlevel10k_rainbow.omp.json"),
             Some(&FileTarget::Rename("my-prompt.json".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_path_beside_any_release_field_is_refused() {
+        // The two describe different things, and silently ignoring one would be a trap. All three
+        // release fields count, not just `targets`.
+        for extra in [
+            "    asset: '{release}/thing.zip'",
+            "    member: 'thing.exe'",
+            "    targets:\n      windows-x86_64: x86_64-pc-windows-msvc",
+        ] {
+            let yaml = format!(
+                "version: 1\nprograms:\n  confused:\n    repository: https://github.com/e/c\n    path: some/file.txt\n{extra}\n"
+            );
+            let document = program(&yaml);
+            let error = for_host("confused", &document.programs["confused"], "windows-x86_64")
+                .expect_err("must be refused");
+            let message = error.to_string();
+            assert!(
+                message.contains("asset") && message.contains("targets"),
+                "for {extra:?}: {message}"
+            );
+        }
     }
 
     #[test]

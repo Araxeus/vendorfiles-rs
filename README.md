@@ -376,7 +376,7 @@ release assets are called:
 
 ```bash
 vendor add fd          # or fdfind, or fd-find
-vendor add ripgrep     # keys the entry `rg`
+vendor add rg          # keys the entry `ripgrep`, its canonical name
 ```
 
 That writes an ordinary entry — nothing registry-specific, so it keeps working whatever happens to
@@ -464,8 +464,12 @@ Test your entry before opening the PR:
 VENDOR_REGISTRY=./registry.yml vendor add <name>
 ```
 
-CI parses the file and resolves every entry for every host it claims, so a typo fails the build
-rather than reaching anyone.
+Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
+host it lists, and that anything with a `member` is a container the extractor can open. A change to
+`registry.yml` additionally queries GitHub to confirm the asset each entry names really exists — the
+same check runs weekly, since a project can rename its assets without anyone touching this
+repository. Archive *members* are not verified, because that would mean downloading every asset for
+every platform, so test yours with the command above.
 
 A few notes on how it behaves. The registry is only read by `install`/`add`, never by `sync` or
 `update`. It is cached for a day, so the usual install makes no request at all; after that the

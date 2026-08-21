@@ -1,7 +1,9 @@
 # Programs `vendor add <name>` can install without being told a repository or its asset names.
 #
-# To add one, open a pull request against this file. CI parses it and resolves every entry for
-# every host, so a typo fails the build rather than reaching anyone.
+# To add one, open a pull request against this file. Two checks run: every pull request proves the
+# file parses and that each entry resolves for every host it lists, and a change to this file also
+# queries GitHub to confirm the asset each entry names really exists. Archive *members* are not
+# verified — that would mean downloading every asset for every platform — so check yours by hand.
 #
 # Test your entry before opening the PR:
 #
@@ -38,10 +40,10 @@ programs:
     repository: https://github.com/sharkdp/fd
     asset: "{release}/fd-v{version}-{target}{ext}"
     member: "fd-v{version}-{target}/fd{exe}"
+    # No macos-x86_64: upstream builds only aarch64 for macOS.
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
       windows-aarch64: aarch64-pc-windows-msvc
-      macos-x86_64: x86_64-apple-darwin
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
@@ -57,7 +59,8 @@ programs:
       windows-aarch64: aarch64-pc-windows-msvc
       macos-x86_64: x86_64-apple-darwin
       macos-aarch64: aarch64-apple-darwin
-      linux-x86_64: x86_64-unknown-linux-gnu
+      # musl, not gnu: upstream publishes no gnu build for x86_64.
+      linux-x86_64: x86_64-unknown-linux-musl
       linux-aarch64: aarch64-unknown-linux-gnu
 
   bat:

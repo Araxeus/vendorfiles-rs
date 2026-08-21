@@ -260,8 +260,8 @@ async fn install(
 
     let name = match name.filter(|n| !n.is_empty()) {
         Some(name) => name,
-        // A registry entry names itself, so `vendor add rg` keys the entry `rg` rather than
-        // `ripgrep`.
+        // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` — the
+        // canonical name, not the alias that was typed.
         None => match listed.as_ref() {
             Some(listed) => listed.name.clone(),
             None => owner_and_name_from_repo_url(&lookup)?.name,

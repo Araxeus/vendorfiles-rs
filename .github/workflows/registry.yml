@@ -1,0 +1,42 @@
+name: Registry
+
+# Only when the registry itself changes: the check queries GitHub for every entry's latest
+# release, which is neither free nor deterministic enough to gate every pull request.
+on:
+  pull_request:
+    paths:
+      - registry.yml
+      - crates/vendorfiles_core/src/registry/**
+  push:
+    branches: [main]
+    paths:
+      - registry.yml
+      - crates/vendorfiles_core/src/registry/**
+  # A release renaming its assets breaks an entry without anyone touching this repository.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  assets-exist:
+    name: Entries name assets that exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Resolves every entry for every host it claims, then checks the asset it names is in the
+      # release GitHub actually publishes. Archive members stay unverified — confirming those
+      # means downloading every asset for every platform.
+      - name: Verify against live releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          cargo test -p vendorfiles_core --lib registry
+          -- --ignored --nocapture
