@@ -466,10 +466,14 @@ VENDOR_REGISTRY=./registry.yml vendor add <name>
 
 Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
 host it lists, and that anything with a `member` is a container the extractor can open. A change to
-`registry.yml` additionally queries GitHub to confirm the asset each entry names really exists — the
-same check runs weekly, since a project can rename its assets without anyone touching this
-repository. Archive *members* are not verified, because that would mean downloading every asset for
-every platform, so test yours with the command above.
+`registry.yml` additionally queries GitHub: the asset each entry names must exist for every host it
+claims, and the `member` inside it is downloaded and checked on one platform. The same checks run
+weekly, since a project can rename its assets without anyone touching this repository.
+
+Members are verified on one platform rather than all of them — every platform would mean
+downloading every asset — so an entry whose layout differs *between* platforms still deserves a
+manual look. `microsoft/edit` and `sinelaw/fresh` both nest their binary on one platform and not
+another.
 
 A few notes on how it behaves. The registry is only read by `install`/`add`, never by `sync` or
 `update`. It is cached for a day, so the usual install makes no request at all; after that the

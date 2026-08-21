@@ -451,8 +451,9 @@ programs:
     /// `cargo test -p vendorfiles_core --lib registry -- --ignored --nocapture`, which is what the
     /// `registry` workflow does whenever `registry.yml` changes.
     ///
-    /// Archive *members* are still unverified: checking those means downloading every asset for
-    /// every platform, which is gigabytes.
+    /// This checks asset *names* only, for every host: reading inside each one would mean
+    /// downloading every asset for every platform, which is gigabytes. Members are checked by
+    /// [`the_shipped_registry_names_members_that_exist`] instead, on one platform per entry.
     #[tokio::test]
     #[ignore = "queries the GitHub API"]
     async fn the_shipped_registry_names_assets_that_exist() {
@@ -522,6 +523,158 @@ programs:
             problems.join("\n  ")
         );
         println!("verified {checked} asset names against live releases");
+    }
+
+    /// The host whose asset holds archive members, preferring the platform running the test.
+    ///
+    /// A host whose target is a bare binary has nothing to look inside — the asset *is* the file,
+    /// already checked by name — so keep looking rather than giving up on the entry, which may mix
+    /// bare binaries and archives across platforms. Returns the host, its asset, and the members
+    /// the entry claims are inside it.
+    fn member_bearing_host(
+        canonical: &str,
+        program: &super::schema::Program,
+        local_host: &str,
+        problems: &mut Vec<String>,
+    ) -> Option<(String, String, indexmap::IndexMap<String, String>)> {
+        use crate::model::FileTarget;
+
+        let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
+        hosts.sort_by_key(|host| *host != local_host);
+
+        for host in hosts {
+            let entry = match super::resolve::for_host(canonical, program, host) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {error}"));
+                    continue;
+                }
+            };
+            let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+                continue;
+            };
+            let (asset, target) = files.iter().next().expect("one asset");
+            if let FileTarget::ExtractMap(members) = target {
+                return Some((host.to_owned(), asset.clone(), members.clone()));
+            }
+        }
+        None
+    }
+
+    /// One platform per entry, checked all the way into the archive.
+    ///
+    /// Verifying every host would mean downloading every asset for every platform — gigabytes. One
+    /// is enough to catch the mistake that actually happens: a `member` path that does not match
+    /// how the archive is laid out. Both `microsoft/edit` and `sinelaw/fresh` nest their binary on
+    /// one platform and not another, and each was found by hand.
+    ///
+    /// Ignored by default; the `registry` workflow runs it when `registry.yml` changes and weekly
+    /// thereafter.
+    #[tokio::test]
+    #[ignore = "downloads release assets"]
+    async fn the_shipped_registry_names_members_that_exist() {
+        use crate::template::{
+            owner_and_name_from_repo_url, replace_version, strip_release_prefix,
+        };
+
+        let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
+        let github =
+            crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
+        let mut problems: Vec<String> = Vec::new();
+        let mut checked = 0_usize;
+        // Whatever machine is running this, not a fixed platform: the point is to exercise the
+        // layout this host would really install.
+        let local_host = super::resolve::host();
+
+        for name in registry.names() {
+            let (canonical, program) = registry.find(name).expect("just listed");
+            if program.path.is_some() {
+                continue; // A repository file: no archive to look inside.
+            }
+            let Some((host, asset, wanted_members)) =
+                member_bearing_host(canonical, program, &local_host, &mut problems)
+            else {
+                continue; // Bare binaries on every platform: no archive to look inside.
+            };
+
+            let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
+            let release = match github
+                .latest_release(&repo, program.release_regex.as_deref())
+                .await
+            {
+                Ok(release) => release,
+                Err(error) => {
+                    problems.push(format!("{canonical}: no usable release ({error})"));
+                    continue;
+                }
+            };
+            let tag = release.tag_name.clone();
+            let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
+
+            let response = match github
+                .download_release_asset(&repo, &asset_name, &tag, program.release_regex.as_deref())
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {asset_name}: {error}"));
+                    continue;
+                }
+            };
+            // Saved under the asset's own name, as the install path does: a lone `.gz` or `.xz`
+            // extracts to its name minus the suffix, so a random temporary name would list the
+            // wrong member.
+            let temporary = tempfile::Builder::new()
+                .prefix("vendorfiles-check-")
+                .tempdir()
+                .expect("a temporary directory");
+            let downloaded = temporary.path().join(&asset_name);
+            if let Err(error) = crate::fsx::stream_to_file(response, &downloaded, true, None).await
+            {
+                problems.push(format!("{canonical} for {host}: {error}"));
+                continue;
+            }
+            let held = match crate::archive::members(&downloaded) {
+                Ok(held) => held,
+                Err(error) => {
+                    problems.push(format!(
+                        "{canonical} for {host}: unreadable archive: {error}"
+                    ));
+                    continue;
+                }
+            };
+
+            // Resolved the way installation resolves it — `join_normalized` under the directory
+            // the archive was unpacked into — rather than compared as raw spellings. That is what
+            // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
+            // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
+            // is enough: both sides go through the same one.
+            let root = std::path::Path::new("extracted");
+            let held_paths: Vec<_> = held
+                .iter()
+                .map(|held| crate::fsx::join_normalized(root, &[held]))
+                .collect();
+            for member in wanted_members.keys() {
+                let expected = replace_version(member, &tag);
+                if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
+                    checked += 1;
+                } else {
+                    problems.push(format!(
+                        "{canonical} for {host}: '{expected}' is not in {asset_name} — holds: {}",
+                        held.join(", ")
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "{} member(s) verified, {} problem(s):\n  {}",
+            checked,
+            problems.len(),
+            problems.join("\n  ")
+        );
+        println!("verified {checked} archive member(s) on one platform each");
     }
 
     #[test]

@@ -400,8 +400,8 @@ code and the complete resulting file tree (including binary payloads). Covered:
    either a release asset (extracted, or taken as-is when it names no `member`) or a repository
    `path`; `releaseRegex` picks the tag train. Entries carry no `vendorFolder` and refuse unknown
    keys, so remote data cannot decide where files land. Two gates: every pull request checks the
-   file parses and resolves, and the `registry` workflow checks the named assets exist against live
-   releases — the offline half cannot know that.
+   file parses and resolves, and the `registry` workflow checks the named assets exist and that one
+   platform's `member` is really inside its archive — neither of which the offline half can know.
 13. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.
