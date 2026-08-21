@@ -598,12 +598,15 @@ programs:
             };
 
             let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
-            let Ok(release) = github
+            let release = match github
                 .latest_release(&repo, program.release_regex.as_deref())
                 .await
-            else {
-                problems.push(format!("{canonical}: no usable release"));
-                continue;
+            {
+                Ok(release) => release,
+                Err(error) => {
+                    problems.push(format!("{canonical}: no usable release ({error})"));
+                    continue;
+                }
             };
             let tag = release.tag_name.clone();
             let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
@@ -641,17 +644,19 @@ programs:
                 }
             };
 
-            // Compared the way installation resolves them, not by raw spelling: the install path
-            // looks a member up through `join_normalized`, so an archive that lists `./bin/tool`
-            // still yields `bin/tool` on disk. Matching that here keeps the gate from failing an
-            // entry that installs perfectly well.
+            // Resolved the way installation resolves it — `join_normalized` under the directory
+            // the archive was unpacked into — rather than compared as raw spellings. That is what
+            // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
+            // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
+            // is enough: both sides go through the same one.
+            let root = std::path::Path::new("extracted");
             let held_paths: Vec<_> = held
                 .iter()
-                .map(|held| crate::fsx::normalize(std::path::Path::new(held)))
+                .map(|held| crate::fsx::join_normalized(root, &[held]))
                 .collect();
             for member in wanted_members.keys() {
                 let expected = replace_version(member, &tag);
-                if held_paths.contains(&crate::fsx::normalize(std::path::Path::new(&expected))) {
+                if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
                     checked += 1;
                 } else {
                     problems.push(format!(

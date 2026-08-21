@@ -160,10 +160,15 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The paths an archive contains, without writing any of them out.
+/// The *file* paths an archive contains, without writing any of them out.
 ///
 /// Listing rather than extracting: checking that an archive holds a named file should not cost the
 /// disk space of everything else in it.
+///
+/// Directory entries are left out. A member is something installation *moves into place*, and
+/// [`crate::ops`] copies it when a rename cannot cross filesystems — which fails on a directory.
+/// Listing `tool/bin/` would let a `member` of `tool/bin` look present when installing it could
+/// not work.
 ///
 /// # Errors
 ///
@@ -228,13 +233,23 @@ fn decompresses_to_a_tar(reader: &mut impl Read) -> Result<bool> {
 
 fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
     let archive = zip::ZipArchive::new(reader).map_err(|e| VendorError::Http(e.to_string()))?;
-    Ok(archive.file_names().map(str::to_owned).collect())
+    Ok(archive
+        .file_names()
+        // What `ZipFile::is_dir` itself tests, without paying to parse every local header: a ZIP
+        // marks a directory by the trailing separator on its name.
+        .filter(|name| !name.ends_with(['/', '\\']))
+        .map(str::to_owned)
+        .collect())
 }
 
 fn tar_names(reader: impl Read) -> Result<Vec<String>> {
     let mut names = Vec::new();
     for entry in tar::Archive::new(reader).entries()? {
         let entry = entry?;
+        // Tar says so in the header's type flag rather than in the name.
+        if entry.header().entry_type().is_dir() {
+            continue;
+        }
         names.push(entry.path()?.to_string_lossy().into_owned());
     }
     Ok(names)
@@ -486,6 +501,51 @@ mod tests {
 
         // Nothing was written out: only the two containers are in the directory.
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn directory_entries_are_left_out_of_the_listing() {
+        // A `member` naming a directory cannot install — the move falls back to a file copy when
+        // rename cannot cross filesystems — so listing one would let a wrong `member` look right.
+        let dir = tempfile::tempdir().unwrap();
+
+        let zipped = dir.path().join("with-dirs.zip");
+        {
+            let file = std::fs::File::create(&zipped).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            writer
+                .add_directory::<_, ()>("tool/bin", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer
+                .start_file::<_, ()>("tool/bin/tool", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"hi").unwrap();
+            writer.finish().unwrap();
+        }
+        assert_eq!(super::members(&zipped).unwrap(), ["tool/bin/tool"]);
+
+        let tarred = dir.path().join("with-dirs.tar");
+        {
+            let file = std::fs::File::create(&tarred).unwrap();
+            let mut builder = tar::Builder::new(file);
+            let mut directory = tar::Header::new_gnu();
+            directory.set_entry_type(tar::EntryType::Directory);
+            directory.set_size(0);
+            directory.set_mode(0o755);
+            directory.set_cksum();
+            builder
+                .append_data(&mut directory, "tool/bin", std::io::empty())
+                .unwrap();
+            let mut header = tar::Header::new_gnu();
+            header.set_size(2);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "tool/bin/tool", &b"hi"[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        assert_eq!(super::members(&tarred).unwrap(), ["tool/bin/tool"]);
     }
 
     #[test]
