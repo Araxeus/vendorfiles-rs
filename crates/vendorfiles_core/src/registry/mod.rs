@@ -451,8 +451,9 @@ programs:
     /// `cargo test -p vendorfiles_core --lib registry -- --ignored --nocapture`, which is what the
     /// `registry` workflow does whenever `registry.yml` changes.
     ///
-    /// Archive *members* are still unverified: checking those means downloading every asset for
-    /// every platform, which is gigabytes.
+    /// This checks asset *names* only, for every host: reading inside each one would mean
+    /// downloading every asset for every platform, which is gigabytes. Members are checked by
+    /// [`the_shipped_registry_names_members_that_exist`] instead, on one platform per entry.
     #[tokio::test]
     #[ignore = "queries the GitHub API"]
     async fn the_shipped_registry_names_assets_that_exist() {
@@ -546,6 +547,9 @@ programs:
             crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
         let mut problems: Vec<String> = Vec::new();
         let mut checked = 0_usize;
+        // Whatever machine is running this, not a fixed platform: the point is to exercise the
+        // layout this host would really install.
+        let local_host = super::resolve::host();
 
         for name in registry.names() {
             let (canonical, program) = registry.find(name).expect("just listed");
@@ -557,7 +561,7 @@ programs:
             // to look inside — the asset *is* the file, already checked by name — so keep looking
             // rather than giving up on the entry, which may mix bare binaries and archives.
             let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
-            hosts.sort_by_key(|host| *host != "linux-x86_64");
+            hosts.sort_by_key(|host| *host != local_host.as_str());
 
             let mut archive_target = None;
             for host in hosts {
