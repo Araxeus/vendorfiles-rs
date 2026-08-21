@@ -472,6 +472,30 @@ programs:
 ",
         ),
         (
+            "a triple with no shared asset to substitute it into",
+            r"
+version: 1
+programs:
+  patternless:
+    repository: https://github.com/example/patternless
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "one triple among targets that otherwise name their assets outright",
+            r#"
+version: 1
+programs:
+  mixed:
+    repository: https://github.com/example/mixed
+    targets:
+      linux-x86_64:
+        asset: "{release}/mixed-linux.tar.gz"
+      macos-aarch64: aarch64-apple-darwin
+"#,
+        ),
+        (
             "a format version this build does not support",
             r"
 version: 2
