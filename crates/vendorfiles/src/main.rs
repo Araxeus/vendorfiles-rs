@@ -21,6 +21,26 @@ use crate::help::Intercept;
 /// Exit code used for every failure, matching the reference CLI.
 const FAILURE: u8 = 1;
 
+/// Exit code for a run the user interrupted: the shell convention of 128 plus SIGINT.
+const INTERRUPTED: u8 = 130;
+
+/// Gives the terminal back when the user interrupts a run.
+///
+/// A signal runs no destructor, so without this an interrupted `sync` leaves the cursor hidden
+/// for the rest of the session — the display hides it on every frame. Listening rather than
+/// masking: the process still stops, it just stops tidily.
+fn restore_terminal_on_interrupt() {
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return; // No handler to be had; the default behaviour still stops the process.
+        }
+        vendorfiles_core::progress::restore_terminal();
+        // A second press falls through to the operating system's own handling, so an impatient
+        // user is never stuck waiting on the tidy-up.
+        std::process::exit(i32::from(INTERRUPTED));
+    });
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,6 +70,8 @@ async fn main() -> ExitCode {
             return ExitCode::from(FAILURE);
         }
     };
+
+    restore_terminal_on_interrupt();
 
     match run::dispatch(parsed).await {
         Ok(()) => ExitCode::SUCCESS,

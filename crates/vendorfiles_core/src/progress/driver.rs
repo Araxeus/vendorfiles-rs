@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::cursor::{MoveTo, Show};
+use ratatui::crossterm::cursor::{MoveTo, MoveToColumn, Show};
 use ratatui::crossterm::execute;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
@@ -205,6 +205,16 @@ fn close(terminal: &mut Term) {
     // `draw` hides the cursor, so leaving without showing it again would cost the user their
     // prompt cursor for the rest of the session.
     let _ = execute!(out, Show);
+    let _ = out.flush();
+}
+
+/// Shows the cursor, whatever state the display was left in.
+///
+/// `Terminal::draw` hides it on every frame, so anything that ends a run without going through
+/// [`close`] has to put it back.
+pub fn show_cursor() {
+    let mut out = io::stdout();
+    let _ = execute!(out, MoveToColumn(0), Show);
     let _ = out.flush();
 }
 
