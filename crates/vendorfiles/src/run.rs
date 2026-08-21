@@ -186,18 +186,24 @@ impl Inherited {
 
     /// What to warn about, or `None` when nothing came from the neighbour.
     fn warning(self, neighbour: &str, name: &str, repository: &str) -> Option<String> {
-        let borrowed = match (self.files, self.version) {
-            (true, true) => "its files and version",
-            (true, false) => "its files",
-            (false, true) => "its version",
+        let (borrowed, advice) = match (self.files, self.version) {
+            // `--files` replaces the files and only the files. Saying it describes the new entry
+            // "separately" would promise more than it delivers, since the version — the half that
+            // can swallow the config write — comes from the neighbour whatever the command says.
+            (true, true) => (
+                "its files and version",
+                format!(
+                    " Pass --files to give '{name}' its own files; the version comes from \
+                     '{neighbour}' either way."
+                ),
+            ),
+            (true, false) => (
+                "its files",
+                format!(" Pass --files to describe '{name}' separately."),
+            ),
+            // Nothing to pass: this is the half no argument overrides.
+            (false, true) => ("its version", String::new()),
             (false, false) => return None,
-        };
-        // `--files` is the only thing that stops any of this, and only the files half of it, so
-        // it is the only advice worth giving.
-        let advice = if self.files {
-            format!(" Pass --files to describe '{name}' separately.")
-        } else {
-            String::new()
         };
         Some(format!(
             "'{neighbour}' already vendors {repository}, so '{name}' inherits {borrowed}.{advice}"
@@ -582,8 +588,11 @@ mod tests {
         assert_eq!(
             said,
             "'first' already vendors https://github.com/a/b, so 'second' inherits its files and \
-             version. Pass --files to describe 'second' separately."
+             version. Pass --files to give 'second' its own files; the version comes from 'first' \
+             either way."
         );
+        // The advice must not promise that `--files` separates the whole entry.
+        assert!(!said.contains("separately"), "{said}");
     }
 
     #[test]
