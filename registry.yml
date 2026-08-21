@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=./registry.schema.json
+#
 # Programs `vendor add <name>` can install without being told a repository or its asset names.
 #
 # To add one, open a pull request against this file. Every pull request proves the file parses and
