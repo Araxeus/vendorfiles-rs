@@ -32,7 +32,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         vendorfiles_core::ui::set_pr_mode(true);
     }
 
-    let config_location = cli.config.flatten();
+    let config_location = cli.config;
     let workspace = Workspace::load(config_location.as_deref()).await?;
     let github = GitHubClient::new(auth::resolve_token_async().await)?;
     // `--plain` asks for the output a pipe would get: no region, just the lines.

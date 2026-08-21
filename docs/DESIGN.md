@@ -376,6 +376,13 @@ code and the complete resulting file tree (including binary payloads). Covered:
    reference spent on `update`'s only option. The two help screens differ from the captured
    reference by exactly those two lines; `tests/fixtures/help` keeps the reference text and the
    test applies the delta, so both stay checkable.
-10. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+10. **Root options are global**, so `-c`/`--config` and `-p`/`--plain` are accepted on either side
+   of the subcommand; Commander only reads them before it. `CommandSpec::option_for` falls back to
+   `ROOT_OPTIONS` for this reason — without it the operand scanner counts a root option's value as a
+   positional and misreports the count in `too many arguments`. `-c` also **requires** its value,
+   where the reference declares `[file/folder path]`: an optional value would let `-c` claim the
+   next word after a command that takes names, and naming the option is only ever a request for a
+   specific config. Help says `<file/folder path>` accordingly.
+11. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.

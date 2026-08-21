@@ -57,16 +57,22 @@ fn fixture(name: &str) -> String {
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
-        "root" => reference.replace(
-            "  -v, --version",
-            &format!(
-                "{}\n  -v, --version",
-                format_args!(
-                    "{:<46}{}",
-                    "  -p, --plain", "Print plain lines instead of a live display"
-                )
+        // The config value is required here, so it is `<…>` rather than the reference's `[…]`.
+        "root" => reference
+            .replace(
+                "  -c, --config [file/folder path]",
+                "  -c, --config <file/folder path>",
+            )
+            .replace(
+                "  -v, --version",
+                &format!(
+                    "{}\n  -v, --version",
+                    format_args!(
+                        "{:<46}{}",
+                        "  -p, --plain", "Print plain lines instead of a live display"
+                    )
+                ),
             ),
-        ),
         "update" => reference.replace("  -p|--pr     ", &format!("{:<14}", "  --pr")),
         _ => reference,
     }
@@ -153,6 +159,14 @@ fn argument_errors_match_the_reference() {
             "error: option '-f, --files <files...>' argument missing\n",
         ),
         (
+            vec!["sync", "-c"],
+            "error: option '-c, --config <file/folder path>' argument missing\n",
+        ),
+        (
+            vec!["uninstall", "-c"],
+            "error: option '-c, --config <file/folder path>' argument missing\n",
+        ),
+        (
             vec!["sync", "extra"],
             "error: too many arguments for 'sync'. Expected 0 arguments but got 1.\n",
         ),
@@ -215,9 +229,17 @@ fn the_config_option_accepts_a_folder_or_a_file() {
         .into_owned();
 
     for location in [folder, file] {
-        let out = vendor(elsewhere.path(), &["-c", &location, "sync"]);
-        assert_eq!(stderr(&out), "", "stderr for -c {location}");
-        assert_eq!(code(&out), 0, "exit code for -c {location}");
+        // Global, so either side of the subcommand, long or short.
+        for args in [
+            vec!["-c", &location, "sync"],
+            vec!["sync", "-c", &location],
+            vec!["sync", "--config", &location],
+            vec!["outdated", "-c", &location],
+        ] {
+            let out = vendor(elsewhere.path(), &args);
+            assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
+            assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+        }
     }
 }
 

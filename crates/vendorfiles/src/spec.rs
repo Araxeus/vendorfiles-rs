@@ -46,8 +46,12 @@ impl CommandSpec {
         self.name == token || self.aliases.contains(&token)
     }
 
+    /// The option `token` names, whether it belongs to this command or to the root.
+    ///
+    /// Root options are global, so `vendor sync -c path` is legal; without the fallback the
+    /// scanner would not know `-c` consumes `path` and would count it as an operand.
     fn option_for(&self, token: &str) -> Option<&OptionSpec> {
-        self.options.iter().find(|option| {
+        self.options.iter().chain(ROOT_OPTIONS).find(|option| {
             option.long == token
                 || option
                     .short
@@ -104,8 +108,10 @@ pub fn is_option_like(token: &str) -> bool {
 const CONFIG_OPTION: OptionSpec = OptionSpec {
     short: Some('c'),
     long: "--config",
+    // Its value is required, so it always consumes the next token; `Optional` is what the
+    // scanner needs — it consumes one when present, and a missing one is clap's to reject.
     arity: Arity::Optional,
-    display: "-c, --config [file/folder path]",
+    display: "-c, --config <file/folder path>",
 };
 
 const PLAIN_OPTION: OptionSpec = OptionSpec {
@@ -245,6 +251,13 @@ mod tests {
         assert_eq!(install.count_operands(&args(&["--name=Foo", "React"])), 1);
 
         let sync = find("sync").unwrap();
+        // A root option is global, so its value is not an operand wherever it appears.
+        assert_eq!(sync.count_operands(&args(&["-c", "some/path"])), 0);
+        assert_eq!(sync.count_operands(&args(&["-c", "some/path", "extra"])), 1);
+        assert_eq!(
+            install.count_operands(&args(&["React", "v1", "--config", "p"])),
+            2
+        );
         assert_eq!(sync.count_operands(&args(&["-f"])), 0);
         assert_eq!(sync.count_operands(&args(&["-f", "extra"])), 1);
     }
@@ -269,9 +282,10 @@ mod tests {
             option_display(find("install"), "files"),
             Some("-f, --files <files...>")
         );
+        // `<…>`, not the reference's `[…]`: the value is required here.
         assert_eq!(
             option_display(None, "config"),
-            Some("-c, --config [file/folder path]")
+            Some("-c, --config <file/folder path>")
         );
     }
 }

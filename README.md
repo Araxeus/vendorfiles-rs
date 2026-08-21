@@ -316,7 +316,7 @@ vendorDependencies:
 Usage: vendor command [options]
 
 Options:
-  -c, --config [file/folder path]             Config file path / Folder containing the config file
+  -c, --config <file/folder path>             Config file path / Folder containing the config file
   -p, --plain                                 Print plain lines instead of a live display
   -v, --version                               output the current version
   -h, --help                                  display help for command
@@ -331,7 +331,11 @@ Commands:
   help [command]                              display help for command
 ```
 
-The config location can also come from `VENDOR_CONFIG`; `-c` wins if both are set.
+Both root options are global, so they read naturally on either side of the subcommand:
+`vendor -c ./conf.json sync` and `vendor sync -c ./conf.json` are the same command. `-c` requires
+its value — naming the option is only ever a request for a specific config — so it can never claim
+a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
+are set.
 
 `-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead —
 the same output a redirected stdout gets. It works on either side of the subcommand

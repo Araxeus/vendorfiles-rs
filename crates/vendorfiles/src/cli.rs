@@ -21,8 +21,18 @@ use crate::spec;
 )]
 pub struct Cli {
     /// Config file path, or a folder containing the config file.
-    #[arg(short = 'c', long = "config", num_args = 0..=1, value_name = "file/folder path")]
-    pub config: Option<Option<String>>,
+    ///
+    /// The value is required, unlike the reference's `[file/folder path]`: naming the option is
+    /// only ever a request for a specific config, and an optional value would let `-c` swallow
+    /// the next word after a command that takes names.
+    #[arg(
+        short = 'c',
+        long = "config",
+        num_args = 1,
+        value_name = "file/folder path",
+        global = true
+    )]
+    pub config: Option<String>,
 
     /// Print plain lines instead of animating a live display.
     ///
