@@ -17,6 +17,8 @@ pub enum ArchiveKind {
     Crx,
     /// Gzip: a `.tar.gz` if the decompressed stream is a tar, otherwise a single file.
     Gzip,
+    /// Xz: likewise a `.tar.xz`, or a single compressed file.
+    Xz,
     Tar,
 }
 
@@ -34,6 +36,9 @@ pub fn sniff(header: &[u8]) -> Option<ArchiveKind> {
     }
     if header.starts_with(&[0x1f, 0x8b]) {
         return Some(ArchiveKind::Gzip);
+    }
+    if header.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]) {
+        return Some(ArchiveKind::Xz);
     }
     if is_tar(header) {
         return Some(ArchiveKind::Tar);
@@ -68,6 +73,7 @@ pub fn extract(archive: &Path, dest: &Path) -> Result<()> {
         Some(ArchiveKind::Crx) => unzip_crx(archive, dest),
         Some(ArchiveKind::Tar) => untar(file, dest),
         Some(ArchiveKind::Gzip) => ungzip(archive, file, dest),
+        Some(ArchiveKind::Xz) => unxz(archive, file, dest),
     }
 }
 
@@ -118,6 +124,41 @@ fn ungzip(archive: &Path, file: File, dest: &Path) -> Result<()> {
     let mut out = File::create(dest.join(stem))?;
     out.write_all(&head)?;
     std::io::copy(&mut decoder, &mut out)?;
+    Ok(())
+}
+
+/// An xz stream is a `.tar.xz` when it decompresses to a tar; otherwise it is a lone file.
+///
+/// `lzma-rs` decodes into a writer rather than offering a reader, so unlike the gzip path this
+/// cannot be a pure stream. It decodes to a **temporary file** instead of a buffer: compression
+/// ratios are unbounded, so a modest asset can hold a payload far larger than memory.
+fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
+    let mut decoded = tempfile::Builder::new()
+        .prefix("vendorfiles-xz-")
+        .tempfile()?;
+    {
+        let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
+        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
+            .map_err(|source| VendorError::Http(source.to_string()))?;
+        writer.flush()?;
+    }
+
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut decoded.reopen()?, &mut head)?;
+    head.truncate(read);
+
+    if is_tar(&head) {
+        tar::Archive::new(BufReader::new(decoded.reopen()?)).unpack(dest)?;
+        return Ok(());
+    }
+
+    let name = archive.file_name().map_or_else(
+        || "archive".to_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let stem = name.strip_suffix(".xz").unwrap_or(name.as_str());
+    let mut out = File::create(dest.join(stem))?;
+    std::io::copy(&mut decoded.reopen()?, &mut out)?;
     Ok(())
 }
 
@@ -222,6 +263,50 @@ mod tests {
         let out = dir.path().join("out");
         extract(&archive_path, &out).unwrap();
         assert_eq!(std::fs::read_to_string(out.join("fzf")).unwrap(), "hi");
+    }
+
+    #[test]
+    fn tar_xz_archives_round_trip_through_extract() {
+        // `sinelaw/fresh` and others publish `.tar.xz`, which used to be unopenable.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("a.tar.xz");
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(2);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "fresh", &b"hi"[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        std::fs::write(&archive_path, &compressed).unwrap();
+
+        // Sniffed from its magic bytes, like every other container.
+        assert_eq!(sniff(&compressed), Some(ArchiveKind::Xz));
+        let out = dir.path().join("out");
+        extract(&archive_path, &out).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("fresh")).unwrap(), "hi");
+    }
+
+    #[test]
+    fn plain_xz_becomes_a_single_file_named_without_the_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("notes.txt.xz");
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(b"plain content"), &mut compressed).unwrap();
+        std::fs::write(&archive_path, compressed).unwrap();
+
+        let out = dir.path().join("out");
+        extract(&archive_path, &out).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join("notes.txt")).unwrap(),
+            "plain content"
+        );
     }
 
     #[test]

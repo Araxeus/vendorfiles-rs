@@ -11,6 +11,8 @@ use vendorfiles_core::{GitHubClient, InstallOptions, Session, SyncOptions, Works
 
 use crate::cli::{Cli, Command};
 use crate::known;
+use vendorfiles_core::registry;
+use vendorfiles_core::ui;
 
 /// Loads the workspace and runs the requested command.
 ///
@@ -85,8 +87,17 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             version,
             name,
             files,
+            refresh,
         } => {
-            install(&mut session, &source, version, name.flatten(), files).await?;
+            install(
+                &mut session,
+                &source,
+                version,
+                name.flatten(),
+                files,
+                refresh,
+            )
+            .await?;
         }
 
         Command::Uninstall { names } => {
@@ -154,28 +165,59 @@ fn merge_install_entry(
     entry
 }
 
-/// `vendor install <url/name> [version]`.
-async fn install(
-    session: &mut Session,
+/// What a `source` argument turned out to name.
+struct Source {
+    /// The URL the reference builds, warts and all — `owner/repo` becomes
+    /// `https://www.github.com/owner/repo`, and that exact string is what config entries are
+    /// compared against.
+    lookup: String,
+    /// The same repository without the `www.`, the form every documented example uses and the
+    /// form the search path returns.
+    stored: String,
+    /// A name this tool knows describes itself.
+    known: Option<known::Known>,
+    /// A name the hosted registry describes.
+    listed: Option<registry::Entry>,
+}
+
+/// Works out which repository `source` means, and what is already known about it.
+async fn resolve_source(
+    session: &Session,
     source: &str,
-    version: Option<String>,
-    name: Option<String>,
-    files: Option<Vec<String>>,
-) -> Result<()> {
-    // `lookup` is the URL the reference builds, warts and all — `owner/repo` becomes
-    // `https://www.github.com/owner/repo`, and that exact string is what it compares against
-    // config entries below. `stored` is the same repository without the `www.`, which is the
-    // form every documented example uses and the form the search path already returns.
-    // A name this tool knows describes itself, so neither a search nor `--files` is needed.
-    // Anything explicit the user passed still wins.
-    let known = if files.is_none() {
+    files_given: bool,
+    refresh: bool,
+) -> Result<Source> {
+    // A name this tool knows needs neither a search nor `--files`. Anything explicit the user
+    // passed still wins.
+    let known = if files_given {
+        None
+    } else {
         known::find(source)
+    };
+
+    // Then the hosted registry, which is what makes `vendor add fd` work without a repository or
+    // a `--files` list. A registry that cannot be reached is a miss, not a failure: the search
+    // still works, and so does `vendor add owner/repo`.
+    let bare_name = !files_given
+        && known.is_none()
+        && !is_github_url(source)
+        && !is_owner_repo_shorthand(source);
+    let listed = if bare_name {
+        match registry::lookup(source, refresh).await {
+            Ok(entry) => entry,
+            Err(error) => {
+                ui::warning(error);
+                None
+            }
+        }
     } else {
         None
     };
 
     let (lookup, stored) = if let Some(known) = known.as_ref() {
         (known.repository.to_owned(), known.repository.to_owned())
+    } else if let Some(listed) = listed.as_ref() {
+        (listed.repository.clone(), listed.repository.clone())
     } else if is_github_url(source) {
         (source.to_owned(), source.to_owned())
     } else if is_owner_repo_shorthand(source) {
@@ -188,13 +230,42 @@ async fn install(
         (found.clone(), found)
     };
 
+    Ok(Source {
+        lookup,
+        stored,
+        known,
+        listed,
+    })
+}
+
+/// `vendor install <url/name> [version]`.
+async fn install(
+    session: &mut Session,
+    source: &str,
+    version: Option<String>,
+    name: Option<String>,
+    files: Option<Vec<String>>,
+    refresh: bool,
+) -> Result<()> {
+    let Source {
+        lookup,
+        stored,
+        known,
+        listed,
+    } = resolve_source(session, source, files.is_some(), refresh).await?;
+
     if !is_github_url(&lookup) {
         bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
     }
 
     let name = match name.filter(|n| !n.is_empty()) {
         Some(name) => name,
-        None => owner_and_name_from_repo_url(&lookup)?.name,
+        // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` — the
+        // canonical name, not the alias that was typed.
+        None => match listed.as_ref() {
+            Some(listed) => listed.name.clone(),
+            None => owner_and_name_from_repo_url(&lookup)?.name,
+        },
     };
 
     // Files may be inherited from an entry under this name, or from any entry pointing at the
@@ -220,11 +291,13 @@ async fn install(
                 .map(vendorfiles_core::FileEntry::Simple)
                 .collect(),
         ),
-        // An entry already in the config describes itself; otherwise a known name does.
+        // An entry already in the config describes itself; otherwise a known name or the
+        // registry does.
         None => existing
             .files
             .clone()
-            .or_else(|| known.as_ref().map(|known| known.files.clone())),
+            .or_else(|| known.as_ref().map(|known| known.files.clone()))
+            .or_else(|| listed.as_ref().map(|listed| listed.files.clone())),
     };
     if files.as_ref().is_none_or(Vec::is_empty) {
         bail!(VendorError::MissingFilesOption);
@@ -236,6 +309,15 @@ async fn install(
         && let Some(known) = known.as_ref()
     {
         entry.vendor_folder = known.folder.clone();
+    }
+    // What a registry entry knows about the repository that the config does not yet.
+    if let Some(listed) = listed.as_ref() {
+        if entry.release_regex.is_none() {
+            entry.release_regex = listed.release_regex.clone();
+        }
+        if entry.hash_version_file.is_none() && listed.hash_version_file == Some(true) {
+            entry.hash_version_file = Some(vendorfiles_core::model::HashVersionFile::Flag(true));
+        }
     }
     let dependency = entry.resolve(&name)?;
 

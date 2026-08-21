@@ -32,6 +32,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
   - [Locking Dependencies](#locking-dependencies)
   - [Default Options](#default-options)
 - [Commands](#commands)
+- [Installing by name](#installing-by-name)
 - [Keeping vendor updated](#keeping-vendor-updated)
 - [Authentication](#authentication)
 - [Lockfile](#lockfile)
@@ -238,8 +239,8 @@ of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 }
 ```
 
-The container format is detected from the file's magic bytes, not its name: zip, tar, gzip,
-tar.gz/tgz, and the zip-based `.crx`/`.xpi` extension packages.
+The container format is detected from the file's magic bytes, not its name: zip, tar, gzip, xz,
+tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
 
 ### Filtering Releases
 
@@ -367,6 +368,115 @@ vendor login
 ```
 
 Every failure exits with code `1`; success exits `0`.
+
+## Installing by name
+
+Some programs are known by name, so you do not have to look up the repository or work out what its
+release assets are called:
+
+```bash
+vendor add fd          # or fdfind, or fd-find
+vendor add rg          # keys the entry `ripgrep`, its canonical name
+```
+
+That writes an ordinary entry — nothing registry-specific, so it keeps working whatever happens to
+the registry later:
+
+```json
+{
+    "vendorDependencies": {
+        "fd": {
+            "version": "v10.4.2",
+            "repository": "https://github.com/sharkdp/fd",
+            "files": [
+                {
+                    "{release}/fd-v{version}-x86_64-pc-windows-msvc.zip": {
+                        "fd-v{version}-x86_64-pc-windows-msvc/fd.exe": "fd.exe"
+                    }
+                }
+            ]
+        }
+    }
+}
+```
+
+The asset picked is the one for your platform, and `{version}` stays symbolic so `vendor update`
+keeps working afterwards.
+
+### Adding a program to the registry
+
+The list lives in [`registry.yml`](./registry.yml) at the root of this repository. Open a pull
+request adding an entry and, once merged, `vendor add <name>` works for everyone — no new release
+needed. Most projects need a few lines:
+
+```yaml
+  fd:
+    aliases: [fdfind, fd-find]
+    repository: https://github.com/sharkdp/fd
+    asset: "{release}/fd-v{version}-{target}{ext}"
+    member: "fd-v{version}-{target}/fd{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+```
+
+`{target}` is the triple your host maps to, `{ext}` is `.zip` on Windows and `.tar.gz` elsewhere,
+and `{exe}` is `.exe` on Windows. Projects that name assets some other way spell each host out
+instead, with its own `asset` and `member`.
+
+Projects that publish a bare binary rather than an archive leave `member` out entirely, and use
+`as` when the asset's name is not the command you would type:
+
+```yaml
+  ox:
+    repository: https://github.com/curlpipe/ox
+    targets:
+      windows-x86_64:
+        asset: "{release}/ox.exe"
+      macos-x86_64:
+        asset: "{release}/ox-macos"
+        as: "ox"
+```
+
+Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
+and a file from the repository is vendored with `path` instead of an asset:
+
+```yaml
+  bitwarden-secrets-cli:
+    aliases: [bws]
+    repository: https://github.com/bitwarden/sdk
+    releaseRegex: '^bws-v\d+\.\d+\.\d+$'
+    asset: "{release}/bws-{target}-{version}.zip"
+    member: "bws{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+
+  some-theme:
+    repository: https://github.com/example/themes
+    path: themes/example.json
+    hashVersionFile: true      # track the file by commit; no `targets` needed
+```
+
+Test your entry before opening the PR:
+
+```bash
+VENDOR_REGISTRY=./registry.yml vendor add <name>
+```
+
+Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
+host it lists, and that anything with a `member` is a container the extractor can open. A change to
+`registry.yml` additionally queries GitHub to confirm the asset each entry names really exists — the
+same check runs weekly, since a project can rename its assets without anyone touching this
+repository. Archive *members* are not verified, because that would mean downloading every asset for
+every platform, so test yours with the command above.
+
+A few notes on how it behaves. The registry is only read by `install`/`add`, never by `sync` or
+`update`. It is cached for a day, so the usual install makes no request at all; after that the
+check is conditional, and `--refresh` forces it. If it cannot be reached, `vendor` says so and
+carries on with its normal search, so being offline costs you nothing but the shorthand. And an
+entry can only say *what* to fetch — there is no `vendorFolder` in the format, and unknown keys are
+refused, so a registry can never redirect writes on your machine.
 
 ## Keeping vendor updated
 

@@ -29,6 +29,7 @@ pub mod lockfile;
 pub mod model;
 pub mod ops;
 pub mod progress;
+pub mod registry;
 pub mod template;
 pub mod ui;
 

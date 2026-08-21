@@ -74,6 +74,22 @@ fn expected_help(name: &str) -> String {
                 ),
             ),
         "update" => reference.replace("  -p|--pr     ", &format!("{:<14}", "  --pr")),
+        // `--refresh` is ours, and the summary mentions the registry the reference has no idea
+        // about.
+        "install" => reference
+            .replace(
+                "  -h, --help              display help for command",
+                &format!(
+                    "{:<24}{}
+  -h, --help              display help for command",
+                    "  --refresh", "Re-check the program registry"
+                ),
+            )
+            .replace(
+                "Files have to be provided with -f or --files <files...>",
+                "A name in the program registry needs no files; otherwise provide them with -f or
+--files <files...>",
+            ),
         _ => reference,
     }
 }

@@ -1,0 +1,289 @@
+# Programs `vendor add <name>` can install without being told a repository or its asset names.
+#
+# To add one, open a pull request against this file. Two checks run: every pull request proves the
+# file parses and that each entry resolves for every host it lists, and a change to this file also
+# queries GitHub to confirm the asset each entry names really exists. Archive *members* are not
+# verified — that would mean downloading every asset for every platform — so check yours by hand.
+#
+# Test your entry before opening the PR:
+#
+#     VENDOR_REGISTRY=./registry.yml vendor add <name>
+#
+# Placeholders
+#   {release}  marks a release asset (config syntax, left as-is in the entry that gets written)
+#   {version}  the semver core of the tag: `v10.4.2` and `10.4.2` both give `10.4.2`
+#   {target}   the triple this host maps to under `targets`
+#   {ext}      `.zip` on Windows, `.tar.gz` elsewhere
+#   {exe}      `.exe` on Windows, empty elsewhere
+#
+# Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
+# linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
+#
+# `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
+# `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
+# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, crx or xpi.
+#
+# `releaseRegex` narrows which tags count, for repositories that publish several trains of
+# releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`
+# to track it by commit; it takes no `targets`, being the same everywhere.
+#
+# An entry says *what* to download. It cannot say where files land — there is no `vendorFolder`
+# here, and unknown keys are refused.
+
+version: 1
+
+programs:
+  # Most Rust projects name assets by target triple and ship the binary inside a directory of
+  # the same name, which the compact form covers in a few lines.
+  fd:
+    aliases: [fdfind, fd-find]
+    repository: https://github.com/sharkdp/fd
+    asset: "{release}/fd-v{version}-{target}{ext}"
+    member: "fd-v{version}-{target}/fd{exe}"
+    # No macos-x86_64: upstream builds only aarch64 for macOS.
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # ripgrep tags releases without a leading `v`, so the asset carries {version} bare.
+  ripgrep:
+    aliases: [rg]
+    repository: https://github.com/BurntSushi/ripgrep
+    asset: "{release}/ripgrep-{version}-{target}{ext}"
+    member: "ripgrep-{version}-{target}/rg{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      # musl, not gnu: upstream publishes no gnu build for x86_64.
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  bat:
+    repository: https://github.com/sharkdp/bat
+    asset: "{release}/bat-v{version}-{target}{ext}"
+    member: "bat-v{version}-{target}/bat{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # fzf names assets `os_arch` rather than by triple, and puts the binary at the archive root,
+  # so each host is spelled out.
+  fzf:
+    repository: https://github.com/junegunn/fzf
+    targets:
+      windows-x86_64:
+        asset: "{release}/fzf-{version}-windows_amd64.zip"
+        member: "fzf.exe"
+      windows-aarch64:
+        asset: "{release}/fzf-{version}-windows_arm64.zip"
+        member: "fzf.exe"
+      macos-x86_64:
+        asset: "{release}/fzf-{version}-darwin_amd64.tar.gz"
+        member: "fzf"
+      macos-aarch64:
+        asset: "{release}/fzf-{version}-darwin_arm64.tar.gz"
+        member: "fzf"
+      linux-x86_64:
+        asset: "{release}/fzf-{version}-linux_amd64.tar.gz"
+        member: "fzf"
+      linux-aarch64:
+        asset: "{release}/fzf-{version}-linux_arm64.tar.gz"
+        member: "fzf"
+
+  yamlfmt:
+    repository: https://github.com/google/yamlfmt
+    # Ships .tar.gz on every platform, Windows included, so the extension is literal.
+    asset: "{release}/yamlfmt_{version}_{target}.tar.gz"
+    member: "yamlfmt{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  micro:
+    repository: https://github.com/zyedidia/micro
+    asset: "{release}/micro-{version}-{target}{ext}"
+    member: "micro-{version}/micro{exe}"
+    targets:
+      windows-x86_64: win64
+      windows-aarch64: win-arm64
+      macos-x86_64: osx
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux64
+      linux-aarch64: linux-arm64
+
+  surge:
+    repository: https://github.com/surge-downloader/surge
+    asset: "{release}/Surge_{version}_{target}{ext}"
+    member: "surge{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  ansi2txt:
+    aliases: [ansi2text]
+    repository: https://github.com/gabe565/ansi2txt
+    asset: "{release}/ansi2txt_{version}_{target}{ext}"
+    member: "ansi2txt{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  ls-interactive:
+    aliases: [lsi]
+    repository: https://github.com/Araxeus/ls-interactive
+    asset: "{release}/lsi_v{version}_{target}{ext}"
+    member: "ls-interactive{exe}"
+    # One asset per OS, so only the architecture upstream actually builds is listed.
+    targets:
+      windows-x86_64: windows
+      macos-x86_64: macos
+      linux-x86_64: linux
+
+  # `edit` nests its binary inside a directory on Windows but not on Unix, so each host is
+  # spelled out rather than sharing one `member`.
+  edit:
+    aliases: [msedit]
+    repository: https://github.com/microsoft/edit
+    targets:
+      windows-x86_64:
+        asset: "{release}/edit-{version}-x86_64-windows.zip"
+        member: "edit-{version}-x86_64-windows/edit.exe"
+      windows-aarch64:
+        asset: "{release}/edit-{version}-aarch64-windows.zip"
+        member: "edit-{version}-aarch64-windows/edit.exe"
+      macos-aarch64:
+        asset: "{release}/edit-{version}-aarch64-apple-darwin.tar.gz"
+        member: "edit"
+      linux-x86_64:
+        asset: "{release}/edit-{version}-x86_64-linux-gnu.tar.gz"
+        member: "edit"
+      linux-aarch64:
+        asset: "{release}/edit-{version}-aarch64-linux-gnu.tar.gz"
+        member: "edit"
+
+  # Bare binaries: no `member`, so the asset is saved as it stands. `as` gives it the name you
+  # would actually type.
+  shfmt:
+    repository: https://github.com/mvdan/sh
+    asset: "{release}/shfmt_v{version}_{target}{exe}"
+    as: "shfmt{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  yt-dlp:
+    repository: https://github.com/yt-dlp/yt-dlp
+    targets:
+      windows-x86_64:
+        asset: "{release}/yt-dlp.exe"
+      windows-aarch64:
+        asset: "{release}/yt-dlp_arm64.exe"
+        as: "yt-dlp.exe"
+      macos-x86_64:
+        asset: "{release}/yt-dlp_macos"
+        as: "yt-dlp"
+      macos-aarch64:
+        asset: "{release}/yt-dlp_macos"
+        as: "yt-dlp"
+      linux-x86_64:
+        asset: "{release}/yt-dlp_linux"
+        as: "yt-dlp"
+      linux-aarch64:
+        asset: "{release}/yt-dlp_linux_aarch64"
+        as: "yt-dlp"
+
+  ox:
+    repository: https://github.com/curlpipe/ox
+    targets:
+      windows-x86_64:
+        asset: "{release}/ox.exe"
+      macos-x86_64:
+        asset: "{release}/ox-macos"
+        as: "ox"
+      linux-x86_64:
+        asset: "{release}/ox"
+
+  # Windows only by nature: it forwards notifications from WSL to the Windows host.
+  wsl-notify-send:
+    repository: https://github.com/stuartleeks/wsl-notify-send
+    targets:
+      windows-x86_64:
+        asset: "{release}/wsl-notify-send_windows_amd64.zip"
+        member: "wsl-notify-send.exe"
+
+  # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` — so every host is
+  # spelled out.
+  fresh:
+    repository: https://github.com/sinelaw/fresh
+    targets:
+      windows-x86_64:
+        asset: "{release}/fresh-editor-x86_64-pc-windows-msvc.zip"
+        member: "fresh.exe"
+      windows-aarch64:
+        asset: "{release}/fresh-editor-aarch64-pc-windows-msvc.zip"
+        member: "fresh.exe"
+      macos-x86_64:
+        asset: "{release}/fresh-editor-x86_64-apple-darwin.tar.xz"
+        member: "fresh-editor-x86_64-apple-darwin/fresh"
+      macos-aarch64:
+        asset: "{release}/fresh-editor-aarch64-apple-darwin.tar.xz"
+        member: "fresh-editor-aarch64-apple-darwin/fresh"
+      linux-x86_64:
+        asset: "{release}/fresh-editor-x86_64-unknown-linux-gnu.tar.xz"
+        member: "fresh-editor-x86_64-unknown-linux-gnu/fresh"
+      linux-aarch64:
+        asset: "{release}/fresh-editor-aarch64-unknown-linux-gnu.tar.xz"
+        member: "fresh-editor-aarch64-unknown-linux-gnu/fresh"
+
+  flow:
+    repository: https://github.com/neurocyte/flow
+    # Its assets are named by the host key itself.
+    asset: "{release}/flow-v{version}-{target}{ext}"
+    member: "flow{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      windows-aarch64: windows-aarch64
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # The SDK monorepo tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, and only the
+  # first has the binaries. Without `releaseRegex` the newest release has no assets at all.
+  bitwarden-secrets-cli:
+    aliases: [bws]
+    repository: https://github.com/bitwarden/sdk
+    releaseRegex: '^bws-v\d+\.\d+\.\d+$'
+    asset: "{release}/bws-{target}-{version}.zip"
+    member: "bws{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
