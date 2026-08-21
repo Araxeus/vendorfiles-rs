@@ -93,6 +93,14 @@ tokio = { version = "1.53.1", features = [
 toml_edit = { version = "0.25.13", features = ["serde"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 
+# The lint set CI enforces, declared here so a bare `cargo clippy` is the same gate as the
+# workflow. `priority = -1` keeps these groups below any individual lint, so a specific
+# `allow`/`expect` still wins over the group that raised it.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
 [profile.release]
 lto = "thin"
 strip = true

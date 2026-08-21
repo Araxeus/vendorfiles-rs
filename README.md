@@ -479,9 +479,17 @@ Measured against `vendorfiles@1.4.2` with 8 dependencies:
 ## Development
 
 ```bash
-cargo test --workspace
+cargo xtask ci   # every gate CI applies: check, rustfmt, clippy, tests
+```
+
+Or one at a time. The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` is the
+same gate as the workflow; the flags below are what CI spells out and are redundant locally.
+
+```bash
+cargo check --workspace --all-targets
 cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -W clippy::pedantic -W clippy::cargo -W clippy::nursery -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --workspace
 ```
 
 The workspace is three crates:
@@ -490,7 +498,7 @@ The workspace is three crates:
 | --- | --- |
 | `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
 | `crates/vendorfiles` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
-| `xtask` | `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
+| `xtask` | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
 
 See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
 parity contract.

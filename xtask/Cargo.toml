@@ -20,3 +20,6 @@ clap.workspace = true
 dialoguer.workspace = true
 semver.workspace = true
 toml_edit.workspace = true
+
+[lints]
+workspace = true

@@ -1,19 +1,17 @@
 //! `cargo xtask release` — the Rust counterpart of the reference project's `scripts/release.ts`.
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use dialoguer::{Select, theme::ColorfulTheme};
 use semver::Version;
 
+use crate::sh;
+
 /// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
 pub fn run() -> Result<()> {
-    let root = workspace_root()?;
+    let root = sh::workspace_root()?;
 
     let status = git(&root, &["status", "--porcelain"])?;
     if !status.trim().is_empty() {
@@ -53,22 +51,22 @@ pub fn run() -> Result<()> {
     println!("Updated Cargo.toml to version {new_version}");
 
     // Refresh Cargo.lock so the commit is self-consistent.
-    run_command(
+    sh::run(
         &root,
         "Refreshing Cargo.lock",
         "cargo",
         &["check", "--workspace", "--quiet"],
     )?;
-    run_command(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
+    sh::run(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
 
-    run_command(&root, "Staging changes", "git", &["add", "."])?;
-    run_command(
+    sh::run(&root, "Staging changes", "git", &["add", "."])?;
+    sh::run(
         &root,
         &format!("Committing v{new_version}"),
         "git",
         &["commit", "-m", &format!("v{new_version}")],
     )?;
-    run_command(
+    sh::run(
         &root,
         &format!("Tagging v{new_version}"),
         "git",
@@ -146,14 +144,6 @@ fn replace_keeping_decor(slot: &mut toml_edit::Item, value: &str) {
     }
 }
 
-fn workspace_root() -> Result<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .context("locating the workspace root")
-}
-
 fn git(root: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
@@ -168,84 +158,6 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Runs a command under a spinner, so a slow step (`cargo check`) never looks like a hang.
-///
-/// The child's output is captured rather than inherited — otherwise it would fight the spinner
-/// for the same lines — and is replayed only when the command fails.
-fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result<()> {
-    let spinner = Spinner::start(label);
-
-    let started = Instant::now();
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .output()
-        .with_context(|| format!("running {program} {}", args.join(" ")));
-    spinner.stop();
-
-    let output = output?;
-    if !output.status.success() {
-        bail!(
-            "{program} {} failed:\n{}{}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    println!("✔ {label} ({:.1?})", started.elapsed());
-    Ok(())
-}
-
-/// A one-line spinner on stderr, kept turning by its own thread.
-///
-/// Small enough to own outright: the release flow shows one at a time, on a line of its own, so
-/// none of the machinery the tool's own display needs applies here.
-struct Spinner {
-    running: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Spinner {
-    /// Starts spinning until [`Spinner::stop`].
-    fn start(label: &str) -> Self {
-        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let running = Arc::new(AtomicBool::new(true));
-        let flag = Arc::clone(&running);
-        let label = label.to_owned();
-        let started = Instant::now();
-        let thread = std::thread::spawn(move || {
-            let mut frame = 0_usize;
-            while flag.load(Ordering::Relaxed) {
-                let mut err = std::io::stderr();
-                let _ = write!(
-                    err,
-                    "\r\x1b[2K\x1b[36m{}\x1b[0m {label} {:.1?}",
-                    FRAMES[frame % FRAMES.len()],
-                    started.elapsed()
-                );
-                let _ = err.flush();
-                frame += 1;
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        });
-        Self {
-            running,
-            thread: Some(thread),
-        }
-    }
-
-    /// Stops the thread and wipes the line.
-    fn stop(mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-        let mut err = std::io::stderr();
-        let _ = write!(err, "\r\x1b[2K");
-        let _ = err.flush();
-    }
 }
 
 #[cfg(test)]
