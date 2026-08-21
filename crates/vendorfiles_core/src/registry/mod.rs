@@ -552,30 +552,33 @@ programs:
             if program.path.is_some() {
                 continue; // A repository file: no archive to look inside.
             }
-            // The runner's own platform where an entry covers it, so the common case is the one
-            // exercised; otherwise whatever the entry does cover.
-            let host = if program.targets.contains_key("linux-x86_64") {
-                "linux-x86_64".to_owned()
-            } else {
-                let Some(first) = program.targets.keys().next() else {
+            // The runner's own platform first, so the common case is the one exercised; then
+            // whatever else the entry covers. A host whose target is a bare binary has no member
+            // to look inside — the asset *is* the file, already checked by name — so keep looking
+            // rather than giving up on the entry, which may mix bare binaries and archives.
+            let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
+            hosts.sort_by_key(|host| *host != "linux-x86_64");
+
+            let mut archive_target = None;
+            for host in hosts {
+                let entry = match super::resolve::for_host(canonical, program, host) {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        problems.push(format!("{canonical} for {host}: {error}"));
+                        continue;
+                    }
+                };
+                let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
                     continue;
                 };
-                first.clone()
-            };
-
-            let entry = match super::resolve::for_host(canonical, program, &host) {
-                Ok(entry) => entry,
-                Err(error) => {
-                    problems.push(format!("{canonical} for {host}: {error}"));
-                    continue;
+                let (asset, target) = files.iter().next().expect("one asset");
+                if let FileTarget::ExtractMap(members) = target {
+                    archive_target = Some((host.to_owned(), asset.clone(), members.clone()));
+                    break;
                 }
-            };
-            let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
-                continue;
-            };
-            let (asset, target) = files.iter().next().expect("one asset");
-            let FileTarget::ExtractMap(wanted_members) = target else {
-                continue; // A bare binary: the asset *is* the file, already checked by name.
+            }
+            let Some((host, asset, wanted_members)) = archive_target else {
+                continue; // Bare binaries on every platform: no archive to look inside.
             };
 
             let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
@@ -587,7 +590,7 @@ programs:
                 continue;
             };
             let tag = release.tag_name.clone();
-            let asset_name = strip_release_prefix(&replace_version(asset, &tag));
+            let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
 
             let response = match github
                 .download_release_asset(&repo, &asset_name, &tag, program.release_regex.as_deref())
@@ -599,17 +602,20 @@ programs:
                     continue;
                 }
             };
+            // Saved under the asset's own name, as the install path does: a lone `.gz` or `.xz`
+            // extracts to its name minus the suffix, so a random temporary name would list the
+            // wrong member.
             let temporary = tempfile::Builder::new()
                 .prefix("vendorfiles-check-")
-                .tempfile()
-                .expect("a temporary file");
-            if let Err(error) =
-                crate::fsx::stream_to_file(response, temporary.path(), true, None).await
+                .tempdir()
+                .expect("a temporary directory");
+            let downloaded = temporary.path().join(&asset_name);
+            if let Err(error) = crate::fsx::stream_to_file(response, &downloaded, true, None).await
             {
                 problems.push(format!("{canonical} for {host}: {error}"));
                 continue;
             }
-            let held = match crate::archive::members(temporary.path()) {
+            let held = match crate::archive::members(&downloaded) {
                 Ok(held) => held,
                 Err(error) => {
                     problems.push(format!(

@@ -88,6 +88,18 @@ fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> 
     Ok(filled)
 }
 
+/// The name a lone compressed file extracts to: its own, minus the compression suffix.
+///
+/// Shared by extraction and listing so the two cannot disagree about what a `.gz` or `.xz`
+/// that is not a tar actually produces.
+fn lone_file_name(archive: &Path, suffix: &str) -> String {
+    let name = archive.file_name().map_or_else(
+        || "archive".to_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    name.strip_suffix(suffix).unwrap_or(&name).to_owned()
+}
+
 fn unzip(file: File, dest: &Path) -> Result<()> {
     let mut archive =
         zip::ZipArchive::new(BufReader::new(file)).map_err(|e| VendorError::Http(e.to_string()))?;
@@ -116,12 +128,7 @@ fn ungzip(archive: &Path, file: File, dest: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let name = archive.file_name().map_or_else(
-        || "archive".to_owned(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    let stem = name.strip_suffix(".gz").unwrap_or(name.as_str());
-    let mut out = File::create(dest.join(stem))?;
+    let mut out = File::create(dest.join(lone_file_name(archive, ".gz")))?;
     out.write_all(&head)?;
     std::io::copy(&mut decoder, &mut out)?;
     Ok(())
@@ -143,21 +150,12 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
         writer.flush()?;
     }
 
-    let mut head = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut decoded.reopen()?, &mut head)?;
-    head.truncate(read);
-
-    if is_tar(&head) {
+    if decompresses_to_a_tar(&mut decoded.reopen()?)? {
         tar::Archive::new(BufReader::new(decoded.reopen()?)).unpack(dest)?;
         return Ok(());
     }
 
-    let name = archive.file_name().map_or_else(
-        || "archive".to_owned(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    let stem = name.strip_suffix(".xz").unwrap_or(name.as_str());
-    let mut out = File::create(dest.join(stem))?;
+    let mut out = File::create(dest.join(lone_file_name(archive, ".xz")))?;
     std::io::copy(&mut decoded.reopen()?, &mut out)?;
     Ok(())
 }
@@ -186,7 +184,17 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
             zip_names(std::io::Cursor::new(bytes[start..].to_vec()))
         }
         Some(ArchiveKind::Tar) => tar_names(BufReader::new(file)),
-        Some(ArchiveKind::Gzip) => tar_names(flate2::read::GzDecoder::new(BufReader::new(file))),
+        Some(ArchiveKind::Gzip) => {
+            let mut decoder = flate2::read::GzDecoder::new(BufReader::new(file));
+            if decompresses_to_a_tar(&mut decoder)? {
+                // Restart from the beginning: the tar reader needs the header bytes back.
+                let file = File::open(archive)?;
+                tar_names(flate2::read::GzDecoder::new(BufReader::new(file)))
+            } else {
+                // A lone compressed file, which extraction writes out under this one name.
+                Ok(vec![lone_file_name(archive, ".gz")])
+            }
+        }
         Some(ArchiveKind::Xz) => {
             // No reader to wrap, so the payload lands in a temporary file first, as extraction
             // does.
@@ -199,9 +207,23 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
                     .map_err(|source| VendorError::Http(source.to_string()))?;
                 writer.flush()?;
             }
-            tar_names(BufReader::new(decoded.reopen()?))
+            if decompresses_to_a_tar(&mut decoded.reopen()?)? {
+                tar_names(BufReader::new(decoded.reopen()?))
+            } else {
+                Ok(vec![lone_file_name(archive, ".xz")])
+            }
         }
     }
+}
+
+/// Whether a decompressed stream is a tar, read from its leading bytes.
+///
+/// Consumes the header it inspects, so callers that go on to read the tar restart the stream.
+fn decompresses_to_a_tar(reader: &mut impl Read) -> Result<bool> {
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(reader, &mut head)?;
+    head.truncate(read);
+    Ok(is_tar(&head))
 }
 
 fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
@@ -423,6 +445,78 @@ mod tests {
         lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
         std::fs::write(&txz, compressed).unwrap();
         assert_eq!(super::members(&txz).unwrap(), ["nested/fresh"]);
+    }
+
+    /// A ZIP holding one entry, as the payload of an extension container.
+    fn zip_bytes(name: &str) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file::<_, ()>(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"hi").unwrap();
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn crx_containers_are_listed_through_their_wrapped_zip() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = zip_bytes("manifest.json");
+
+        // CRX2: the public key and signature sit between the header and the ZIP.
+        let mut crx2 = b"Cr24".to_vec();
+        crx2.extend_from_slice(&2u32.to_le_bytes());
+        crx2.extend_from_slice(&3u32.to_le_bytes()); // public key length
+        crx2.extend_from_slice(&5u32.to_le_bytes()); // signature length
+        crx2.extend_from_slice(&[0u8; 8]); // the key and signature themselves
+        crx2.extend_from_slice(&payload);
+        let crx2_path = dir.path().join("ext2.crx");
+        std::fs::write(&crx2_path, &crx2).unwrap();
+        assert_eq!(sniff(&crx2), Some(ArchiveKind::Crx));
+        assert_eq!(super::members(&crx2_path).unwrap(), ["manifest.json"]);
+
+        // CRX3: one length covers the whole protobuf header.
+        let mut crx3 = b"Cr24".to_vec();
+        crx3.extend_from_slice(&3u32.to_le_bytes());
+        crx3.extend_from_slice(&4u32.to_le_bytes()); // header length
+        crx3.extend_from_slice(&[0u8; 4]);
+        crx3.extend_from_slice(&payload);
+        let crx3_path = dir.path().join("ext3.crx");
+        std::fs::write(&crx3_path, &crx3).unwrap();
+        assert_eq!(super::members(&crx3_path).unwrap(), ["manifest.json"]);
+
+        // Nothing was written out: only the two containers are in the directory.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn lone_compressed_files_are_listed_under_the_name_they_extract_to() {
+        // The registry lets a `member` name a `.gz` or `.xz` that is not a tar, in which case
+        // extraction writes exactly one file — so listing has to report that one name, not fail.
+        let dir = tempfile::tempdir().unwrap();
+
+        let gzipped = dir.path().join("yamlfmt.gz");
+        {
+            let file = std::fs::File::create(&gzipped).unwrap();
+            let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+            encoder.write_all(b"not a tar").unwrap();
+            encoder.finish().unwrap();
+        }
+        assert_eq!(super::members(&gzipped).unwrap(), ["yamlfmt"]);
+
+        let xzed = dir.path().join("yamlfmt.xz");
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(b"not a tar"), &mut compressed).unwrap();
+        std::fs::write(&xzed, compressed).unwrap();
+        assert_eq!(super::members(&xzed).unwrap(), ["yamlfmt"]);
+
+        // And that is the name extraction really produces.
+        let out = dir.path().join("out");
+        extract(&gzipped, &out).unwrap();
+        extract(&xzed, &out).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join("yamlfmt")).unwrap(),
+            "not a tar"
+        );
     }
 
     #[test]
