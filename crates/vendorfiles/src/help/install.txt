@@ -14,6 +14,7 @@ Options:
   -n, --name [name]       Name to write in dependencies
   -f, --files <files...>  Files to install
   --refresh             Re-check the program registry
+  --dry-run             Print the entry, change nothing
   -h, --help              display help for command
 
 Examples:
