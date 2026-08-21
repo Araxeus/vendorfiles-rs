@@ -21,8 +21,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  assets-exist:
-    name: Entries name assets that exist
+  entries-resolve:
+    name: Entries name assets and members that exist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,8 +32,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Resolves every entry for every host it claims, then checks the asset it names is in the
-      # release GitHub actually publishes. Archive members stay unverified — confirming those
-      # means downloading every asset for every platform.
+      # release GitHub actually publishes. Also downloads one asset per entry — this runner's own
+      # platform where the entry covers it — and checks the `member` really is inside it. Reading
+      # inside every asset for every platform would be gigabytes, so one platform per entry it is.
       - name: Verify against live releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -187,6 +187,12 @@ pub const COMMANDS: &[CommandSpec] = &[
                 arity: Arity::None,
                 display: "--refresh",
             },
+            OptionSpec {
+                short: None,
+                long: "--dry-run",
+                arity: Arity::None,
+                display: "--dry-run",
+            },
         ],
         help: include_str!("help/install.txt"),
     },

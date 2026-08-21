@@ -52,6 +52,7 @@ zbus-secret-service-keyring-store.workspace = true
 linux-keyutils-keyring-store.workspace = true
 
 [dev-dependencies]
+jsonschema.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]

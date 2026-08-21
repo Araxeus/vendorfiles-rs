@@ -359,7 +359,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor sync` | Download everything the config declares. `-f`/`--force` re-downloads even when the lockfile agrees. |
 | `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
 | `vendor outdated` | List dependencies with a newer version available. |
-| `vendor install <url/name> [version]` | Add a dependency. Accepts a full URL, `owner/repo`, or a name to search for. `-n`/`--name` sets the config key; `-f`/`--files` lists the files. |
+| `vendor install <url/name> [version]` | Add a dependency. Accepts a full URL, `owner/repo`, or a name to search for. `-n`/`--name` sets the config key; `-f`/`--files` lists the files. `--dry-run` prints the entry it would add and changes nothing. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
 | `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
@@ -470,18 +470,48 @@ and a file from the repository is vendored with `path` instead of an asset:
     hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
-Test your entry before opening the PR:
+[`registry.schema.json`](./registry.schema.json) describes the format, and `registry.yml` points
+at it, so an editor with YAML language-server support flags a wrong field or a malformed host key
+as you type — before CI, and before the PR. Test your entry too:
 
 ```bash
-VENDOR_REGISTRY=./registry.yml vendor add <name>
+VENDOR_REGISTRY=./registry.yml vendor add <name> --dry-run   # what it resolves to
+VENDOR_REGISTRY=./registry.yml vendor add <name>             # the real thing
+```
+
+`--dry-run` answers "what would this put in my config" without contacting GitHub or touching a
+file, which makes it the quickest way to check an entry:
+
+```console
+$ vendor add bws --dry-run
+INFO: bitwarden-secrets-cli would be added as:
+{
+  "bitwarden-secrets-cli": {
+    "repository": "https://github.com/bitwarden/sdk",
+    "files": [
+      {
+        "{release}/bws-x86_64-unknown-linux-gnu-{version}.zip": {
+          "bws": "bws"
+        }
+      }
+    ],
+    "releaseRegex": "^bws-v\\d+\\.\\d+\\.\\d+$"
+  }
+}
+INFO: files would be written to /home/you/project/vendor/bitwarden-secrets-cli
+INFO: nothing was downloaded or written
 ```
 
 Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
 host it lists, and that anything with a `member` is a container the extractor can open. A change to
-`registry.yml` additionally queries GitHub to confirm the asset each entry names really exists — the
-same check runs weekly, since a project can rename its assets without anyone touching this
-repository. Archive *members* are not verified, because that would mean downloading every asset for
-every platform, so test yours with the command above.
+`registry.yml` additionally queries GitHub: the asset each entry names must exist for every host it
+claims, and the `member` inside it is downloaded and checked on one platform. The same checks run
+weekly, since a project can rename its assets without anyone touching this repository.
+
+Members are verified on one platform rather than all of them — every platform would mean
+downloading every asset — so an entry whose layout differs *between* platforms still deserves a
+manual look. `microsoft/edit` and `sinelaw/fresh` both nest their binary on one platform and not
+another.
 
 A few notes on how it behaves. The registry is only read by `install`/`add`, never by `sync` or
 `update`. It is cached for a day, so the usual install makes no request at all; after that the

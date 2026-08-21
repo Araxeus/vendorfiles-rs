@@ -26,6 +26,11 @@ fancy-regex = "0.19.0"
 flate2 = "1.1.9"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.0", features = ["serde"] }
+# Validates `registry.schema.json` in the tests, so a broken `$ref` or a regression in the
+# `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
+# off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
+# refers to nothing outside itself.
+jsonschema = { version = "0.50.0", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
@@ -97,6 +102,8 @@ tokio = { version = "1.53.1", features = [
     "io-util",
     "time",
     "sync",
+    # Ctrl-C has to give the terminal back: nothing else runs when the process is signalled.
+    "signal",
 ] }
 toml_edit = { version = "0.25.13", features = ["serde"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate", "bzip2", "zstd"] }
