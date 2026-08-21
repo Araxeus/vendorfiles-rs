@@ -162,8 +162,8 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
 
 /// The *file* paths an archive contains, without writing any of them out.
 ///
-/// Listing rather than extracting: checking that an archive holds a named file should not cost the
-/// disk space of everything else in it.
+/// Listing rather than extracting: checking that an archive holds a named file never costs the
+/// disk space of everything else in it, whatever the payload decompresses to.
 ///
 /// Directory entries are left out. A member is something installation *moves into place*, and
 /// [`crate::ops`] copies it when a rename cannot cross filesystems — which fails on a directory.
@@ -200,25 +200,59 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
                 Ok(vec![lone_file_name(archive, ".gz")])
             }
         }
-        Some(ArchiveKind::Xz) => {
-            // No reader to wrap, so the payload lands in a temporary file first, as extraction
-            // does.
-            let mut decoded = tempfile::Builder::new()
-                .prefix("vendorfiles-xz-")
-                .tempfile()?;
-            {
-                let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
-                lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
-                    .map_err(|source| VendorError::Http(source.to_string()))?;
-                writer.flush()?;
-            }
-            if decompresses_to_a_tar(&mut decoded.reopen()?)? {
-                tar_names(BufReader::new(decoded.reopen()?))
-            } else {
-                Ok(vec![lone_file_name(archive, ".xz")])
-            }
-        }
+        Some(ArchiveKind::Xz) => xz_names(archive, file),
     }
+}
+
+/// The names inside an xz payload, without ever storing the payload.
+///
+/// `lzma-rs` decodes into a writer rather than offering a reader, which is why [`unxz`] decodes to
+/// a temporary file. Listing cannot afford that: it exists to avoid paying for an archive's
+/// contents. So a thread pushes the decompressed stream down a pipe and the tar reader pulls it
+/// out here — the bytes pass through memory a pipe buffer at a time and are never kept.
+fn xz_names(archive: &Path, file: File) -> Result<Vec<String>> {
+    let (mut reader, writer) = std::io::pipe()?;
+    let decoding = std::thread::spawn(move || -> Result<()> {
+        let mut writer = std::io::BufWriter::new(writer);
+        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
+            .map_err(|source| VendorError::Http(source.to_string()))?;
+        writer.flush()?;
+        Ok(())
+    });
+
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut reader, &mut head)?;
+    head.truncate(read);
+
+    if !is_tar(&head) {
+        // A lone compressed file: its name comes from the archive's own, so none of the payload is
+        // needed. Drain it anyway — a stream that does not decode should be an error here rather
+        // than a surprise at install time — which costs time but still no disk.
+        std::io::copy(&mut reader, &mut std::io::sink())?;
+        finish_decoding(decoding)?;
+        return Ok(vec![lone_file_name(archive, ".xz")]);
+    }
+
+    // The header is already out of the pipe and the tar reader needs it back.
+    let mut tarball = tar::Archive::new(std::io::Cursor::new(head).chain(reader));
+    let names = names_in(&mut tarball)?;
+    // A tar reader stops at the end-of-archive marker, but archives are padded well past it and
+    // the decoding thread is still pushing those blocks. Read them out so it can finish: closing
+    // the pipe under it would turn a sound archive into a broken-pipe error.
+    std::io::copy(&mut tarball.into_inner(), &mut std::io::sink())?;
+    // Only now is the decode's own verdict worth having. The whole stream was pulled through, so a
+    // failure here is the archive's rather than this reader having stopped early. A listing that
+    // failed instead reports its own error, which is what a half-decoded stream looks like from
+    // the tar side.
+    finish_decoding(decoding)?;
+    Ok(names)
+}
+
+/// The decoding thread's own result, once the stream has been read to the end.
+fn finish_decoding(decoding: std::thread::JoinHandle<Result<()>>) -> Result<()> {
+    decoding
+        .join()
+        .map_err(|_| VendorError::Http("xz decoding panicked".to_owned()))?
 }
 
 /// Whether a decompressed stream is a tar, read from its leading bytes.
@@ -243,8 +277,12 @@ fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
 }
 
 fn tar_names(reader: impl Read) -> Result<Vec<String>> {
+    names_in(&mut tar::Archive::new(reader))
+}
+
+fn names_in(archive: &mut tar::Archive<impl Read>) -> Result<Vec<String>> {
     let mut names = Vec::new();
-    for entry in tar::Archive::new(reader).entries()? {
+    for entry in archive.entries()? {
         let entry = entry?;
         // Tar says so in the header's type flag rather than in the name.
         if entry.header().entry_type().is_dir() {
@@ -501,6 +539,105 @@ mod tests {
 
         // Nothing was written out: only the two containers are in the directory.
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    /// A tar of `count` files of `size` bytes each, xz-compressed.
+    fn tar_xz(count: usize, size: usize) -> Vec<u8> {
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            for index in 0..count {
+                let body = vec![b'a'; size];
+                let mut header = tar::Header::new_gnu();
+                header.set_size(body.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder
+                    .append_data(&mut header, format!("big/file-{index}"), &body[..])
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        compressed
+    }
+
+    #[test]
+    fn a_tar_xz_far_larger_than_a_pipe_buffer_is_listed_without_stalling() {
+        // The payload passes from the decoding thread to the tar reader a pipe buffer at a time —
+        // tens of kilobytes — so a payload thousands of times that size proves the two really do
+        // hand off rather than one waiting for the other to finish.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.tar.xz");
+        std::fs::write(&path, tar_xz(4, 2 * 1024 * 1024)).unwrap();
+
+        let listed = super::members(&path).unwrap();
+        assert_eq!(
+            listed,
+            ["big/file-0", "big/file-1", "big/file-2", "big/file-3"]
+        );
+        // 8 MiB decompressed, and not a byte of it written anywhere.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_truncated_xz_is_an_error_rather_than_a_made_up_name() {
+        // Listing derives a lone file's name from the archive's own, so a stream that stops
+        // decoding could quietly look like one. It has to stay an error, as it is for extraction.
+        let dir = tempfile::tempdir().unwrap();
+
+        // Truncated before anything decodes at all.
+        let mut nothing = Vec::new();
+        lzma_rs::xz_compress(
+            &mut std::io::Cursor::new(&vec![b'z'; 400_000]),
+            &mut nothing,
+        )
+        .unwrap();
+        nothing.truncate(nothing.len() / 2);
+        let nothing_path = dir.path().join("notes.txt.xz");
+        std::fs::write(&nothing_path, nothing).unwrap();
+        assert!(super::members(&nothing_path).is_err());
+
+        // Truncated after a tar header has come through, so the listing starts and then runs out.
+        let mut partial = tar_xz(4, 512 * 1024);
+        partial.truncate(partial.len() * 2 / 3);
+        let partial_path = dir.path().join("big.tar.xz");
+        std::fs::write(&partial_path, partial).unwrap();
+        assert!(super::members(&partial_path).is_err());
+    }
+
+    #[test]
+    fn a_tar_xz_padded_past_its_end_marker_still_lists() {
+        // What GNU tar really ships: zero blocks after the end-of-archive marker. A tar reader
+        // stops at the marker and never reads them, so the decoder feeding it is still mid-write —
+        // and a listing that walked away at that point would report a broken pipe on a sound
+        // archive. Every padding here is larger than a pipe buffer.
+        let dir = tempfile::tempdir().unwrap();
+        for pad in [0usize, 8 * 1024, 64 * 1024, 1024 * 1024] {
+            let mut tarred = Vec::new();
+            {
+                let mut builder = tar::Builder::new(&mut tarred);
+                let mut header = tar::Header::new_gnu();
+                header.set_size(2);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder
+                    .append_data(&mut header, "tool", &b"hi"[..])
+                    .unwrap();
+                builder.finish().unwrap();
+            }
+            tarred.extend(std::iter::repeat_n(0u8, pad));
+            let mut compressed = Vec::new();
+            lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+            let path = dir.path().join(format!("pad-{pad}.tar.xz"));
+            std::fs::write(&path, compressed).unwrap();
+            assert_eq!(
+                super::members(&path).unwrap(),
+                ["tool"],
+                "padded with {pad} trailing bytes"
+            );
+        }
     }
 
     #[test]
