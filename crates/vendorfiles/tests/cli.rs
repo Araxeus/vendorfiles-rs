@@ -193,6 +193,28 @@ fn the_script_covers_the_flags_it_was_generated_from() {
 }
 
 #[test]
+fn the_script_covers_the_help_and_version_surface() {
+    // `Cli` disables clap's help and version handling because `help::intercept` answers them, so
+    // a script generated from the parser alone would promise less than the binary accepts.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = stdout(&vendor(dir.path(), &["completions", "bash"]));
+    for expected in [
+        // Root flags, offered before any command.
+        r#"opts="-c -p -h -v --config --plain --help --version"#,
+        // `help` is a command, and the arm that recognises it offers the topics.
+        "vendor,help)",
+        r#"opts="-c -p --config --plain sync update outdated install uninstall login completions"#,
+        // Each real subcommand takes `-h` too; `help` itself must not, `vendor help -h` fails.
+        r#"opts="-f -h -c -p --force --help --config --plain"#,
+    ] {
+        assert!(
+            script.contains(expected),
+            "missing from the script: {expected}\n{script}"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_shell_names_the_ones_that_work() {
     let dir = tempfile::tempdir().expect("temp dir");
     let out = vendor(dir.path(), &["completions", "tcsh"]);

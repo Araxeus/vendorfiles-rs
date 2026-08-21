@@ -183,13 +183,64 @@ const SHELLS: [(&str, clap_complete::Shell); 5] = [
     ("zsh", clap_complete::Shell::Zsh),
 ];
 
+/// The command the completion scripts describe.
+///
+/// Not the parser: `Cli` turns clap's help and version handling off, because `help::intercept`
+/// answers `-h`, `-v` and `help [command]` from captured text before parsing, so Commander's
+/// wording and exit codes survive. Generating from the parser alone would therefore promise less
+/// than the binary accepts, so those three go back on here. Nothing parses this command; only its
+/// shape is read.
+fn completion_command() -> clap::Command {
+    use clap::{Arg, ArgAction, Command as ClapCommand, CommandFactory};
+
+    // Wording taken from the served help text, so what a shell shows is what `vendor --help`
+    // prints.
+    let help_flag = || {
+        Arg::new("help")
+            .short('h')
+            .long("help")
+            .help("display help for command")
+            .action(ArgAction::Help)
+    };
+
+    let mut command = Cli::command()
+        .version(vendorfiles_core::VERSION)
+        .arg(help_flag())
+        .arg(
+            Arg::new("version")
+                .short('v')
+                .long("version")
+                .help("output the current version")
+                .action(ArgAction::Version),
+        );
+
+    // Every subcommand takes `-h` as well, and every one of them disables clap's own. `help` is
+    // appended afterwards deliberately: `vendor help -h` is a usage error, so it must not gain one.
+    let topics: Vec<String> = command
+        .get_subcommands()
+        .map(|sub| sub.get_name().to_owned())
+        .collect();
+    for topic in &topics {
+        command = command.mut_subcommand(topic, |sub| sub.arg(help_flag()));
+    }
+
+    command.subcommand(
+        ClapCommand::new("help")
+            .about("display help for command")
+            // `help help` is not a topic, so the names collected above are exactly the list.
+            .arg(
+                Arg::new("command")
+                    .value_name("command")
+                    .value_parser(topics),
+            ),
+    )
+}
+
 /// Writes a completion script for `shell` to stdout.
 ///
 /// Generated from the parser itself, so it stays in step with the flags rather than being a second
 /// description of them that has to be maintained.
 fn completions(shell: &str) -> Result<()> {
-    use clap::CommandFactory;
-
     let wanted = shell.to_ascii_lowercase();
     let Some((_, generator)) = SHELLS.iter().find(|(name, _)| *name == wanted) else {
         let accepted = SHELLS
@@ -200,7 +251,7 @@ fn completions(shell: &str) -> Result<()> {
         bail!("unknown shell '{shell}'. Expected one of {accepted}");
     };
 
-    let mut command = Cli::command();
+    let mut command = completion_command();
     clap_complete::generate(
         *generator,
         &mut command,
