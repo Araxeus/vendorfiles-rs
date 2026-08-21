@@ -85,8 +85,9 @@ pub fn print_err(text: &str) {
 /// this, interrupting a sync leaves the cursor hidden — [`driver`] hides it on every frame — and
 /// the shell that follows has no visible caret for the rest of the session.
 ///
-/// Best effort by design. The render thread is asked to wipe the region, but it may be mid-frame,
-/// so the cursor is shown here regardless rather than waiting on it.
+/// The region is best effort: the render thread is asked to wipe it, but it may be mid-frame, so
+/// the cursor is shown here regardless rather than waiting on it. The cursor is not best effort —
+/// showing it stops the thread from drawing, so no later frame can hide it again.
 pub fn restore_terminal() {
     let sender = ACTIVE.lock().ok().and_then(|mut active| active.take());
     if let Some(sender) = sender {
@@ -101,7 +102,8 @@ pub fn restore_terminal() {
 ///
 /// [`restore_terminal`] gives the render thread a moment to take the region down first. A user
 /// pressing Ctrl-C a second time has said they will not wait for that, and a visible cursor is
-/// worth more to the session that follows than a tidy region.
+/// worth more to the session that follows than a tidy region. Drawing stops either way, so the
+/// abandoned region is the only thing given up.
 pub fn show_cursor() {
     driver::show_cursor();
 }
@@ -493,10 +495,18 @@ impl Drop for Transfer<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Reporter, column, print_out, restore_terminal, show_cursor};
+    use super::{ACTIVE, Command, Reporter, column, print_out, restore_terminal, show_cursor};
     use crate::progress::state::{Bytes, Outcome, RunState, Stage};
     use crate::progress::view::NAME_WIDTH;
     use std::path::Path;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    /// Serialises the tests that reach into [`ACTIVE`] directly.
+    ///
+    /// It is process-wide state, and `Reporter::end` clears it unconditionally: two of these
+    /// running at once would steal each other's sender.
+    static ACTIVE_GUARD: Mutex<()> = Mutex::new(());
 
     /// Reads from the run state without holding the lock past the read.
     fn peek<T>(reporter: &Reporter, read: impl FnOnce(&RunState) -> T) -> T {
@@ -693,6 +703,7 @@ mod tests {
 
     #[test]
     fn restoring_the_terminal_is_safe_with_nothing_to_restore() {
+        let _guard = ACTIVE_GUARD.lock().expect("active guard");
         // The interrupt handler runs whatever the run was doing, including before a display
         // exists and after one has already been closed.
         restore_terminal();
@@ -702,6 +713,26 @@ mod tests {
         reporter.end();
         restore_terminal();
         show_cursor();
+    }
+
+    #[test]
+    fn restoring_the_terminal_stops_an_active_display() {
+        // A display cannot be started here — it needs a terminal that answers a cursor query —
+        // so the render thread is stood in for by a channel of its own.
+        let _guard = ACTIVE_GUARD.lock().expect("active guard");
+        let (sender, inbox) = std::sync::mpsc::channel();
+        *ACTIVE.lock().expect("active") = Some(sender);
+
+        restore_terminal();
+
+        // A `Print` from work still in flight may arrive first; `Stop` is what has to arrive.
+        let stopped = std::iter::from_fn(|| inbox.recv_timeout(Duration::from_secs(1)).ok())
+            .any(|command| matches!(command, Command::Stop));
+        assert!(stopped, "the display was never asked to stop");
+        assert!(
+            ACTIVE.lock().expect("active").is_none(),
+            "a stopped display is still taking print traffic"
+        );
     }
 
     #[test]
