@@ -270,19 +270,33 @@ async fn install(
 
     // Files may be inherited from an entry under this name, or from any entry pointing at the
     // same repository — the reference looks in both places.
-    let existing = session
-        .workspace
-        .dependencies
-        .get(&name)
-        .or_else(|| {
-            session
-                .workspace
-                .dependencies
-                .values()
-                .find(|dependency| dependency.repository.as_deref() == Some(lookup.as_str()))
-        })
-        .cloned()
+    let under_this_name = session.workspace.dependencies.get(&name).cloned();
+    // Which *other* entry it would be borrowed from, when there is nothing under this name. Worth
+    // knowing separately: inheriting from an entry the user did not name is the surprising half.
+    let neighbour = if under_this_name.is_some() {
+        None
+    } else {
+        session
+            .workspace
+            .dependencies
+            .iter()
+            .find(|(_, dependency)| dependency.repository.as_deref() == Some(lookup.as_str()))
+            .map(|(key, dependency)| (key.clone(), dependency.clone()))
+    };
+    let borrowing = files.is_none() && neighbour.is_some();
+    let existing = under_this_name
+        .or_else(|| neighbour.as_ref().map(|(_, dependency)| dependency.clone()))
         .unwrap_or_default();
+
+    // Say so. The inherited `version` comes with the files, and when it already matches what
+    // would be installed the new entry is never written at all — which looks like nothing
+    // happening for no reason.
+    if borrowing && let Some((neighbour, _)) = neighbour.as_ref() {
+        ui::warning(format!(
+            "'{neighbour}' already vendors {lookup}, so '{name}' inherits its files and version. \
+             Pass --files to describe '{name}' separately."
+        ));
+    }
 
     let files = match files {
         Some(files) => Some(

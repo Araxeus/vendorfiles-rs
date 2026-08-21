@@ -388,6 +388,62 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Inheriting files from a neighbouring entry
+// ---------------------------------------------------------------------------------------
+
+/// A config already vendoring `repository` under the name `first`.
+fn neighbour_project(repository: &str) -> tempfile::TempDir {
+    project(&format!(
+        r#"{{"vendorDependencies":{{"first":{{"repository":"{repository}","version":"v1.0.0","files":["LICENSE"]}}}}}}"#
+    ))
+}
+
+#[test]
+fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
+    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
+    // version, and when that version already matches nothing is written at all.
+    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
+    let dir = neighbour_project(repository);
+
+    let out = vendor(dir.path(), &["add", repository]);
+    let warning = stderr(&out);
+
+    assert!(warning.contains("'first' already vendors"), "{warning}");
+    assert!(
+        warning.contains("inherits its files and version"),
+        "{warning}"
+    );
+    assert!(warning.contains("--files"), "{warning}");
+}
+
+#[test]
+fn describing_it_with_files_says_nothing() {
+    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
+    let dir = neighbour_project(repository);
+
+    let out = vendor(dir.path(), &["add", repository, "-f", "README.md"]);
+    assert!(
+        !stderr(&out).contains("already vendors"),
+        "an explicit --files inherits nothing: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn re_adding_the_same_name_says_nothing() {
+    // Updating an entry under its own name is ordinary, not a surprise.
+    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
+    let dir = neighbour_project(repository);
+
+    let out = vendor(dir.path(), &["add", repository, "-n", "first"]);
+    assert!(
+        !stderr(&out).contains("already vendors"),
+        "its own entry is not a neighbour: {}",
+        stderr(&out)
+    );
+}
+
 #[test]
 fn a_missing_file_makes_sync_consider_the_dependency_stale() {
     let dir = up_to_date_project();
