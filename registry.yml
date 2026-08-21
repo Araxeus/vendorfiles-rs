@@ -19,8 +19,11 @@
 #
 # `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
-# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, crx or xpi — a
-# `.tar.xz` release cannot be used.
+# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, crx or xpi.
+#
+# `releaseRegex` narrows which tags count, for repositories that publish several trains of
+# releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`
+# to track it by commit; it takes no `targets`, being the same everywhere.
 #
 # An entry says *what* to download. It cannot say where files land — there is no `vendorFolder`
 # here, and unknown keys are refused.
@@ -229,7 +232,8 @@ programs:
         asset: "{release}/wsl-notify-send_windows_amd64.zip"
         member: "wsl-notify-send.exe"
 
-  # Windows only here: upstream's Unix builds ship `.tar.xz`, which this tool does not extract.
+  # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` — so every host is
+  # spelled out.
   fresh:
     repository: https://github.com/sinelaw/fresh
     targets:
@@ -239,3 +243,44 @@ programs:
       windows-aarch64:
         asset: "{release}/fresh-editor-aarch64-pc-windows-msvc.zip"
         member: "fresh.exe"
+      macos-x86_64:
+        asset: "{release}/fresh-editor-x86_64-apple-darwin.tar.xz"
+        member: "fresh-editor-x86_64-apple-darwin/fresh"
+      macos-aarch64:
+        asset: "{release}/fresh-editor-aarch64-apple-darwin.tar.xz"
+        member: "fresh-editor-aarch64-apple-darwin/fresh"
+      linux-x86_64:
+        asset: "{release}/fresh-editor-x86_64-unknown-linux-gnu.tar.xz"
+        member: "fresh-editor-x86_64-unknown-linux-gnu/fresh"
+      linux-aarch64:
+        asset: "{release}/fresh-editor-aarch64-unknown-linux-gnu.tar.xz"
+        member: "fresh-editor-aarch64-unknown-linux-gnu/fresh"
+
+  flow:
+    repository: https://github.com/neurocyte/flow
+    # Its assets are named by the host key itself.
+    asset: "{release}/flow-v{version}-{target}{ext}"
+    member: "flow{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      windows-aarch64: windows-aarch64
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # The SDK monorepo tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, and only the
+  # first has the binaries. Without `releaseRegex` the newest release has no assets at all.
+  bitwarden-secrets-cli:
+    aliases: [bws]
+    repository: https://github.com/bitwarden/sdk
+    releaseRegex: '^bws-v\d+\.\d+\.\d+$'
+    asset: "{release}/bws-{target}-{version}.zip"
+    member: "bws{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu

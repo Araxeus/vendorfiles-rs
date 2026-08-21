@@ -34,6 +34,20 @@ pub struct Program {
     pub aliases: Vec<String>,
     /// The GitHub repository releases come from.
     pub repository: String,
+    /// Which tags count, for repositories that publish more than one train of releases.
+    ///
+    /// `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, so without
+    /// this the newest release is one with no assets at all.
+    #[serde(rename = "releaseRegex", default)]
+    pub release_regex: Option<String>,
+    /// A path in the repository, for something that is not a release asset at all.
+    ///
+    /// Mutually exclusive with `asset`/`targets`: a repository file is the same on every platform.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Track that file by commit rather than by tag.
+    #[serde(rename = "hashVersionFile", default)]
+    pub hash_version_file: Option<bool>,
     /// The asset pattern shared by every target, for projects that name assets by target triple.
     #[serde(default)]
     pub asset: Option<String>,
@@ -48,7 +62,8 @@ pub struct Program {
     /// `ox-macos` and `shfmt_v3.13.1_linux_amd64` are assets; `ox` and `shfmt` are commands.
     #[serde(rename = "as", default)]
     pub output: Option<String>,
-    /// What to fetch per host, keyed `{os}-{arch}`.
+    /// What to fetch per host, keyed `{os}-{arch}`. Absent for a repository file.
+    #[serde(default)]
     pub targets: IndexMap<String, Target>,
 }
 

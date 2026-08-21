@@ -43,6 +43,9 @@ zbus-secret-service-keyring-store = { version = "1.0.1", default-features = fals
 ] }
 # The fallback when no Secret Service is running (headless boxes, minimal containers, WSL).
 linux-keyutils-keyring-store = "1.0.0"
+# `.tar.xz` releases. Pure Rust, like every other codec here — `xz2`/`liblzma` would bind the C
+# library and put a build toolchain between a user and `cargo install`.
+lzma-rs = "0.3.0"
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.
 windows-native-keyring-store = { version = "1.1.0", default-features = false }

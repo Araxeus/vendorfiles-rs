@@ -19,6 +19,7 @@ flate2.workspace = true
 futures-util.workspace = true
 indexmap.workspace = true
 keyring-core.workspace = true
+lzma-rs.workspace = true
 octocrab.workspace = true
 open.workspace = true
 ratatui.workspace = true

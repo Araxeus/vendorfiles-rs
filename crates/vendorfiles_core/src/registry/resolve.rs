@@ -45,6 +45,10 @@ pub struct Entry {
     pub repository: String,
     /// The `files` array to write.
     pub files: Vec<FileEntry>,
+    /// Which tags count as releases, when the repository publishes several trains.
+    pub release_regex: Option<String>,
+    /// Whether to track a repository file by commit.
+    pub hash_version_file: Option<bool>,
 }
 
 /// Resolves `program` for the given host key.
@@ -55,6 +59,17 @@ pub struct Entry {
 /// and [`VendorError::RegistryInvalidEntry`] when it is malformed or names an output that would
 /// escape the vendor folder.
 pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
+    if let Some(path) = program.path.as_ref() {
+        if !program.targets.is_empty() {
+            return Err(VendorError::RegistryInvalidEntry {
+                name: name.to_owned(),
+                reason: "'path' vendors a repository file, so it cannot also list 'targets'"
+                    .to_owned(),
+            });
+        }
+        return repository_file(name, program, path);
+    }
+
     let Some(target) = program.targets.get(host) else {
         return Err(VendorError::RegistryUnsupportedHost {
             name: name.to_owned(),
@@ -109,6 +124,31 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
         name: name.to_owned(),
         repository: program.repository.clone(),
         files: vec![FileEntry::Mapped(files)],
+        release_regex: program.release_regex.clone(),
+        hash_version_file: program.hash_version_file,
+    })
+}
+
+/// Resolves a program that vendors a file from the repository rather than a release.
+///
+/// Platform-independent by nature, so there is nothing to expand and no target to choose.
+fn repository_file(name: &str, program: &Program, path: &str) -> Result<Entry> {
+    let files = if let Some(output) = program.output.as_ref() {
+        let output = output_name(name, output)?;
+        let mut mapped = IndexMap::new();
+        mapped.insert(path.to_owned(), FileTarget::Rename(output));
+        FileEntry::Mapped(mapped)
+    } else {
+        // Saved under its own basename, which is what a bare string means in a config.
+        output_name(name, path)?;
+        FileEntry::Simple(path.to_owned())
+    };
+    Ok(Entry {
+        name: name.to_owned(),
+        repository: program.repository.clone(),
+        files: vec![files],
+        release_regex: program.release_regex.clone(),
+        hash_version_file: program.hash_version_file,
     })
 }
 
@@ -325,6 +365,94 @@ programs:
         let (asset, target) = files.iter().next().unwrap();
         assert_eq!(asset, "{release}/shfmt_v{version}_linux_amd64");
         assert_eq!(target, &FileTarget::Rename("shfmt".to_owned()));
+    }
+
+    #[test]
+    fn a_repository_file_needs_no_target() {
+        // Not a release at all: the same file on every platform, tracked by commit.
+        let document = program(
+            r"
+version: 1
+programs:
+  omp-theme:
+    repository: https://github.com/JanDeDobbeleer/oh-my-posh
+    path: themes/powerlevel10k_rainbow.omp.json
+    hashVersionFile: true
+",
+        );
+        let entry = for_host("omp-theme", &document.programs["omp-theme"], "any").unwrap();
+        assert_eq!(entry.hash_version_file, Some(true));
+        assert_eq!(
+            entry.files,
+            vec![FileEntry::Simple(
+                "themes/powerlevel10k_rainbow.omp.json".to_owned()
+            )],
+            "a bare path is saved under its own basename"
+        );
+    }
+
+    #[test]
+    fn a_repository_file_can_be_renamed() {
+        let document = program(
+            r"
+version: 1
+programs:
+  omp-theme:
+    repository: https://github.com/JanDeDobbeleer/oh-my-posh
+    path: themes/powerlevel10k_rainbow.omp.json
+    as: my-prompt.json
+",
+        );
+        let entry = for_host("omp-theme", &document.programs["omp-theme"], "any").unwrap();
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("expected a mapped entry, found {:?}", entry.files);
+        };
+        assert_eq!(
+            files.get("themes/powerlevel10k_rainbow.omp.json"),
+            Some(&FileTarget::Rename("my-prompt.json".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_path_and_targets_together_are_refused() {
+        // They describe two different things; silently preferring one would be a trap.
+        let document = program(
+            r"
+version: 1
+programs:
+  confused:
+    repository: https://github.com/example/confused
+    path: some/file.txt
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+",
+        );
+        let error = for_host("confused", &document.programs["confused"], "windows-x86_64")
+            .expect_err("must be refused");
+        assert!(error.to_string().contains("targets"), "{error}");
+    }
+
+    #[test]
+    fn a_release_regex_reaches_the_entry() {
+        // Without it, `bitwarden/sdk`'s newest release is one with no assets.
+        let document = program(
+            r"
+version: 1
+programs:
+  bws:
+    repository: https://github.com/bitwarden/sdk
+    releaseRegex: '^bws-v\d+\.\d+\.\d+$'
+    asset: '{release}/bws-{target}-{version}.zip'
+    member: 'bws{exe}'
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+",
+        );
+        let entry = for_host("bws", &document.programs["bws"], "windows-x86_64").unwrap();
+        assert_eq!(
+            entry.release_regex.as_deref(),
+            Some(r"^bws-v\d+\.\d+\.\d+$")
+        );
     }
 
     #[test]

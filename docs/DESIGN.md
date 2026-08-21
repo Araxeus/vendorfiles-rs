@@ -396,8 +396,10 @@ code and the complete resulting file tree (including binary payloads). Covered:
    limit, and an `ETag` for cheap revalidation) and cached for a day, so the usual `add` makes no
    request. Only `install` reads it; an unreachable registry warns and falls through to the search.
    `{target}`/`{ext}`/`{exe}` are expanded from the *host key being resolved* rather than from
-   `cfg!`, which is what lets one machine validate every platform's entry in CI. Entries carry no
-   `vendorFolder` and refuse unknown keys, so remote data cannot decide where files land.
+   `cfg!`, which is what lets one machine validate every platform's entry in CI. An entry describes
+   either a release asset (extracted, or taken as-is when it names no `member`) or a repository
+   `path`; `releaseRegex` picks the tag train. Entries carry no `vendorFolder` and refuse unknown
+   keys, so remote data cannot decide where files land.
 13. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.

@@ -165,31 +165,40 @@ fn merge_install_entry(
     entry
 }
 
-/// `vendor install <url/name> [version]`.
-async fn install(
-    session: &mut Session,
+/// What a `source` argument turned out to name.
+struct Source {
+    /// The URL the reference builds, warts and all — `owner/repo` becomes
+    /// `https://www.github.com/owner/repo`, and that exact string is what config entries are
+    /// compared against.
+    lookup: String,
+    /// The same repository without the `www.`, the form every documented example uses and the
+    /// form the search path returns.
+    stored: String,
+    /// A name this tool knows describes itself.
+    known: Option<known::Known>,
+    /// A name the hosted registry describes.
+    listed: Option<registry::Entry>,
+}
+
+/// Works out which repository `source` means, and what is already known about it.
+async fn resolve_source(
+    session: &Session,
     source: &str,
-    version: Option<String>,
-    name: Option<String>,
-    files: Option<Vec<String>>,
+    files_given: bool,
     refresh: bool,
-) -> Result<()> {
-    // `lookup` is the URL the reference builds, warts and all — `owner/repo` becomes
-    // `https://www.github.com/owner/repo`, and that exact string is what it compares against
-    // config entries below. `stored` is the same repository without the `www.`, which is the
-    // form every documented example uses and the form the search path already returns.
-    // A name this tool knows describes itself, so neither a search nor `--files` is needed.
-    // Anything explicit the user passed still wins.
-    let known = if files.is_none() {
-        known::find(source)
-    } else {
+) -> Result<Source> {
+    // A name this tool knows needs neither a search nor `--files`. Anything explicit the user
+    // passed still wins.
+    let known = if files_given {
         None
+    } else {
+        known::find(source)
     };
 
     // Then the hosted registry, which is what makes `vendor add fd` work without a repository or
     // a `--files` list. A registry that cannot be reached is a miss, not a failure: the search
-    // below still works, and so does `vendor add owner/repo`.
-    let bare_name = files.is_none()
+    // still works, and so does `vendor add owner/repo`.
+    let bare_name = !files_given
         && known.is_none()
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
@@ -220,6 +229,30 @@ async fn install(
         let found = session.github.find_repo_url(source).await?;
         (found.clone(), found)
     };
+
+    Ok(Source {
+        lookup,
+        stored,
+        known,
+        listed,
+    })
+}
+
+/// `vendor install <url/name> [version]`.
+async fn install(
+    session: &mut Session,
+    source: &str,
+    version: Option<String>,
+    name: Option<String>,
+    files: Option<Vec<String>>,
+    refresh: bool,
+) -> Result<()> {
+    let Source {
+        lookup,
+        stored,
+        known,
+        listed,
+    } = resolve_source(session, source, files.is_some(), refresh).await?;
 
     if !is_github_url(&lookup) {
         bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
@@ -276,6 +309,15 @@ async fn install(
         && let Some(known) = known.as_ref()
     {
         entry.vendor_folder = known.folder.clone();
+    }
+    // What a registry entry knows about the repository that the config does not yet.
+    if let Some(listed) = listed.as_ref() {
+        if entry.release_regex.is_none() {
+            entry.release_regex = listed.release_regex.clone();
+        }
+        if entry.hash_version_file.is_none() && listed.hash_version_file == Some(true) {
+            entry.hash_version_file = Some(vendorfiles_core::model::HashVersionFile::Flag(true));
+        }
     }
     let dependency = entry.resolve(&name)?;
 

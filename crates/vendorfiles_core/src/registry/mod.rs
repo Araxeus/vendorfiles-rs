@@ -348,9 +348,16 @@ programs:
                 program.repository
             );
             assert!(
-                !program.targets.is_empty(),
-                "{canonical}: needs at least one target"
+                !program.targets.is_empty() || program.path.is_some(),
+                "{canonical}: needs either 'targets' or a repository 'path'"
             );
+            if program.path.is_some() {
+                // Platform-independent: resolved once, with no host to choose.
+                super::resolve::for_host(canonical, program, "any")
+                    .unwrap_or_else(|error| panic!("{canonical}: {error}"));
+                checked += 1;
+                continue;
+            }
             for host in program.targets.keys() {
                 let entry = super::resolve::for_host(canonical, program, host)
                     .unwrap_or_else(|error| panic!("{canonical} for {host}: {error}"));
@@ -370,8 +377,9 @@ programs:
                 // container `archive::sniff` recognises. This is what catches a `.tar.xz`
                 // release, which looks reasonable and cannot be opened.
                 if matches!(target, crate::model::FileTarget::ExtractMap(_)) {
-                    const CONTAINERS: [&str; 7] =
-                        [".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".crx", ".xpi"];
+                    const CONTAINERS: [&str; 9] = [
+                        ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".crx", ".xpi",
+                    ];
                     assert!(
                         CONTAINERS.iter().any(|ext| asset.ends_with(ext)),
                         "{canonical} for {host}: '{asset}' names a member, so it must be one of \

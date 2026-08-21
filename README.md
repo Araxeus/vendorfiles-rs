@@ -239,8 +239,8 @@ of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 }
 ```
 
-The container format is detected from the file's magic bytes, not its name: zip, tar, gzip,
-tar.gz/tgz, and the zip-based `.crx`/`.xpi` extension packages.
+The container format is detected from the file's magic bytes, not its name: zip, tar, gzip, xz,
+tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
 
 ### Filtering Releases
 
@@ -437,6 +437,25 @@ Projects that publish a bare binary rather than an archive leave `member` out en
       macos-x86_64:
         asset: "{release}/ox-macos"
         as: "ox"
+```
+
+Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
+and a file from the repository is vendored with `path` instead of an asset:
+
+```yaml
+  bitwarden-secrets-cli:
+    aliases: [bws]
+    repository: https://github.com/bitwarden/sdk
+    releaseRegex: '^bws-v\d+\.\d+\.\d+$'
+    asset: "{release}/bws-{target}-{version}.zip"
+    member: "bws{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+
+  some-theme:
+    repository: https://github.com/example/themes
+    path: themes/example.json
+    hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
 Test your entry before opening the PR:
