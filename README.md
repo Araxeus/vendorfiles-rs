@@ -330,6 +330,7 @@ Commands:
   install|add [options] <url/name> [version]  Install a dependency
   uninstall|remove [names...]                 Uninstall dependencies
   login|auth [token]                          Login to GitHub
+  completions <shell>                         Print a shell completion script
   help [command]                              display help for command
 ```
 
@@ -338,6 +339,16 @@ Both root options are global, so they read naturally on either side of the subco
 its value — naming the option is only ever a request for a specific config — so it can never claim
 a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
 are set.
+
+Completions are generated from the parser itself, so they always match the flags this build
+accepts — including anything added since the last release:
+
+```bash
+vendor completions bash > /etc/bash_completion.d/vendor
+vendor completions zsh  > "${fpath[1]}/_vendor"
+vendor completions fish > ~/.config/fish/completions/vendor.fish
+vendor completions powershell >> $PROFILE
+```
 
 `-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead —
 the same output a redirected stdout gets. It works on either side of the subcommand
@@ -351,6 +362,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor install <url/name> [version]` | Add a dependency. Accepts a full URL, `owner/repo`, or a name to search for. `-n`/`--name` sets the config key; `-f`/`--files` lists the files. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
+| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
 Examples:
 

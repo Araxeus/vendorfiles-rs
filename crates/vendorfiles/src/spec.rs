@@ -204,6 +204,13 @@ pub const COMMANDS: &[CommandSpec] = &[
         options: &[],
         help: include_str!("help/login.txt"),
     },
+    CommandSpec {
+        name: "completions",
+        aliases: &[],
+        max_operands: Some(1),
+        options: &[],
+        help: include_str!("help/completions.txt"),
+    },
 ];
 
 /// Looks a command up by name or alias.

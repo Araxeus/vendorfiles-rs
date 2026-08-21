@@ -97,6 +97,15 @@ pub enum Command {
     /// Login to GitHub to increase rate limit.
     #[command(alias = "auth", disable_help_flag = true)]
     Login { token: Option<String> },
+
+    /// Print a completion script for a shell.
+    #[command(disable_help_flag = true)]
+    Completions {
+        /// Taken as a plain string and parsed by hand: clap's own rejection of an unknown value
+        /// would arrive through the Commander error mapping, which has no wording for it.
+        #[arg(value_name = "shell")]
+        shell: String,
+    },
 }
 
 /// Index of the first token that is not a root option or one of its values.

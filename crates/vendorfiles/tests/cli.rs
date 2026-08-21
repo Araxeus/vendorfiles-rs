@@ -64,6 +64,10 @@ fn expected_help(name: &str) -> String {
                 "  -c, --config <file/folder path>",
             )
             .replace(
+                "  help [command]                              display help for command",
+                "  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
+            )
+            .replace(
                 "  -v, --version",
                 &format!(
                     "{}\n  -v, --version",
@@ -146,6 +150,82 @@ fn help_is_answered_before_missing_arguments_are_reported() {
     let out = vendor(dir.path(), &["install", "-h"]);
     assert_eq!(stdout(&out), expected_help("install"));
     assert_eq!(code(&out), 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Shell completions
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn every_supported_shell_gets_a_script() {
+    // No config anywhere: a completion script has nothing to do with a project.
+    let dir = tempfile::tempdir().expect("temp dir");
+    for shell in ["bash", "elvish", "fish", "powershell", "zsh"] {
+        let out = vendor(dir.path(), &["completions", shell]);
+        assert_eq!(code(&out), 0, "exit code for {shell}: {}", stderr(&out));
+        assert_eq!(stderr(&out), "", "stderr for {shell}");
+        let script = stdout(&out);
+        assert!(script.len() > 200, "{shell} script looks empty: {script}");
+        assert!(
+            script.contains("vendor"),
+            "{shell} script does not mention the binary"
+        );
+    }
+}
+
+#[test]
+fn the_script_covers_the_flags_it_was_generated_from() {
+    // Generated from the parser, so our own additions appear without being listed twice.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = stdout(&vendor(dir.path(), &["completions", "bash"]));
+    for expected in [
+        "--plain",
+        "--refresh",
+        "--config",
+        "uninstall",
+        "completions",
+    ] {
+        assert!(
+            script.contains(expected),
+            "{expected} missing from the script"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_shell_names_the_ones_that_work() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out = vendor(dir.path(), &["completions", "tcsh"]);
+    assert_eq!(code(&out), 1);
+    let message = stderr(&out);
+    assert!(message.contains("tcsh"), "{message}");
+    for shell in ["bash", "elvish", "fish", "powershell", "zsh"] {
+        assert!(message.contains(shell), "{shell} not offered: {message}");
+    }
+}
+
+#[test]
+fn the_shell_name_is_case_insensitive() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    assert_eq!(code(&vendor(dir.path(), &["completions", "Bash"])), 0);
+    assert_eq!(code(&vendor(dir.path(), &["completions", "PowerShell"])), 0);
+}
+
+#[test]
+fn completions_help_is_routed_like_every_other_command() {
+    let dir = project("{}");
+    let served = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/help/completions.txt"),
+    )
+    .expect("the served help text")
+    .replace("\r\n", "\n");
+    // No reference fixture to diff against — the reference has no such command — so this checks
+    // the binary serves the text we ship, through both routes.
+    for args in [vec!["completions", "--help"], vec!["help", "completions"]] {
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stdout(&out), served, "stdout for `vendor {args:?}`");
+        assert_eq!(code(&out), 0);
+    }
 }
 
 // ---------------------------------------------------------------------------------------

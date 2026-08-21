@@ -19,6 +19,12 @@ use vendorfiles_core::ui;
 /// `login` runs without a config file: authenticating is not a project-scoped action, and the
 /// reference's blanket `preAction` hook made `vendor login` fail outside a project.
 pub async fn dispatch(cli: Cli) -> Result<()> {
+    // Before the config is looked for: a completion script has nothing to do with a project, and
+    // asking for one outside a project should not fail.
+    if let Command::Completions { shell } = &cli.command {
+        return completions(shell);
+    }
+
     if let Command::Login { token } = &cli.command {
         return match token {
             Some(token) => auth::login_with_token(token).await.map_err(Into::into),
@@ -111,6 +117,9 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
 
         // Handled before the workspace is loaded.
         Command::Login { .. } => unreachable!("login is dispatched without a workspace"),
+        Command::Completions { .. } => {
+            unreachable!("completions are dispatched without a workspace")
+        }
     }
 
     Ok(())
@@ -163,6 +172,42 @@ fn merge_install_entry(
     };
     entry.apply_defaults(defaults);
     entry
+}
+
+/// The shells `vendor completions` can write a script for.
+const SHELLS: [(&str, clap_complete::Shell); 5] = [
+    ("bash", clap_complete::Shell::Bash),
+    ("elvish", clap_complete::Shell::Elvish),
+    ("fish", clap_complete::Shell::Fish),
+    ("powershell", clap_complete::Shell::PowerShell),
+    ("zsh", clap_complete::Shell::Zsh),
+];
+
+/// Writes a completion script for `shell` to stdout.
+///
+/// Generated from the parser itself, so it stays in step with the flags rather than being a second
+/// description of them that has to be maintained.
+fn completions(shell: &str) -> Result<()> {
+    use clap::CommandFactory;
+
+    let wanted = shell.to_ascii_lowercase();
+    let Some((_, generator)) = SHELLS.iter().find(|(name, _)| *name == wanted) else {
+        let accepted = SHELLS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!("unknown shell '{shell}'. Expected one of {accepted}");
+    };
+
+    let mut command = Cli::command();
+    clap_complete::generate(
+        *generator,
+        &mut command,
+        "vendor",
+        &mut std::io::stdout().lock(),
+    );
+    Ok(())
 }
 
 /// What a `source` argument turned out to name.
