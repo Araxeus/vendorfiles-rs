@@ -1,9 +1,10 @@
 # Programs `vendor add <name>` can install without being told a repository or its asset names.
 #
-# To add one, open a pull request against this file. Two checks run: every pull request proves the
-# file parses and that each entry resolves for every host it lists, and a change to this file also
-# queries GitHub to confirm the asset each entry names really exists. Archive *members* are not
-# verified — that would mean downloading every asset for every platform — so check yours by hand.
+# To add one, open a pull request against this file. Every pull request proves the file parses and
+# that each entry resolves for every host it lists. A change to this file also queries GitHub: the
+# asset each entry names must exist for every host, and the `member` inside it is checked for real
+# on one platform — the runner's own where the entry covers it. So a wrong `member` is caught, and
+# the failure lists what the archive actually holds.
 #
 # Test your entry before opening the PR:
 #

@@ -524,6 +524,124 @@ programs:
         println!("verified {checked} asset names against live releases");
     }
 
+    /// One platform per entry, checked all the way into the archive.
+    ///
+    /// Verifying every host would mean downloading every asset for every platform — gigabytes. One
+    /// is enough to catch the mistake that actually happens: a `member` path that does not match
+    /// how the archive is laid out. Both `microsoft/edit` and `sinelaw/fresh` nest their binary on
+    /// one platform and not another, and each was found by hand.
+    ///
+    /// Ignored by default; the `registry` workflow runs it when `registry.yml` changes and weekly
+    /// thereafter.
+    #[tokio::test]
+    #[ignore = "downloads release assets"]
+    async fn the_shipped_registry_names_members_that_exist() {
+        use crate::model::FileTarget;
+        use crate::template::{
+            owner_and_name_from_repo_url, replace_version, strip_release_prefix,
+        };
+
+        let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
+        let github =
+            crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
+        let mut problems: Vec<String> = Vec::new();
+        let mut checked = 0_usize;
+
+        for name in registry.names() {
+            let (canonical, program) = registry.find(name).expect("just listed");
+            if program.path.is_some() {
+                continue; // A repository file: no archive to look inside.
+            }
+            // The runner's own platform where an entry covers it, so the common case is the one
+            // exercised; otherwise whatever the entry does cover.
+            let host = if program.targets.contains_key("linux-x86_64") {
+                "linux-x86_64".to_owned()
+            } else {
+                let Some(first) = program.targets.keys().next() else {
+                    continue;
+                };
+                first.clone()
+            };
+
+            let entry = match super::resolve::for_host(canonical, program, &host) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {error}"));
+                    continue;
+                }
+            };
+            let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+                continue;
+            };
+            let (asset, target) = files.iter().next().expect("one asset");
+            let FileTarget::ExtractMap(wanted_members) = target else {
+                continue; // A bare binary: the asset *is* the file, already checked by name.
+            };
+
+            let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
+            let Ok(release) = github
+                .latest_release(&repo, program.release_regex.as_deref())
+                .await
+            else {
+                problems.push(format!("{canonical}: no usable release"));
+                continue;
+            };
+            let tag = release.tag_name.clone();
+            let asset_name = strip_release_prefix(&replace_version(asset, &tag));
+
+            let response = match github
+                .download_release_asset(&repo, &asset_name, &tag, program.release_regex.as_deref())
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {asset_name}: {error}"));
+                    continue;
+                }
+            };
+            let temporary = tempfile::Builder::new()
+                .prefix("vendorfiles-check-")
+                .tempfile()
+                .expect("a temporary file");
+            if let Err(error) =
+                crate::fsx::stream_to_file(response, temporary.path(), true, None).await
+            {
+                problems.push(format!("{canonical} for {host}: {error}"));
+                continue;
+            }
+            let held = match crate::archive::members(temporary.path()) {
+                Ok(held) => held,
+                Err(error) => {
+                    problems.push(format!(
+                        "{canonical} for {host}: unreadable archive: {error}"
+                    ));
+                    continue;
+                }
+            };
+
+            for member in wanted_members.keys() {
+                let expected = replace_version(member, &tag);
+                if held.iter().any(|held| held == &expected) {
+                    checked += 1;
+                } else {
+                    problems.push(format!(
+                        "{canonical} for {host}: '{expected}' is not in {asset_name} — holds: {}",
+                        held.join(", ")
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "{} member(s) verified, {} problem(s):\n  {}",
+            checked,
+            problems.len(),
+            problems.join("\n  ")
+        );
+        println!("verified {checked} archive member(s) on one platform each");
+    }
+
     #[test]
     fn the_shipped_registry_has_no_duplicate_names_or_aliases() {
         // Two entries claiming one alias would make `vendor add` depend on file order.

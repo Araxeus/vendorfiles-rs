@@ -162,6 +162,62 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The paths an archive contains, without writing any of them out.
+///
+/// Listing rather than extracting: checking that an archive holds a named file should not cost the
+/// disk space of everything else in it.
+///
+/// # Errors
+///
+/// Returns an error if the container cannot be read or is not a supported archive.
+pub fn members(archive: &Path) -> Result<Vec<String>> {
+    let mut file = File::open(archive)?;
+    let mut header = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut file, &mut header)?;
+    header.truncate(read);
+    file.seek(SeekFrom::Start(0))?;
+
+    match sniff(&header) {
+        Some(ArchiveKind::Zip) | None => zip_names(BufReader::new(file)),
+        Some(ArchiveKind::Crx) => {
+            let bytes = std::fs::read(archive)?;
+            let start = crx_payload_offset(&bytes)
+                .ok_or_else(|| VendorError::Http("unsupported CRX header".to_owned()))?;
+            zip_names(std::io::Cursor::new(bytes[start..].to_vec()))
+        }
+        Some(ArchiveKind::Tar) => tar_names(BufReader::new(file)),
+        Some(ArchiveKind::Gzip) => tar_names(flate2::read::GzDecoder::new(BufReader::new(file))),
+        Some(ArchiveKind::Xz) => {
+            // No reader to wrap, so the payload lands in a temporary file first, as extraction
+            // does.
+            let mut decoded = tempfile::Builder::new()
+                .prefix("vendorfiles-xz-")
+                .tempfile()?;
+            {
+                let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
+                lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
+                    .map_err(|source| VendorError::Http(source.to_string()))?;
+                writer.flush()?;
+            }
+            tar_names(BufReader::new(decoded.reopen()?))
+        }
+    }
+}
+
+fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
+    let archive = zip::ZipArchive::new(reader).map_err(|e| VendorError::Http(e.to_string()))?;
+    Ok(archive.file_names().map(str::to_owned).collect())
+}
+
+fn tar_names(reader: impl Read) -> Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in tar::Archive::new(reader).entries()? {
+        let entry = entry?;
+        names.push(entry.path()?.to_string_lossy().into_owned());
+    }
+    Ok(names)
+}
+
 /// Unwraps a CRX container and extracts the ZIP inside it.
 fn unzip_crx(archive: &Path, dest: &Path) -> Result<()> {
     let bytes = std::fs::read(archive)?;
@@ -307,6 +363,66 @@ mod tests {
             std::fs::read_to_string(out.join("notes.txt")).unwrap(),
             "plain content"
         );
+    }
+
+    #[test]
+    fn members_are_listed_without_extracting_anything() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // A tar.gz, as most Unix releases ship.
+        let tgz = dir.path().join("a.tar.gz");
+        {
+            let file = std::fs::File::create(&tgz).unwrap();
+            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            for name in ["tool-1.0/LICENSE", "tool-1.0/tool"] {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(2);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, name, &b"hi"[..]).unwrap();
+            }
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+        let mut listed = super::members(&tgz).unwrap();
+        listed.sort();
+        assert_eq!(listed, ["tool-1.0/LICENSE", "tool-1.0/tool"]);
+        // Nothing was written out: only the archive is in the directory.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        // A zip, as most Windows releases ship.
+        let zipped = dir.path().join("b.zip");
+        {
+            let file = std::fs::File::create(&zipped).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            writer
+                .start_file::<_, ()>("tool.exe", zip::write::FileOptions::default())
+                .unwrap();
+            writer.write_all(b"hi").unwrap();
+            writer.finish().unwrap();
+        }
+        assert_eq!(super::members(&zipped).unwrap(), ["tool.exe"]);
+
+        // A tar.xz, which has to be decompressed before it can be listed.
+        let txz = dir.path().join("c.tar.xz");
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(2);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "nested/fresh", &b"hi"[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        std::fs::write(&txz, compressed).unwrap();
+        assert_eq!(super::members(&txz).unwrap(), ["nested/fresh"]);
     }
 
     #[test]
