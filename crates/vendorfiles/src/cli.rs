@@ -21,8 +21,26 @@ use crate::spec;
 )]
 pub struct Cli {
     /// Config file path, or a folder containing the config file.
-    #[arg(short = 'c', long = "config", num_args = 0..=1, value_name = "file/folder path")]
-    pub config: Option<Option<String>>,
+    ///
+    /// The value is required, unlike the reference's `[file/folder path]`: naming the option is
+    /// only ever a request for a specific config, and an optional value would let `-c` swallow
+    /// the next word after a command that takes names.
+    #[arg(
+        short = 'c',
+        long = "config",
+        num_args = 1,
+        value_name = "file/folder path",
+        global = true
+    )]
+    pub config: Option<String>,
+
+    /// Print plain lines instead of animating a live display.
+    ///
+    /// Global, so it reads naturally either side of the subcommand. `-p` is why `--pr` no longer
+    /// has a short form: a flag that means one thing everywhere is worth more than the one
+    /// letter the reference spent on `update`'s only option.
+    #[arg(short = 'p', long = "plain", global = true)]
+    pub plain: bool,
 
     #[command(subcommand)]
     pub command: Command,
@@ -45,7 +63,7 @@ pub enum Command {
     )]
     Update {
         names: Vec<String>,
-        #[arg(short = 'p', long = "pr")]
+        #[arg(long = "pr")]
         pr: bool,
     },
 

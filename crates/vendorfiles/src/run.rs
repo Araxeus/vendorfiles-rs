@@ -3,6 +3,7 @@
 use anyhow::{Result, bail};
 use vendorfiles_core::error::VendorError;
 use vendorfiles_core::model::{DefaultOptions, RawDependency};
+use vendorfiles_core::progress::Reporter;
 use vendorfiles_core::template::{
     is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
 };
@@ -22,10 +23,24 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         };
     }
 
-    let config_location = cli.config.flatten();
+    // Set before the session builds its display: `--pr` means stdout is a machine-readable
+    // summary, so nothing should animate. It only applies to a whole-project update, matching
+    // the reference.
+    if let Command::Update { names, pr: true } = &cli.command
+        && names.is_empty()
+    {
+        vendorfiles_core::ui::set_pr_mode(true);
+    }
+
+    let config_location = cli.config;
     let workspace = Workspace::load(config_location.as_deref()).await?;
     let github = GitHubClient::new(auth::resolve_token_async().await)?;
-    let mut session = Session::new(github, workspace);
+    // `--plain` asks for the output a pipe would get: no region, just the lines.
+    let mut session = if cli.plain {
+        Session::with_reporter(github, workspace, Reporter::new(false))
+    } else {
+        Session::new(github, workspace)
+    };
 
     match cli.command {
         Command::Sync { force } => {
@@ -38,10 +53,8 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 .await?;
         }
 
-        Command::Update { names, pr } => {
+        Command::Update { names, pr: _ } => {
             if names.is_empty() {
-                // `--pr` only applies to a full update, matching the reference.
-                vendorfiles_core::ui::set_pr_mode(pr);
                 session
                     .sync(SyncOptions {
                         should_update: true,

@@ -316,7 +316,8 @@ vendorDependencies:
 Usage: vendor command [options]
 
 Options:
-  -c, --config [file/folder path]             Config file path / Folder containing the config file
+  -c, --config <file/folder path>             Config file path / Folder containing the config file
+  -p, --plain                                 Print plain lines instead of a live display
   -v, --version                               output the current version
   -h, --help                                  display help for command
 
@@ -330,12 +331,20 @@ Commands:
   help [command]                              display help for command
 ```
 
-The config location can also come from `VENDOR_CONFIG`; `-c` wins if both are set.
+Both root options are global, so they read naturally on either side of the subcommand:
+`vendor -c ./conf.json sync` and `vendor sync -c ./conf.json` are the same command. `-c` requires
+its value — naming the option is only ever a request for a specific config — so it can never claim
+a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
+are set.
+
+`-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead —
+the same output a redirected stdout gets. It works on either side of the subcommand
+(`vendor -p sync`, `vendor sync --plain`).
 
 | Command | What it does |
 | --- | --- |
 | `vendor sync` | Download everything the config declares. `-f`/`--force` re-downloads even when the lockfile agrees. |
-| `vendor update [names...]` | Resolve each dependency's latest version and install it. `-p`/`--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
+| `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
 | `vendor outdated` | List dependencies with a newer version available. |
 | `vendor install <url/name> [version]` | Add a dependency. Accepts a full URL, `owner/repo`, or a name to search for. `-n`/`--name` sets the config key; `-f`/`--files` lists the files. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
@@ -448,7 +457,9 @@ can validate and autocomplete it:
 CLI help text, argument errors, exit codes, log wording, ANSI colours, lockfile bytes and
 config write-back formatting are all matched deliberately - the help fixtures in
 [`crates/vendorfiles/tests/fixtures/help`](./crates/vendorfiles/tests/fixtures/help) are captured
-from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite.
+from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite. The only departures are the
+two lines `-p`/`--plain` adds and takes away: the fixtures keep the reference text, and the test
+applies that delta explicitly.
 
 The main difference:
 Version lookups run concurrently, and dependencies download
@@ -468,9 +479,17 @@ Measured against `vendorfiles@1.4.2` with 8 dependencies:
 ## Development
 
 ```bash
-cargo test --workspace
+cargo xtask ci   # every gate CI applies: check, rustfmt, clippy, tests
+```
+
+Or one at a time. The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` is the
+same gate as the workflow; the flags below are what CI spells out and are redundant locally.
+
+```bash
+cargo check --workspace --all-targets
 cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -W clippy::pedantic -W clippy::cargo -W clippy::nursery -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --workspace
 ```
 
 The workspace is three crates:
@@ -479,7 +498,7 @@ The workspace is three crates:
 | --- | --- |
 | `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
 | `crates/vendorfiles` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
-| `xtask` | `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
+| `xtask` | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest update, format, commit, tag. |
 
 See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
 parity contract.

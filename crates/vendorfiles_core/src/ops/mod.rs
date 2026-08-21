@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::config::Workspace;
 use crate::error::Result;
 use crate::github::GitHubClient;
+use crate::progress::Reporter;
 
 pub use install::InstallOptions;
 pub use sync::SyncOptions;
@@ -25,15 +26,25 @@ pub use sync::SyncOptions;
 pub struct Session {
     pub github: Arc<GitHubClient>,
     pub workspace: Workspace,
+    /// The live display. Animates only when stderr is a terminal, so piped runs still emit
+    /// plain, ordered lines.
+    pub progress: Arc<Reporter>,
 }
 
 impl Session {
-    /// Pairs a workspace with a client.
+    /// Pairs a workspace with a client, detecting whether to animate progress.
     #[must_use]
     pub fn new(github: GitHubClient, workspace: Workspace) -> Self {
+        Self::with_reporter(github, workspace, Reporter::detect())
+    }
+
+    /// Pairs a workspace with a client and an explicit display.
+    #[must_use]
+    pub fn with_reporter(github: GitHubClient, workspace: Workspace, progress: Reporter) -> Self {
         Self {
             github: Arc::new(github),
             workspace,
+            progress: Arc::new(progress),
         }
     }
 

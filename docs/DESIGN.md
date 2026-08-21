@@ -26,6 +26,7 @@ vendorfiles-rs/
 │   │       ├── lib.rs
 │   │       ├── error.rs      # VendorError — Display == user-facing message
 │   │       ├── ui.rs         # ANSI colors, INFO/SUCCESS/WARNING/ERROR routing, RunOptions
+│   │       ├── progress/     # the live display, and the plain-line fallback
 │   │       ├── model.rs      # FileEntry / FileTarget / VendorDependency / VendorConfig
 │   │       ├── template.rs   # {version} / {release} / {vendorFolder} substitution, trims
 │   │       ├── config/
@@ -217,7 +218,7 @@ changing what the user sees required splitting an install into three stages, in 
 | --- | --- | --- |
 | `Session::prepare` | `&self` | resolve version + staleness; read-only |
 | `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
-| `Session::commit` | `&mut self` | strictly ordered: print, write lockfile, write config |
+| `Session::commit` | `&mut self` | strictly ordered: write lockfile, write config, settle the line |
 
 `sync` then:
 
@@ -253,6 +254,57 @@ Measured against `vendorfiles@1.4.2` on a config with 8 dependencies:
 | `sync` (everything up to date) | 721 ms | 66 ms |
 | `outdated` | 3426 ms | 908 ms |
 | `--version` | 706 ms | 54 ms |
+
+### 4.1 Reporting
+
+`progress` owns the display. Each dependency holds an `Arc<progress::Dependency>` — shared
+because the download task and the ordered `commit` describe the same line. `fsx::stream_to_file`
+advances that line per chunk, so it tracks bytes actually written.
+
+The display is a fixed region at the bottom of the terminal, drawn with ratatui's inline viewport
+and redrawn from a snapshot of `RunState` on an 80 ms tick. Four modules, one of which touches a
+terminal:
+
+| Module | Responsibility |
+| --- | --- |
+| `state` | `RunState`, `Stage`, row assignment, byte accounting. Plain data. |
+| `view` | `view(&RunState, tick, area, buf)` — pure, so frames are asserted cell by cell in tests. |
+| `driver` | The render thread: owns the `Terminal`, ticks, inserts lines above, tears down. |
+| `ansi` | Parses our own SGR strings back into ratatui text. |
+
+The region is `5 + rows` lines and at most `REGION_WIDTH` columns: frame, summary bar, worker rows,
+rule, footer. `rows` is fixed once, after staleness is known, at
+`min(MAX_CONCURRENT_DOWNLOADS, stale, rows_that_fit(terminal))`; at zero — `outdated`, or a project
+already up to date — the rule and footer go and the box is three lines.
+
+Rows are places, not a list. `RunState::assign` gives a dependency a row and it keeps that row
+until it has nothing left to show; a freed row is refilled in place and an empty row stays empty,
+so no row moves for an event that concerned another. Empty rows are filled by `Stage::priority` —
+committing, then active, then waiting, then settled — and then by config order. Anything in flight
+without a row is counted in the footer.
+
+A settled dependency reports on its own row; its outcome line is held until `Reporter::end` prints
+them all as the region comes down. Emitting them as they happen pushes the region a row down the
+screen each time, since `insert_before` only scrolls above the region when the region already sits
+on the last row. Warnings and errors still go up immediately.
+
+Every terminal write goes through `print_out` or `print_err`, which hand the line to the render
+thread; a raw `println!` lands wherever the cursor happens to be. `driver::wipe` returns the cursor
+to the region's first row after clearing, since `Terminal::clear` leaves it at the bottom.
+
+Animation requires **stdout** to be a terminal and `--pr` to be off. Stdout rather than stderr is
+forced: anchoring an inline viewport asks for the cursor position, and crossterm sends that query to
+stdout whatever the backend holds. When it does not animate, a dependency buffers its `INFO:` lines
+and flushes them as it settles, so piped output keeps the bytes and ordering it had before the
+display existed.
+
+The region is wiped and the cursor restored on every exit — `end()` on each of `sync`'s error paths,
+a `Drop` on the driver, and a panic hook, since `draw` hides the cursor.
+
+Within a dependency, `record` notes destinations after each batch of transfers joins rather than
+as each one lands, so the piped record follows the `files` array even though the network decides
+completion order. `ui` routes every line through the render thread, so a warning arriving
+mid-run appears above the region instead of being overwritten.
 
 ## 5. Parity contract
 
@@ -319,6 +371,18 @@ code and the complete resulting file tree (including binary payloads). Covered:
    than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
-9. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+9. **`-p`/`--plain`** turns the live display off, and is the reason `--pr` no longer has a short
+   form — a global flag that means one thing everywhere is worth more than the letter the
+   reference spent on `update`'s only option. The two help screens differ from the captured
+   reference by exactly those two lines; `tests/fixtures/help` keeps the reference text and the
+   test applies the delta, so both stay checkable.
+10. **Root options are global**, so `-c`/`--config` and `-p`/`--plain` are accepted on either side
+   of the subcommand; Commander only reads them before it. `CommandSpec::option_for` falls back to
+   `ROOT_OPTIONS` for this reason — without it the operand scanner counts a root option's value as a
+   positional and misreports the count in `too many arguments`. `-c` also **requires** its value,
+   where the reference declares `[file/folder path]`: an optional value would let `-c` claim the
+   next word after a command that takes names, and naming the option is only ever a request for a
+   specific config. Help says `<file/folder path>` accordingly.
+11. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.

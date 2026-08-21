@@ -1,17 +1,17 @@
 //! `cargo xtask release` — the Rust counterpart of the reference project's `scripts/release.ts`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use dialoguer::{Select, theme::ColorfulTheme};
-use indicatif::{ProgressBar, ProgressStyle};
 use semver::Version;
+
+use crate::sh;
 
 /// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
 pub fn run() -> Result<()> {
-    let root = workspace_root()?;
+    let root = sh::workspace_root()?;
 
     let status = git(&root, &["status", "--porcelain"])?;
     if !status.trim().is_empty() {
@@ -51,22 +51,22 @@ pub fn run() -> Result<()> {
     println!("Updated Cargo.toml to version {new_version}");
 
     // Refresh Cargo.lock so the commit is self-consistent.
-    run_command(
+    sh::run(
         &root,
         "Refreshing Cargo.lock",
         "cargo",
         &["check", "--workspace", "--quiet"],
     )?;
-    run_command(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
+    sh::run(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
 
-    run_command(&root, "Staging changes", "git", &["add", "."])?;
-    run_command(
+    sh::run(&root, "Staging changes", "git", &["add", "."])?;
+    sh::run(
         &root,
         &format!("Committing v{new_version}"),
         "git",
         &["commit", "-m", &format!("v{new_version}")],
     )?;
-    run_command(
+    sh::run(
         &root,
         &format!("Tagging v{new_version}"),
         "git",
@@ -144,14 +144,6 @@ fn replace_keeping_decor(slot: &mut toml_edit::Item, value: &str) {
     }
 }
 
-fn workspace_root() -> Result<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .context("locating the workspace root")
-}
-
 fn git(root: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
@@ -166,39 +158,6 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Runs a command under a spinner, so a slow step (`cargo check`) never looks like a hang.
-///
-/// The child's output is captured rather than inherited — otherwise it would fight the spinner
-/// for the same lines — and is replayed only when the command fails.
-fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result<()> {
-    let spinner = ProgressBar::new_spinner().with_message(label.to_owned());
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg} {elapsed}")
-            .expect("the spinner template is valid"),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
-
-    let started = Instant::now();
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .output()
-        .with_context(|| format!("running {program} {}", args.join(" ")));
-    spinner.finish_and_clear();
-
-    let output = output?;
-    if !output.status.success() {
-        bail!(
-            "{program} {} failed:\n{}{}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    println!("✔ {label} ({:.1?})", started.elapsed());
-    Ok(())
 }
 
 #[cfg(test)]

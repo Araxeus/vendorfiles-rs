@@ -2,7 +2,9 @@
 
 #![allow(clippy::multiple_crate_versions)]
 
+mod ci;
 mod release;
+mod sh;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -16,12 +18,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run every check CI runs: cargo check, rustfmt, clippy and the tests.
+    Ci,
     /// Bump the workspace version, commit, and tag `v{version}`.
     Release,
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Ci => ci::run(),
         Command::Release => release::run(),
     }
 }

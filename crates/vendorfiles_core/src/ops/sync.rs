@@ -1,7 +1,6 @@
 //! `sync`, `update` and `outdated` — all three are one traversal with different flags.
 
 use std::collections::VecDeque;
-use std::io::Write;
 use std::sync::Arc;
 
 use tokio::sync::Semaphore;
@@ -11,6 +10,7 @@ use crate::error::{Result, VendorError};
 use crate::model::Dependency;
 use crate::ops::install::{Prepared, download};
 use crate::ops::{InstallOptions, Session};
+use crate::progress;
 use crate::ui;
 
 /// How many dependencies may be downloading at once.
@@ -36,6 +36,7 @@ pub struct SyncOptions {
 struct Plan {
     dependency: Dependency,
     options: InstallOptions,
+    progress: Arc<progress::Dependency>,
 }
 
 /// What `commit` needs to know about a dependency after its `Prepared` has been consumed.
@@ -56,7 +57,7 @@ struct Bump {
     new_version: String,
 }
 
-type DownloadTask = JoinHandle<Result<(Prepared, Vec<String>)>>;
+type DownloadTask = JoinHandle<Result<Prepared>>;
 
 impl Session {
     /// Walks every dependency, installing or reporting as configured.
@@ -68,10 +69,9 @@ impl Session {
     /// 2. **Download** each dependency on its own task, up to
     ///    [`MAX_CONCURRENT_DOWNLOADS`] at a time, collecting the log lines instead of
     ///    printing them.
-    /// 3. **Commit** in config order: print each dependency's lines, write its lockfile, update
-    ///    the config. Because this awaits the tasks in order, output still streams out
-    ///    dependency by dependency, in exactly the reference's sequence, while later
-    ///    dependencies are still downloading.
+    /// 3. **Commit** in config order: write each lockfile, update the config, and settle that
+    ///    dependency's line. Awaiting the tasks in order is what keeps piped output ordered
+    ///    while later dependencies are still downloading.
     ///
     /// Errors from an earlier pass are held until the ordered pass reaches them, so the first
     /// failure reported is always the first failure in the file. When one is reached, the
@@ -81,7 +81,12 @@ impl Session {
     ///
     /// Returns the first error any dependency produces; earlier dependencies keep their effects.
     pub async fn sync(&mut self, options: SyncOptions) -> Result<()> {
+        self.progress.begin(self.workspace.dependencies.len());
         let plans = self.plan(&options)?;
+        if plans.is_empty() {
+            self.progress.end();
+            return Ok(());
+        }
 
         let versions = futures_util::future::join_all(
             plans
@@ -89,21 +94,45 @@ impl Session {
                 .map(|plan| self.decide_version(&plan.dependency, &plan.options)),
         )
         .await;
+        self.progress.summary(if options.show_outdated_only {
+            "checking for updates"
+        } else {
+            "installing"
+        });
 
         let mut prepared = Vec::with_capacity(plans.len());
         for (plan, version) in plans.into_iter().zip(versions) {
-            prepared.push(self.prepare(plan.dependency, plan.options, version?).await);
+            let version = match version {
+                Ok(version) => version,
+                Err(error) => {
+                    plan.progress.failed();
+                    self.progress.end();
+                    return Err(error);
+                }
+            };
+            prepared.push(
+                self.prepare(plan.dependency, plan.options, version, plan.progress)
+                    .await,
+            );
         }
+
+        // Now that staleness is known, reserve exactly the rows the downloads can use: a
+        // project already up to date - or `outdated`, which never downloads - gets none, and
+        // the height is settled before the first byte moves.
+        let working = prepared.iter().filter(|item| item.has_work()).count();
+        self.progress
+            .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
         let mut tasks = self.spawn_downloads(prepared);
         let mut bumps: Vec<Bump> = Vec::new();
 
         while let Some(task) = tasks.pop_front() {
             let outcome = task.await.map_err(|e| VendorError::Http(e.to_string()));
-            let (prepared, logs) = match outcome.and_then(|inner| inner) {
-                Ok(pair) => pair,
+            let prepared = match outcome.and_then(|inner| inner) {
+                Ok(prepared) => prepared,
                 Err(error) => {
                     cancel(&tasks);
+                    self.progress.end();
                     return Err(error);
                 }
             };
@@ -115,7 +144,7 @@ impl Session {
                 tracked: prepared.options.should_update && !prepared.options.show_outdated_only,
             };
 
-            match self.commit(prepared, logs).await {
+            match self.commit(prepared).await {
                 Ok(new_version) => {
                     if let Some(bump) = candidate.into_bump(new_version) {
                         bumps.push(bump);
@@ -123,11 +152,13 @@ impl Session {
                 }
                 Err(error) => {
                     cancel(&tasks);
+                    self.progress.end();
                     return Err(error);
                 }
             }
         }
 
+        self.progress.end();
         if ui::pr_mode() && !bumps.is_empty() {
             print_pull_request_body(&bumps);
         }
@@ -140,6 +171,7 @@ impl Session {
         for (name, raw) in &self.workspace.dependencies {
             raw.validate(name)?;
             let dependency = raw.resolve(name)?;
+            let progress = Arc::new(self.progress.dependency(name));
             plans.push(Plan {
                 options: InstallOptions {
                     should_update: !dependency.locked && options.should_update,
@@ -148,6 +180,7 @@ impl Session {
                     show_outdated_only: options.show_outdated_only,
                 },
                 dependency,
+                progress,
             });
         }
         Ok(plans)
@@ -210,7 +243,5 @@ fn print_pull_request_body(bumps: &[Bump]) {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let mut stdout = std::io::stdout();
-    let _ = stdout.write_all(body.as_bytes());
-    let _ = stdout.flush();
+    crate::progress::print_raw(body.as_bytes());
 }
