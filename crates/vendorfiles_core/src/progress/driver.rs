@@ -214,6 +214,11 @@ fn close(terminal: &mut Term) {
 /// [`close`] has to put it back.
 pub fn show_cursor() {
     let mut out = io::stdout();
+    // Without a terminal there was no display and so no hidden cursor to give back; the escape
+    // bytes would only land in whatever a pipe or `--pr` is collecting.
+    if !out.is_terminal() {
+        return;
+    }
     let _ = execute!(out, MoveToColumn(0), Show);
     let _ = out.flush();
 }

@@ -34,9 +34,14 @@ fn restore_terminal_on_interrupt() {
         if tokio::signal::ctrl_c().await.is_err() {
             return; // No handler to be had; the default behaviour still stops the process.
         }
-        vendorfiles_core::progress::restore_terminal();
-        // A second press falls through to the operating system's own handling, so an impatient
-        // user is never stuck waiting on the tidy-up.
+        // Listening for the signal replaced the operating system's own handling for the rest of
+        // the process, so a second press has to be listened for as well — the tidy-up waits on a
+        // render thread that may be mid-frame, and an impatient user must never wait on it.
+        let restoring = tokio::task::spawn_blocking(vendorfiles_core::progress::restore_terminal);
+        tokio::select! {
+            _ = restoring => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
         std::process::exit(i32::from(INTERRUPTED));
     });
 }
