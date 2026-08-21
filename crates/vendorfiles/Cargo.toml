@@ -22,10 +22,10 @@ vendorfiles_core.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true
+indexmap.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-indexmap.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

@@ -10,6 +10,7 @@ use vendorfiles_core::template::{
 use vendorfiles_core::{GitHubClient, InstallOptions, Session, SyncOptions, Workspace, auth};
 
 use crate::cli::{Cli, Command};
+use crate::known;
 
 /// Loads the workspace and runs the requested command.
 ///
@@ -165,7 +166,17 @@ async fn install(
     // `https://www.github.com/owner/repo`, and that exact string is what it compares against
     // config entries below. `stored` is the same repository without the `www.`, which is the
     // form every documented example uses and the form the search path already returns.
-    let (lookup, stored) = if is_github_url(source) {
+    // A name this tool knows describes itself, so neither a search nor `--files` is needed.
+    // Anything explicit the user passed still wins.
+    let known = if files.is_none() {
+        known::find(source)
+    } else {
+        None
+    };
+
+    let (lookup, stored) = if let Some(known) = known.as_ref() {
+        (known.repository.to_owned(), known.repository.to_owned())
+    } else if is_github_url(source) {
         (source.to_owned(), source.to_owned())
     } else if is_owner_repo_shorthand(source) {
         (
@@ -209,13 +220,23 @@ async fn install(
                 .map(vendorfiles_core::FileEntry::Simple)
                 .collect(),
         ),
-        None => existing.files.clone(),
+        // An entry already in the config describes itself; otherwise a known name does.
+        None => existing
+            .files
+            .clone()
+            .or_else(|| known.as_ref().map(|known| known.files.clone())),
     };
     if files.as_ref().is_none_or(Vec::is_empty) {
         bail!(VendorError::MissingFilesOption);
     }
 
-    let entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
+    let mut entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
+    // Where a known dependency belongs, unless the config already says.
+    if entry.vendor_folder.is_none()
+        && let Some(known) = known.as_ref()
+    {
+        entry.vendor_folder = known.folder.clone();
+    }
     let dependency = entry.resolve(&name)?;
 
     session

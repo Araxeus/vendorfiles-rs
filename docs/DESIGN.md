@@ -383,6 +383,14 @@ code and the complete resulting file tree (including binary payloads). Covered:
    where the reference declares `[file/folder path]`: an optional value would let `-c` claim the
    next word after a command that takes names, and naming the option is only ever a request for a
    specific config. Help says `<file/folder path>` accordingly.
-11. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+11. **`vendor` can vendor itself.** `install` resolves a few names without a search — `vendorfiles`,
+   `vendorfiles-rs`, `vendor` — to an entry for this repository's release asset, rooted at the
+   directory holding the running binary (`crates/vendorfiles/src/known.rs`). When a download's
+   destination *is* the running executable, `fsx::replace_running_executable` stages it alongside
+   and hands the swap to `self-replace`, because the image is locked on Windows and unsafe to
+   overwrite anywhere; `remove_previously_installed` skips it for the same reason. The staged file
+   is given the running binary's mode, since the crate does not document what it does with
+   permissions.
+12. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.

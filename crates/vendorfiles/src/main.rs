@@ -8,6 +8,7 @@
 
 mod cli;
 mod help;
+mod known;
 mod run;
 mod spec;
 
