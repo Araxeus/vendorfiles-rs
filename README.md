@@ -475,9 +475,13 @@ INFO: bitwarden-secrets-cli would be added as:
   "bitwarden-secrets-cli": {
     "repository": "https://github.com/bitwarden/sdk",
     "files": [
-      { "{release}/bws-x86_64-pc-windows-msvc-{version}.zip": { "bws.exe": "bws.exe" } }
+      {
+        "{release}/bws-x86_64-unknown-linux-gnu-{version}.zip": {
+          "bws": "bws"
+        }
+      }
     ],
-    "releaseRegex": "^bws-v\d+\.\d+\.\d+$"
+    "releaseRegex": "^bws-v\\d+\\.\\d+\\.\\d+$"
   }
 }
 INFO: files would be written to /home/you/project/vendor/bitwarden-secrets-cli
