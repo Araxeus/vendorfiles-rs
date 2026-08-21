@@ -176,14 +176,42 @@ programs:
         assert!(refused.is_err());
     }
 
+    /// A file that ships at the repository root, two directories above this crate.
+    fn repository_file(name: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()))
+    }
+
     /// The published JSON Schema, which editors validate `registry.yml` against.
     fn published_schema() -> serde_json::Value {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../registry.schema.json")
-            .canonicalize()
-            .expect("registry.schema.json sits at the repository root");
-        let text = std::fs::read_to_string(path).expect("readable");
-        serde_json::from_str(&text).expect("the schema is valid JSON")
+        serde_json::from_str(&repository_file("registry.schema.json")).expect("valid JSON")
+    }
+
+    /// The same schema compiled as Draft 2020-12.
+    ///
+    /// Building it is itself a test: a `$ref` that resolves to nothing, or a keyword the draft
+    /// does not define, fails here rather than silently doing nothing in an editor.
+    fn compiled_schema() -> jsonschema::Validator {
+        jsonschema::draft202012::new(&published_schema())
+            .expect("registry.schema.json compiles as Draft 2020-12")
+    }
+
+    /// A registry document as the validator wants it: YAML is JSON with a friendlier syntax, so
+    /// the fixtures stay in the form a contributor would actually write.
+    fn as_json(document: &str) -> serde_json::Value {
+        serde_yaml_ng::from_str(document).expect("valid YAML")
+    }
+
+    /// Every way one document offends the schema, for an assertion message worth reading.
+    fn why_invalid(validator: &jsonschema::Validator, document: &serde_json::Value) -> String {
+        validator
+            .iter_errors(document)
+            .map(|error| format!("  {}: {error}", error.instance_path()))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// The fields serde will accept, taken from its own complaint about one it will not.
@@ -283,5 +311,184 @@ nope: 1
     fn an_empty_registry_is_valid() {
         let document = parse("version: 1\n").expect("valid");
         assert!(document.programs.is_empty());
+    }
+
+    /// The file this repository actually ships, against the schema that ships beside it. Nothing
+    /// else proves the two have ever met.
+    #[test]
+    fn the_shipped_registry_satisfies_the_published_schema() {
+        let text = repository_file("registry.yml");
+        parse(&text).expect("registry.yml parses");
+        let registry = as_json(&text);
+        let validator = compiled_schema();
+        assert!(
+            validator.is_valid(&registry),
+            "registry.yml does not satisfy registry.schema.json:\n{}",
+            why_invalid(&validator, &registry)
+        );
+    }
+
+    /// A repository file takes no `targets`, so the `allOf` rule has to let it through — and the
+    /// shipped registry has no such entry to prove it with.
+    const PATH_FORM: &str = r"
+version: 1
+programs:
+  starship-preset:
+    repository: https://github.com/starship/starship
+    path: docs/public/presets/toml/nerd-font-symbols.toml
+    hashVersionFile: true
+    as: starship.toml
+";
+
+    /// The compact form and the path form, from the fixtures above; the explicit form arrives
+    /// with `registry.yml`, where `fzf` names an asset per host.
+    #[test]
+    fn the_compact_and_path_forms_satisfy_the_published_schema() {
+        let validator = compiled_schema();
+        for (what, document) in [("the compact form", COMPACT), ("the path form", PATH_FORM)] {
+            let value = as_json(document);
+            assert!(
+                validator.is_valid(&value),
+                "the schema refuses {what}:\n{}",
+                why_invalid(&validator, &value)
+            );
+            parse(document).unwrap_or_else(|error| panic!("{what} must parse: {error}"));
+        }
+    }
+
+    /// One malformed entry per rule the schema enforces, each named after the rule it breaks.
+    ///
+    /// Naming them one by one is the point: a failure says which constraint stopped holding
+    /// rather than only that something somewhere loosened.
+    const REFUSED: &[(&str, &str)] = &[
+        (
+            "a repository file that also names an asset",
+            r#"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    asset: "{release}/both{ext}"
+"#,
+        ),
+        (
+            "a repository file that also names a member",
+            r"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    member: inner/file
+",
+        ),
+        (
+            "a repository file that also lists targets",
+            r"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "a release entry with no targets at all",
+            r"
+version: 1
+programs:
+  nowhere:
+    repository: https://github.com/example/nowhere
+",
+        ),
+        (
+            "an empty targets map",
+            r"
+version: 1
+programs:
+  nowhere:
+    repository: https://github.com/example/nowhere
+    targets: {}
+",
+        ),
+        (
+            "a host key that is not `{os}-{arch}`",
+            r"
+version: 1
+programs:
+  shouty:
+    repository: https://github.com/example/shouty
+    targets:
+      Windows-X86_64: x86_64-pc-windows-msvc
+",
+        ),
+        (
+            "a repository that is not a GitHub URL",
+            r"
+version: 1
+programs:
+  elsewhere:
+    repository: https://gitlab.com/example/elsewhere
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "an explicit target with no asset",
+            r"
+version: 1
+programs:
+  assetless:
+    repository: https://github.com/example/assetless
+    targets:
+      linux-x86_64:
+        member: inner/bin
+",
+        ),
+        (
+            "a field this build does not know",
+            r#"
+version: 1
+programs:
+  sneaky:
+    repository: https://github.com/example/sneaky
+    vendorFolder: "C:/Windows/System32"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "a program name `add` could not write to a config",
+            r"
+version: 1
+programs:
+  -dashed:
+    repository: https://github.com/example/dashed
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "a format version this build does not support",
+            r"
+version: 2
+programs: {}
+",
+        ),
+    ];
+
+    /// What the schema is for: telling a contributor their entry is wrong before CI does.
+    #[test]
+    fn the_published_schema_refuses_malformed_entries() {
+        let validator = compiled_schema();
+        for (what, document) in REFUSED {
+            assert!(
+                !validator.is_valid(&as_json(document)),
+                "the schema accepts {what}"
+            );
+        }
     }
 }
