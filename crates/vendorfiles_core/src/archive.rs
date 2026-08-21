@@ -196,7 +196,12 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
                 let file = File::open(archive)?;
                 tar_names(flate2::read::GzDecoder::new(BufReader::new(file)))
             } else {
-                // A lone compressed file, which extraction writes out under this one name.
+                // A lone compressed file, which extraction writes out under this one name. None of
+                // the payload is needed to say that, but read it through anyway, as the xz branch
+                // does: a stream that stops decoding — or whose checksum does not match, which
+                // only shows up at the very end — should be an error here rather than a surprise
+                // at install time.
+                std::io::copy(&mut decoder, &mut std::io::sink())?;
                 Ok(vec![lone_file_name(archive, ".gz")])
             }
         }
@@ -638,6 +643,37 @@ mod tests {
                 "padded with {pad} trailing bytes"
             );
         }
+    }
+
+    #[test]
+    fn a_damaged_lone_compressed_file_is_an_error_rather_than_a_made_up_name() {
+        // Both branches derive a lone file's name from the archive's own, so a payload that does
+        // not decode could quietly look like one. It has to stay an error, as it is for extraction.
+        let dir = tempfile::tempdir().unwrap();
+        let mut whole = Vec::new();
+        {
+            let mut encoder =
+                flate2::write::GzEncoder::new(&mut whole, flate2::Compression::fast());
+            encoder.write_all(&vec![b'q'; 400_000]).unwrap();
+            encoder.finish().unwrap();
+        }
+
+        // Truncated well past the 512 bytes the tar sniff reads.
+        let mut truncated = whole.clone();
+        truncated.truncate(truncated.len() / 2);
+        let truncated_path = dir.path().join("notes.txt.gz");
+        std::fs::write(&truncated_path, truncated).unwrap();
+        assert!(super::members(&truncated_path).is_err());
+        assert!(extract(&truncated_path, &dir.path().join("out-truncated")).is_err());
+
+        // Intact deflate data with a damaged trailer: only reading to the very end catches this.
+        let mut checksum = whole;
+        let trailer = checksum.len() - 5;
+        checksum[trailer] ^= 0xff;
+        let checksum_path = dir.path().join("checksum.txt.gz");
+        std::fs::write(&checksum_path, checksum).unwrap();
+        assert!(super::members(&checksum_path).is_err());
+        assert!(extract(&checksum_path, &dir.path().join("out-checksum")).is_err());
     }
 
     #[test]
