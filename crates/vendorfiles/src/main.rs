@@ -40,7 +40,11 @@ fn restore_terminal_on_interrupt() {
         let restoring = tokio::task::spawn_blocking(vendorfiles_core::progress::restore_terminal);
         tokio::select! {
             _ = restoring => {}
-            _ = tokio::signal::ctrl_c() => {}
+            _ = tokio::signal::ctrl_c() => {
+                // Abandoning the wait must not abandon the cursor: that is the part of the
+                // tidy-up the session cannot do without, and it costs nothing to do here.
+                vendorfiles_core::progress::show_cursor();
+            }
         }
         std::process::exit(i32::from(INTERRUPTED));
     });

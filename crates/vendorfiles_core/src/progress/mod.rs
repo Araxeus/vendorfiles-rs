@@ -97,6 +97,15 @@ pub fn restore_terminal() {
     driver::show_cursor();
 }
 
+/// Shows the cursor and returns at once, for a caller that cannot afford to wait.
+///
+/// [`restore_terminal`] gives the render thread a moment to take the region down first. A user
+/// pressing Ctrl-C a second time has said they will not wait for that, and a visible cursor is
+/// worth more to the session that follows than a tidy region.
+pub fn show_cursor() {
+    driver::show_cursor();
+}
+
 /// Writes raw bytes to stdout, for output that is not line-shaped.
 ///
 /// Only the `--pr` body, which never animates — it is the whole output of the command.
@@ -484,7 +493,7 @@ impl Drop for Transfer<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Reporter, column, print_out, restore_terminal};
+    use super::{Reporter, column, print_out, restore_terminal, show_cursor};
     use crate::progress::state::{Bytes, Outcome, RunState, Stage};
     use crate::progress::view::NAME_WIDTH;
     use std::path::Path;
@@ -687,10 +696,12 @@ mod tests {
         // The interrupt handler runs whatever the run was doing, including before a display
         // exists and after one has already been closed.
         restore_terminal();
+        show_cursor();
         let reporter = Reporter::new(false);
         reporter.begin(1);
         reporter.end();
         restore_terminal();
+        show_cursor();
     }
 
     #[test]
