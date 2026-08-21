@@ -81,8 +81,12 @@ fn expected_help(name: &str) -> String {
                 "  -h, --help              display help for command",
                 &format!(
                     "{:<24}{}
+{:<24}{}
   -h, --help              display help for command",
-                    "  --refresh", "Re-check the program registry"
+                    "  --refresh",
+                    "Re-check the program registry",
+                    "  --dry-run",
+                    "Print the entry, change nothing"
                 ),
             )
             .replace(
@@ -386,6 +390,102 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
+}
+
+/// A registry with one program, written next to the project.
+fn registry(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("registry.yml");
+    std::fs::write(
+        &path,
+        r#"
+version: 1
+programs:
+  fd:
+    aliases: [fdfind]
+    repository: https://github.com/sharkdp/fd
+    asset: "{release}/fd-v{version}-{target}{ext}"
+    member: "fd-v{version}-{target}/fd{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+"#,
+    )
+    .expect("writing the registry");
+    path
+}
+
+/// Runs the binary with a registry of our own and no network reachable through it.
+fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
+    let registry = registry(dir);
+    Command::new(env!("CARGO_BIN_EXE_vendor"))
+        .args(args)
+        .current_dir(dir)
+        .env_remove("VENDOR_CONFIG")
+        .env_remove("INIT_CWD")
+        .env_remove("PWD")
+        .env("GITHUB_TOKEN", "")
+        .env("VENDOR_REGISTRY", &registry)
+        .output()
+        .expect("running the vendor binary")
+}
+
+// ---------------------------------------------------------------------------------------
+// `--dry-run`, which is also how the registry path is covered without a network
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_dry_run_reports_the_registry_entry_and_writes_nothing() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let before = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+
+    let out = vendor_with_registry(dir.path(), &["add", "fd", "--dry-run"]);
+    let printed = stdout(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    // The platform's own asset, with `{version}` left for the install to resolve.
+    assert!(
+        printed.contains("\"repository\": \"https://github.com/sharkdp/fd\""),
+        "{printed}"
+    );
+    assert!(printed.contains("{release}/fd-v{version}-"), "{printed}");
+    assert!(printed.contains("{version}"), "{printed}");
+    assert!(printed.contains("would be added as"), "{printed}");
+    assert!(
+        printed.contains("nothing was downloaded or written"),
+        "{printed}"
+    );
+
+    // Nothing touched: no config change, no vendor folder, no lockfile.
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("vendor.json")).unwrap(),
+        before
+    );
+    assert!(!dir.path().join("vendor").exists(), "a folder was created");
+}
+
+#[test]
+fn a_dry_run_resolves_an_alias_to_its_canonical_name() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fdfind", "--dry-run"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    // Keyed `fd`, the canonical name, not the alias that was typed.
+    assert!(stdout(&out).contains("\"fd\": {"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_dry_run_of_an_unknown_name_never_reaches_the_network() {
+    // Not in the registry and not a URL, so the only way on is a GitHub search — which must not
+    // be attempted before `--files` is even satisfied.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(
+        dir.path(),
+        &["add", "definitely-not-a-program", "--dry-run"],
+    );
+    assert_ne!(code(&out), 0);
+    assert!(!dir.path().join("vendor").exists());
 }
 
 #[test]
