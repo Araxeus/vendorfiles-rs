@@ -13,6 +13,7 @@ mod run;
 mod spec;
 
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::Parser;
 
@@ -23,6 +24,14 @@ const FAILURE: u8 = 1;
 
 /// Exit code for a run the user interrupted: the shell convention of 128 plus SIGINT.
 const INTERRUPTED: u8 = 130;
+
+/// How long an interrupted run may spend tidying up before it ends regardless.
+///
+/// Restoration takes about a tick, so this only ever fires when the terminal has stopped
+/// accepting output — and that is exactly when it matters: listening for the signal took the
+/// operating system's own handling away, so a wait that never finishes would leave Ctrl-C doing
+/// nothing at all for the rest of the run. Long enough not to cut a healthy teardown short.
+const GRACE: Duration = Duration::from_millis(500);
 
 /// Gives the terminal back when the user interrupts a run.
 ///
@@ -35,16 +44,17 @@ fn restore_terminal_on_interrupt() {
             return; // No handler to be had; the default behaviour still stops the process.
         }
         // Listening for the signal replaced the operating system's own handling for the rest of
-        // the process, so a second press has to be listened for as well — the tidy-up waits on a
-        // render thread that may be mid-frame, and an impatient user must never wait on it.
+        // the process, which makes this the only thing left that can stop the run: it has to
+        // stop it whatever the terminal does. So the tidy-up is given a thread of its own and
+        // three ways to be over — it finishes, the user says again that they are done with it,
+        // or it runs out of time — and none of them is a wait on the terminal answering.
         let restoring = tokio::task::spawn_blocking(vendorfiles_core::progress::restore_terminal);
         tokio::select! {
             _ = restoring => {}
-            _ = tokio::signal::ctrl_c() => {
-                // Abandoning the wait must not abandon the cursor: that is the part of the
-                // tidy-up the session cannot do without, and it costs nothing to do here.
-                vendorfiles_core::progress::show_cursor();
-            }
+            // Nothing to do on a second press: restoration leads with the cursor, so all that
+            // is being given up here is the wait for the region to come down.
+            _ = tokio::signal::ctrl_c() => {}
+            () = tokio::time::sleep(GRACE) => {}
         }
         std::process::exit(i32::from(INTERRUPTED));
     });

@@ -85,27 +85,19 @@ pub fn print_err(text: &str) {
 /// this, interrupting a sync leaves the cursor hidden — [`driver`] hides it on every frame — and
 /// the shell that follows has no visible caret for the rest of the session.
 ///
-/// The region is best effort: the render thread is asked to wipe it, but it may be mid-frame, so
-/// the cursor is shown here regardless rather than waiting on it. The cursor is not best effort —
-/// showing it stops the thread from drawing, so no later frame can hide it again.
+/// The cursor comes first and the region second, because only the second one can be given up:
+/// whatever cuts this short — a second Ctrl-C, a caller's deadline — has already had the cursor
+/// back. Showing it is what stops the render thread from drawing, so nothing can hide it again;
+/// until drawing could be stopped this had to be the other way round, and the wait was the risk.
 pub fn restore_terminal() {
+    driver::show_cursor();
     let sender = ACTIVE.lock().ok().and_then(|mut active| active.take());
     if let Some(sender) = sender {
         let _ = sender.send(Command::Stop);
-        // Long enough for a tick to notice, short enough that nobody waits on a second press.
+        // Long enough for the thread to notice and wipe the region, short enough that nobody
+        // remembers the wait.
         std::thread::sleep(std::time::Duration::from_millis(120));
     }
-    driver::show_cursor();
-}
-
-/// Shows the cursor and returns at once, for a caller that cannot afford to wait.
-///
-/// [`restore_terminal`] gives the render thread a moment to take the region down first. A user
-/// pressing Ctrl-C a second time has said they will not wait for that, and a visible cursor is
-/// worth more to the session that follows than a tidy region. Drawing stops either way, so the
-/// abandoned region is the only thing given up.
-pub fn show_cursor() {
-    driver::show_cursor();
 }
 
 /// Writes raw bytes to stdout, for output that is not line-shaped.
@@ -495,7 +487,7 @@ impl Drop for Transfer<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ACTIVE, Command, Reporter, column, print_out, restore_terminal, show_cursor};
+    use super::{ACTIVE, Command, Reporter, column, print_out, restore_terminal};
     use crate::progress::state::{Bytes, Outcome, RunState, Stage};
     use crate::progress::view::NAME_WIDTH;
     use std::path::Path;
@@ -707,12 +699,10 @@ mod tests {
         // The interrupt handler runs whatever the run was doing, including before a display
         // exists and after one has already been closed.
         restore_terminal();
-        show_cursor();
         let reporter = Reporter::new(false);
         reporter.begin(1);
         reporter.end();
         restore_terminal();
-        show_cursor();
     }
 
     #[test]
