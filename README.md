@@ -458,7 +458,9 @@ and a file from the repository is vendored with `path` instead of an asset:
     hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
-Test your entry before opening the PR:
+[`registry.schema.json`](./registry.schema.json) describes the format, and `registry.yml` points
+at it, so an editor with YAML language-server support flags a wrong field or a malformed host key
+as you type — before CI, and before the PR. Test your entry too:
 
 ```bash
 VENDOR_REGISTRY=./registry.yml vendor add <name>

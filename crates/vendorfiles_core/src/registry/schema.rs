@@ -176,6 +176,109 @@ programs:
         assert!(refused.is_err());
     }
 
+    /// The published JSON Schema, which editors validate `registry.yml` against.
+    fn published_schema() -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../registry.schema.json")
+            .canonicalize()
+            .expect("registry.schema.json sits at the repository root");
+        let text = std::fs::read_to_string(path).expect("readable");
+        serde_json::from_str(&text).expect("the schema is valid JSON")
+    }
+
+    /// The fields serde will accept, taken from its own complaint about one it will not.
+    ///
+    /// Asking serde rather than repeating the list keeps this honest: add a field to the struct
+    /// and this set grows on its own, so the schema cannot quietly fall behind.
+    fn fields_serde_accepts<T: serde::de::DeserializeOwned>(document: &str) -> Vec<String> {
+        let error = serde_yaml_ng::from_str::<T>(document)
+            .err()
+            .expect("the probe field must be rejected")
+            .to_string();
+        // serde words the list three ways depending on its length — "expected one of `a`, `b`",
+        // "expected `a` or `b`", "expected `a`" — so take every backticked name after "expected"
+        // rather than matching one phrasing.
+        let (_, listed) = error
+            .split_once("expected ")
+            .unwrap_or_else(|| panic!("unexpected serde wording: {error}"));
+        let mut fields: Vec<String> = listed
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect();
+        fields.sort();
+        assert!(!fields.is_empty(), "no fields parsed out of: {error}");
+        fields
+    }
+
+    fn schema_properties(schema: &serde_json::Value, pointer: &str) -> Vec<String> {
+        schema
+            .pointer(pointer)
+            .unwrap_or_else(|| panic!("no properties at {pointer}"))
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn the_published_schema_lists_exactly_the_fields_serde_accepts() {
+        let schema = published_schema();
+
+        for (what, probe, pointer) in [
+            (
+                "Document",
+                "version: 1
+nope: 1
+",
+                "/properties",
+            ),
+            (
+                "Program",
+                "repository: r
+targets: {}
+nope: 1
+",
+                "/$defs/program/properties",
+            ),
+            (
+                "Explicit",
+                "asset: a
+nope: 1
+",
+                "/$defs/explicit/properties",
+            ),
+        ] {
+            let expected = match what {
+                "Document" => fields_serde_accepts::<Document>(probe),
+                "Program" => fields_serde_accepts::<super::Program>(probe),
+                _ => fields_serde_accepts::<super::Explicit>(probe),
+            };
+            let mut published = schema_properties(&schema, pointer);
+            published.sort();
+            assert_eq!(
+                published, expected,
+                "registry.schema.json is out of step with `{what}`"
+            );
+        }
+    }
+
+    #[test]
+    fn the_schema_agrees_with_this_build_about_the_version() {
+        let schema = published_schema();
+        let declared = schema
+            .pointer("/properties/version/const")
+            .and_then(serde_json::Value::as_u64)
+            .expect("a version constant");
+        assert_eq!(
+            u32::try_from(declared).unwrap(),
+            SUPPORTED_VERSION,
+            "the schema documents a format this build does not support"
+        );
+    }
+
     #[test]
     fn an_empty_registry_is_valid() {
         let document = parse("version: 1\n").expect("valid");
