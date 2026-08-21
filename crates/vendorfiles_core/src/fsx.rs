@@ -266,22 +266,43 @@ async fn write_bytes(
     if let Some(parent) = save_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    // What the server said it would send, so a body that stops early can be told from one that
+    // simply ended.
+    let promised = response.content_length();
+    let mut written = 0_u64;
     let mut file = tokio::fs::File::create(save_path).await?;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(std::io::Error::other)?;
         file.write_all(&chunk).await?;
+        written += chunk.len() as u64;
         if let Some(transfer) = transfer {
             transfer.advance(chunk.len() as u64);
         }
     }
     file.flush().await?;
+
+    // The transport already enforces `Content-Length` — a body that stops early surfaces as
+    // "error decoding response body", which the tests below pin down. This is the second line of
+    // defence, and it states the invariant in the code rather than leaving it to a dependency:
+    // what gets saved is the whole asset. It compares against the length reqwest reports *after*
+    // any decoding, so an encoded body is not mistaken for a short one.
+    if let Some(promised) = promised
+        && written != promised
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("expected {promised} bytes, received {written}"),
+        ));
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_running_executable, join_normalized, normalize, simplify, staged_beside};
+    use super::{
+        is_running_executable, join_normalized, normalize, simplify, staged_beside, stream_to_file,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -327,6 +348,130 @@ mod tests {
                 .to_string_lossy()
                 .contains("vendor.exe")
         );
+    }
+
+    /// Serves one response with `length` promised and `body` actually sent, then hangs up.
+    ///
+    /// A real socket rather than a mocked client: the question is what happens to a body that
+    /// stops early, and only the transport can answer it.
+    fn serve_once(length: usize, body: &'static [u8]) -> String {
+        serve(length, body.to_vec(), "")
+    }
+
+    /// As above, with extra response headers.
+    fn serve(length: usize, body: Vec<u8>, extra: &str) -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+        let port = listener.local_addr().unwrap().port();
+        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n{extra}\r\n");
+        std::thread::spawn(move || {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request);
+            let _ = socket.write_all(head.as_bytes());
+            let _ = socket.write_all(&body);
+            let _ = socket.flush();
+            // Dropping the socket ends the body, short of what was promised when it is shorter.
+        });
+        format!("http://127.0.0.1:{port}/asset")
+    }
+
+    #[tokio::test]
+    async fn a_body_that_stops_short_is_refused() {
+        // The failure this guards against: a bare binary — `yt-dlp.exe`, `ox.exe` — saved
+        // half-downloaded and reported as a success.
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("yt-dlp.exe");
+        let url = serve_once(4096, b"only the first few bytes");
+
+        let response = crate::github::http::client()
+            .expect("a client")
+            .get(&url)
+            .send()
+            .await
+            .expect("a response");
+        let outcome = stream_to_file(response, &save_path, true, None).await;
+
+        // Refused either by the transport, which enforces `Content-Length`, or by the byte count
+        // below it. Which one wins is not the point; that it never succeeds is.
+        let error = outcome.expect_err("a truncated download must not succeed");
+        assert!(
+            error.to_string().contains(&save_path.display().to_string()),
+            "the error should name the file: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_complete_body_is_written_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("tool.bin");
+        let body = b"the whole thing";
+        let url = serve_once(body.len(), body);
+
+        let response = crate::github::http::client()
+            .expect("a client")
+            .get(&url)
+            .send()
+            .await
+            .expect("a response");
+        stream_to_file(response, &save_path, true, None)
+            .await
+            .expect("a complete download");
+        assert_eq!(std::fs::read(&save_path).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn an_encoded_body_is_not_mistaken_for_a_short_one() {
+        // `reqwest` decompresses transparently. If it reported the *compressed* length while
+        // handing over decompressed bytes, comparing the two counts would reject every encoded
+        // download — so this pins which length the completeness check is comparing against.
+        use std::io::Write;
+
+        let plain = vec![b'a'; 4096];
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&plain).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(
+            compressed.len() < plain.len(),
+            "the test needs real compression"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("theme.json");
+        let url = serve(compressed.len(), compressed, "Content-Encoding: gzip\r\n");
+
+        let response = crate::github::http::client()
+            .expect("a client")
+            .get(&url)
+            .send()
+            .await
+            .expect("a response");
+        stream_to_file(response, &save_path, true, None)
+            .await
+            .expect("an encoded body is complete, not short");
+        assert_eq!(std::fs::read(&save_path).unwrap(), plain);
+    }
+
+    #[tokio::test]
+    async fn a_short_body_stays_quiet_when_failures_are_not_reported() {
+        // Archives are fetched with `report_failures: false` so the follow-on error is the one
+        // the user sees ("cannot be extracted"). That contract must not change.
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("asset.zip");
+        let url = serve_once(4096, b"truncated");
+
+        let response = crate::github::http::client()
+            .expect("a client")
+            .get(&url)
+            .send()
+            .await
+            .expect("a response");
+        stream_to_file(response, &save_path, false, None)
+            .await
+            .expect("swallowed, as the archive path expects");
     }
 
     #[test]
