@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{Result, VendorError};
+use crate::progress::Transfer;
 
 /// Lexically normalises a path: drops `.`, resolves `..`, and unifies separators.
 ///
@@ -154,8 +155,9 @@ pub async fn stream_to_file(
     response: reqwest::Response,
     save_path: &Path,
     report_failures: bool,
+    transfer: Option<&Transfer<'_>>,
 ) -> Result<()> {
-    match write_stream(response, save_path).await {
+    match write_stream(response, save_path, transfer).await {
         Err(source) if report_failures => Err(VendorError::SaveFailed {
             path: save_path.display().to_string(),
             source,
@@ -167,6 +169,7 @@ pub async fn stream_to_file(
 async fn write_stream(
     response: reqwest::Response,
     save_path: &Path,
+    transfer: Option<&Transfer<'_>>,
 ) -> std::result::Result<(), std::io::Error> {
     if let Some(parent) = save_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -176,6 +179,9 @@ async fn write_stream(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(std::io::Error::other)?;
         file.write_all(&chunk).await?;
+        if let Some(transfer) = transfer {
+            transfer.advance(chunk.len() as u64);
+        }
     }
     file.flush().await?;
     Ok(())

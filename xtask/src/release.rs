@@ -1,12 +1,14 @@
 //! `cargo xtask release` — the Rust counterpart of the reference project's `scripts/release.ts`.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use dialoguer::{Select, theme::ColorfulTheme};
-use indicatif::{ProgressBar, ProgressStyle};
 use semver::Version;
 
 /// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
@@ -173,12 +175,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 /// The child's output is captured rather than inherited — otherwise it would fight the spinner
 /// for the same lines — and is replayed only when the command fails.
 fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result<()> {
-    let spinner = ProgressBar::new_spinner().with_message(label.to_owned());
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg} {elapsed}")
-            .expect("the spinner template is valid"),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    let spinner = Spinner::start(label);
 
     let started = Instant::now();
     let output = Command::new(program)
@@ -186,7 +183,7 @@ fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result
         .current_dir(root)
         .output()
         .with_context(|| format!("running {program} {}", args.join(" ")));
-    spinner.finish_and_clear();
+    spinner.stop();
 
     let output = output?;
     if !output.status.success() {
@@ -199,6 +196,56 @@ fn run_command(root: &Path, label: &str, program: &str, args: &[&str]) -> Result
     }
     println!("✔ {label} ({:.1?})", started.elapsed());
     Ok(())
+}
+
+/// A one-line spinner on stderr, kept turning by its own thread.
+///
+/// Small enough to own outright: the release flow shows one at a time, on a line of its own, so
+/// none of the machinery the tool's own display needs applies here.
+struct Spinner {
+    running: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Spinner {
+    /// Starts spinning until [`Spinner::stop`].
+    fn start(label: &str) -> Self {
+        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&running);
+        let label = label.to_owned();
+        let started = Instant::now();
+        let thread = std::thread::spawn(move || {
+            let mut frame = 0_usize;
+            while flag.load(Ordering::Relaxed) {
+                let mut err = std::io::stderr();
+                let _ = write!(
+                    err,
+                    "\r\x1b[2K\x1b[36m{}\x1b[0m {label} {:.1?}",
+                    FRAMES[frame % FRAMES.len()],
+                    started.elapsed()
+                );
+                let _ = err.flush();
+                frame += 1;
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        Self {
+            running,
+            thread: Some(thread),
+        }
+    }
+
+    /// Stops the thread and wipes the line.
+    fn stop(mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        let mut err = std::io::stderr();
+        let _ = write!(err, "\r\x1b[2K");
+        let _ = err.flush();
+    }
 }
 
 #[cfg(test)]

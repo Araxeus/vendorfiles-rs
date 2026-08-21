@@ -26,6 +26,7 @@ vendorfiles-rs/
 │   │       ├── lib.rs
 │   │       ├── error.rs      # VendorError — Display == user-facing message
 │   │       ├── ui.rs         # ANSI colors, INFO/SUCCESS/WARNING/ERROR routing, RunOptions
+│   │       ├── progress/     # the live display, and the plain-line fallback
 │   │       ├── model.rs      # FileEntry / FileTarget / VendorDependency / VendorConfig
 │   │       ├── template.rs   # {version} / {release} / {vendorFolder} substitution, trims
 │   │       ├── config/
@@ -217,7 +218,7 @@ changing what the user sees required splitting an install into three stages, in 
 | --- | --- | --- |
 | `Session::prepare` | `&self` | resolve version + staleness; read-only |
 | `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
-| `Session::commit` | `&mut self` | strictly ordered: print, write lockfile, write config |
+| `Session::commit` | `&mut self` | strictly ordered: write lockfile, write config, settle the line |
 
 `sync` then:
 
@@ -253,6 +254,57 @@ Measured against `vendorfiles@1.4.2` on a config with 8 dependencies:
 | `sync` (everything up to date) | 721 ms | 66 ms |
 | `outdated` | 3426 ms | 908 ms |
 | `--version` | 706 ms | 54 ms |
+
+### 4.1 Reporting
+
+`progress` owns the display. Each dependency holds an `Arc<progress::Dependency>` — shared
+because the download task and the ordered `commit` describe the same line. `fsx::stream_to_file`
+advances that line per chunk, so it tracks bytes actually written.
+
+The display is a fixed region at the bottom of the terminal, drawn with ratatui's inline viewport
+and redrawn from a snapshot of `RunState` on an 80 ms tick. Four modules, one of which touches a
+terminal:
+
+| Module | Responsibility |
+| --- | --- |
+| `state` | `RunState`, `Stage`, row assignment, byte accounting. Plain data. |
+| `view` | `view(&RunState, tick, area, buf)` — pure, so frames are asserted cell by cell in tests. |
+| `driver` | The render thread: owns the `Terminal`, ticks, inserts lines above, tears down. |
+| `ansi` | Parses our own SGR strings back into ratatui text. |
+
+The region is `5 + rows` lines and at most `REGION_WIDTH` columns: frame, summary bar, worker rows,
+rule, footer. `rows` is fixed once, after staleness is known, at
+`min(MAX_CONCURRENT_DOWNLOADS, stale, rows_that_fit(terminal))`; at zero — `outdated`, or a project
+already up to date — the rule and footer go and the box is three lines.
+
+Rows are places, not a list. `RunState::assign` gives a dependency a row and it keeps that row
+until it has nothing left to show; a freed row is refilled in place and an empty row stays empty,
+so no row moves for an event that concerned another. Empty rows are filled by `Stage::priority` —
+committing, then active, then waiting, then settled — and then by config order. Anything in flight
+without a row is counted in the footer.
+
+A settled dependency reports on its own row; its outcome line is held until `Reporter::end` prints
+them all as the region comes down. Emitting them as they happen pushes the region a row down the
+screen each time, since `insert_before` only scrolls above the region when the region already sits
+on the last row. Warnings and errors still go up immediately.
+
+Every terminal write goes through `print_out` or `print_err`, which hand the line to the render
+thread; a raw `println!` lands wherever the cursor happens to be. `driver::wipe` returns the cursor
+to the region's first row after clearing, since `Terminal::clear` leaves it at the bottom.
+
+Animation requires **stdout** to be a terminal and `--pr` to be off. Stdout rather than stderr is
+forced: anchoring an inline viewport asks for the cursor position, and crossterm sends that query to
+stdout whatever the backend holds. When it does not animate, a dependency buffers its `INFO:` lines
+and flushes them as it settles, so piped output keeps the bytes and ordering it had before the
+display existed.
+
+The region is wiped and the cursor restored on every exit — `end()` on each of `sync`'s error paths,
+a `Drop` on the driver, and a panic hook, since `draw` hides the cursor.
+
+Within a dependency, `record` notes destinations after each batch of transfers joins rather than
+as each one lands, so the piped record follows the `files` array even though the network decides
+completion order. `ui` routes every line through the render thread, so a warning arriving
+mid-run appears above the region instead of being overwritten.
 
 ## 5. Parity contract
 

@@ -6,7 +6,6 @@ use crate::lockfile::{
     config_files_to_lock_files, flat_files, read_lockfile, to_json, write_string,
 };
 use crate::ops::Session;
-use crate::ui;
 
 impl Session {
     /// Removes a dependency entirely.
@@ -19,6 +18,8 @@ impl Session {
     /// Returns [`VendorError::DependencyNotFound`] when the config has no such entry, or a write
     /// error if the lockfile or config cannot be updated.
     pub async fn uninstall(&mut self, name: &str) -> Result<()> {
+        let progress = self.progress.dependency(name);
+        progress.status("removing files");
         let dependency = self
             .workspace
             .dependencies
@@ -66,7 +67,7 @@ impl Session {
         self.workspace.file.document.remove_dependency(name);
         self.workspace.file.write().await?;
 
-        ui::success(format!("Uninstalled {name}"));
+        progress.uninstalled();
         Ok(())
     }
 }

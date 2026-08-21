@@ -45,7 +45,7 @@ pub fn warning(message: impl Display) {
     if pr_mode() {
         return;
     }
-    eprintln!("{}", yellow(&format!("WARNING: {message}")));
+    crate::progress::print_err(&yellow(&format!("WARNING: {message}")));
 }
 
 /// Prints `SUCCESS: {message}` in green to stdout, unless `--pr` mode is active.
@@ -53,7 +53,7 @@ pub fn success(message: impl Display) {
     if pr_mode() {
         return;
     }
-    println!("{}", green(&format!("SUCCESS: {message}")));
+    crate::progress::print_out(&green(&format!("SUCCESS: {message}")));
 }
 
 /// Prints `INFO: {message}` in cyan to stdout, unless `--pr` mode is active.
@@ -61,12 +61,12 @@ pub fn info(message: impl Display) {
     if pr_mode() {
         return;
     }
-    println!("{}", cyan(&format!("INFO: {message}")));
+    crate::progress::print_out(&cyan(&format!("INFO: {message}")));
 }
 
 /// Prints `ERROR: {message}` in red to stderr. Never suppressed.
 pub fn error(message: impl Display) {
-    eprintln!("{}", red(&format!("ERROR: {message}")));
+    crate::progress::print_err(&red(&format!("ERROR: {message}")));
 }
 
 #[cfg(test)]

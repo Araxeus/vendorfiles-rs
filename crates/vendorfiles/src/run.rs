@@ -22,6 +22,15 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         };
     }
 
+    // Set before the session builds its display: `--pr` means stdout is a machine-readable
+    // summary, so nothing should animate. It only applies to a whole-project update, matching
+    // the reference.
+    if let Command::Update { names, pr: true } = &cli.command
+        && names.is_empty()
+    {
+        vendorfiles_core::ui::set_pr_mode(true);
+    }
+
     let config_location = cli.config.flatten();
     let workspace = Workspace::load(config_location.as_deref()).await?;
     let github = GitHubClient::new(auth::resolve_token_async().await)?;
@@ -38,10 +47,8 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 .await?;
         }
 
-        Command::Update { names, pr } => {
+        Command::Update { names, pr: _ } => {
             if names.is_empty() {
-                // `--pr` only applies to a full update, matching the reference.
-                vendorfiles_core::ui::set_pr_mode(pr);
                 session
                     .sync(SyncOptions {
                         should_update: true,

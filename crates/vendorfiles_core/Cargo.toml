@@ -21,6 +21,7 @@ indexmap.workspace = true
 keyring-core.workspace = true
 octocrab.workspace = true
 open.workspace = true
+ratatui.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
