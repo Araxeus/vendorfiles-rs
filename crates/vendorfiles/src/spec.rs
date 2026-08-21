@@ -34,7 +34,8 @@ pub struct CommandSpec {
     /// Maximum positional operands, or `None` when variadic.
     pub max_operands: Option<usize>,
     pub options: &'static [OptionSpec],
-    /// Help text, byte-identical to the reference CLI's.
+    /// Help text, byte-identical to the reference CLI's but for `--plain` and the short form it
+    /// took from `--pr`.
     pub help: &'static str,
 }
 
@@ -107,8 +108,18 @@ const CONFIG_OPTION: OptionSpec = OptionSpec {
     display: "-c, --config [file/folder path]",
 };
 
+const PLAIN_OPTION: OptionSpec = OptionSpec {
+    short: Some('p'),
+    long: "--plain",
+    arity: Arity::None,
+    display: "-p, --plain",
+};
+
 /// The root command's own options.
-pub const ROOT_OPTIONS: &[OptionSpec] = &[CONFIG_OPTION];
+///
+/// `--plain` is global, so it may also appear after the subcommand; being `Arity::None` it needs
+/// no special handling when operands are counted.
+pub const ROOT_OPTIONS: &[OptionSpec] = &[CONFIG_OPTION, PLAIN_OPTION];
 
 /// Help text for `vendor` with no subcommand.
 pub const ROOT_HELP: &str = include_str!("help/root.txt");
@@ -132,10 +143,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         aliases: &["upgrade", "bump", "up", "u"],
         max_operands: None,
         options: &[OptionSpec {
-            short: Some('p'),
+            // No short: `-p` means `--plain` everywhere.
+            short: None,
             long: "--pr",
             arity: Arity::None,
-            display: "-p|--pr",
+            display: "--pr",
         }],
         help: include_str!("help/update.txt"),
     },

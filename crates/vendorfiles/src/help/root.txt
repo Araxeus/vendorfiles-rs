@@ -2,6 +2,7 @@ Usage: vendor command [options]
 
 Options:
   -c, --config [file/folder path]             Config file path / Folder containing the config file
+  -p, --plain                                 Print plain lines instead of a live display
   -v, --version                               output the current version
   -h, --help                                  display help for command
 

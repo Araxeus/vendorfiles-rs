@@ -371,6 +371,11 @@ code and the complete resulting file tree (including binary payloads). Covered:
    than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
-9. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
+9. **`-p`/`--plain`** turns the live display off, and is the reason `--pr` no longer has a short
+   form — a global flag that means one thing everywhere is worth more than the letter the
+   reference spent on `update`'s only option. The two help screens differ from the captured
+   reference by exactly those two lines; `tests/fixtures/help` keeps the reference text and the
+   test applies the delta, so both stay checkable.
+10. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.

@@ -24,6 +24,14 @@ pub struct Cli {
     #[arg(short = 'c', long = "config", num_args = 0..=1, value_name = "file/folder path")]
     pub config: Option<Option<String>>,
 
+    /// Print plain lines instead of animating a live display.
+    ///
+    /// Global, so it reads naturally either side of the subcommand. `-p` is why `--pr` no longer
+    /// has a short form: a flag that means one thing everywhere is worth more than the one
+    /// letter the reference spent on `update`'s only option.
+    #[arg(short = 'p', long = "plain", global = true)]
+    pub plain: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -45,7 +53,7 @@ pub enum Command {
     )]
     Update {
         names: Vec<String>,
-        #[arg(short = 'p', long = "pr")]
+        #[arg(long = "pr")]
         pr: bool,
     },
 

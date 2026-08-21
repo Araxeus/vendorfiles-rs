@@ -49,6 +49,29 @@ fn fixture(name: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// The reference help, plus the two places our help deliberately differs from it.
+///
+/// The fixtures stay exactly as captured from `vendorfiles@1.4.2`, so both facts stay checkable:
+/// what the reference printed, and how we depart from it. Both departures are the same decision —
+/// `-p` means `--plain` everywhere, so `--pr` gave up its short form.
+fn expected_help(name: &str) -> String {
+    let reference = fixture(name);
+    match name {
+        "root" => reference.replace(
+            "  -v, --version",
+            &format!(
+                "{}\n  -v, --version",
+                format_args!(
+                    "{:<46}{}",
+                    "  -p, --plain", "Print plain lines instead of a live display"
+                )
+            ),
+        ),
+        "update" => reference.replace("  -p|--pr     ", &format!("{:<14}", "  --pr")),
+        _ => reference,
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Help and version
 // ---------------------------------------------------------------------------------------
@@ -74,7 +97,11 @@ fn help_matches_the_reference_byte_for_byte() {
         ("login", vec!["auth", "-h"]),
     ] {
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), fixture(name), "stdout for `vendor {args:?}`");
+        assert_eq!(
+            stdout(&out),
+            expected_help(name),
+            "stdout for `vendor {args:?}`"
+        );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
@@ -95,7 +122,7 @@ fn help_is_answered_before_missing_arguments_are_reported() {
     let dir = project("{}");
     // `install` needs <url/name>, but `-h` still wins.
     let out = vendor(dir.path(), &["install", "-h"]);
-    assert_eq!(stdout(&out), fixture("install"));
+    assert_eq!(stdout(&out), expected_help("install"));
     assert_eq!(code(&out), 0);
 }
 
@@ -144,7 +171,7 @@ fn no_command_prints_usage_to_stderr_and_fails() {
         let out = vendor(dir.path(), &args);
         assert_eq!(
             stderr(&out),
-            fixture("root"),
+            expected_help("root"),
             "stderr for `vendor {args:?}`"
         );
         assert_eq!(stdout(&out), "", "stdout for `vendor {args:?}`");
@@ -302,6 +329,25 @@ fn sync_reports_up_to_date_without_touching_the_network() {
         "\u{1b}[36mINFO: Coloris is up to date\u{1b}[0m\n"
     );
     assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn plain_is_accepted_on_either_side_of_the_subcommand() {
+    // The output is already plain here — a test harness has no terminal — so what this pins is
+    // that the flag parses in both positions and changes nothing else.
+    let expected = "\u{1b}[36mINFO: Coloris is up to date\u{1b}[0m\n";
+    for args in [
+        vec!["sync", "--plain"],
+        vec!["sync", "-p"],
+        vec!["--plain", "sync"],
+        vec!["-p", "sync"],
+    ] {
+        let dir = up_to_date_project();
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
+        assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+    }
 }
 
 #[test]
