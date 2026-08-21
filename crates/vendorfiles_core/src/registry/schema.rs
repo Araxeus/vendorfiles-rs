@@ -38,8 +38,16 @@ pub struct Program {
     #[serde(default)]
     pub asset: Option<String>,
     /// The path inside that asset, shared by every target.
+    ///
+    /// Omitted when the asset *is* the executable — plenty of projects publish a bare binary
+    /// rather than an archive.
     #[serde(default)]
     pub member: Option<String>,
+    /// The name to save it under, when the basename is not what you want to type.
+    ///
+    /// `ox-macos` and `shfmt_v3.13.1_linux_amd64` are assets; `ox` and `shfmt` are commands.
+    #[serde(rename = "as", default)]
+    pub output: Option<String>,
     /// What to fetch per host, keyed `{os}-{arch}`.
     pub targets: IndexMap<String, Target>,
 }
@@ -60,8 +68,12 @@ pub enum Target {
 pub struct Explicit {
     /// The release asset, including the `{release}/` prefix.
     pub asset: String,
-    /// The path to the executable inside it.
-    pub member: String,
+    /// The path to the executable inside it, or omitted when the asset is the executable.
+    #[serde(default)]
+    pub member: Option<String>,
+    /// The name to save it under; defaults to the basename of whichever of the two is used.
+    #[serde(rename = "as", default)]
+    pub output: Option<String>,
 }
 
 #[cfg(test)]
@@ -114,7 +126,7 @@ programs:
         let Target::Explicit(explicit) = &document.programs["fzf"].targets["windows-x86_64"] else {
             panic!("expected the explicit form");
         };
-        assert_eq!(explicit.member, "fzf.exe");
+        assert_eq!(explicit.member.as_deref(), Some("fzf.exe"));
     }
 
     #[test]

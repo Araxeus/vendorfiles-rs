@@ -17,6 +17,11 @@
 # Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
 # linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
 #
+# `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
+# `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
+# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, crx or xpi — a
+# `.tar.xz` release cannot be used.
+#
 # An entry says *what* to download. It cannot say where files land — there is no `vendorFolder`
 # here, and unknown keys are refused.
 
@@ -39,8 +44,8 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   # ripgrep tags releases without a leading `v`, so the asset carries {version} bare.
-  rg:
-    aliases: [ripgrep]
+  ripgrep:
+    aliases: [rg]
     repository: https://github.com/BurntSushi/ripgrep
     asset: "{release}/ripgrep-{version}-{target}{ext}"
     member: "ripgrep-{version}-{target}/rg{exe}"
@@ -87,3 +92,150 @@ programs:
       linux-aarch64:
         asset: "{release}/fzf-{version}-linux_arm64.tar.gz"
         member: "fzf"
+
+  yamlfmt:
+    repository: https://github.com/google/yamlfmt
+    # Ships .tar.gz on every platform, Windows included, so the extension is literal.
+    asset: "{release}/yamlfmt_{version}_{target}.tar.gz"
+    member: "yamlfmt{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  micro:
+    repository: https://github.com/zyedidia/micro
+    asset: "{release}/micro-{version}-{target}{ext}"
+    member: "micro-{version}/micro{exe}"
+    targets:
+      windows-x86_64: win64
+      windows-aarch64: win-arm64
+      macos-x86_64: osx
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux64
+      linux-aarch64: linux-arm64
+
+  surge:
+    repository: https://github.com/surge-downloader/surge
+    asset: "{release}/Surge_{version}_{target}{ext}"
+    member: "surge{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  ansi2txt:
+    aliases: [ansi2text]
+    repository: https://github.com/gabe565/ansi2txt
+    asset: "{release}/ansi2txt_{version}_{target}{ext}"
+    member: "ansi2txt{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  ls-interactive:
+    aliases: [lsi]
+    repository: https://github.com/Araxeus/ls-interactive
+    asset: "{release}/lsi_v{version}_{target}{ext}"
+    member: "ls-interactive{exe}"
+    # One asset per OS, so only the architecture upstream actually builds is listed.
+    targets:
+      windows-x86_64: windows
+      macos-x86_64: macos
+      linux-x86_64: linux
+
+  # `edit` nests its binary inside a directory on Windows but not on Unix, so each host is
+  # spelled out rather than sharing one `member`.
+  edit:
+    aliases: [msedit]
+    repository: https://github.com/microsoft/edit
+    targets:
+      windows-x86_64:
+        asset: "{release}/edit-{version}-x86_64-windows.zip"
+        member: "edit-{version}-x86_64-windows/edit.exe"
+      windows-aarch64:
+        asset: "{release}/edit-{version}-aarch64-windows.zip"
+        member: "edit-{version}-aarch64-windows/edit.exe"
+      macos-aarch64:
+        asset: "{release}/edit-{version}-aarch64-apple-darwin.tar.gz"
+        member: "edit"
+      linux-x86_64:
+        asset: "{release}/edit-{version}-x86_64-linux-gnu.tar.gz"
+        member: "edit"
+      linux-aarch64:
+        asset: "{release}/edit-{version}-aarch64-linux-gnu.tar.gz"
+        member: "edit"
+
+  # Bare binaries: no `member`, so the asset is saved as it stands. `as` gives it the name you
+  # would actually type.
+  shfmt:
+    repository: https://github.com/mvdan/sh
+    asset: "{release}/shfmt_v{version}_{target}{exe}"
+    as: "shfmt{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  yt-dlp:
+    repository: https://github.com/yt-dlp/yt-dlp
+    targets:
+      windows-x86_64:
+        asset: "{release}/yt-dlp.exe"
+      windows-aarch64:
+        asset: "{release}/yt-dlp_arm64.exe"
+        as: "yt-dlp.exe"
+      macos-x86_64:
+        asset: "{release}/yt-dlp_macos"
+        as: "yt-dlp"
+      macos-aarch64:
+        asset: "{release}/yt-dlp_macos"
+        as: "yt-dlp"
+      linux-x86_64:
+        asset: "{release}/yt-dlp_linux"
+        as: "yt-dlp"
+      linux-aarch64:
+        asset: "{release}/yt-dlp_linux_aarch64"
+        as: "yt-dlp"
+
+  ox:
+    repository: https://github.com/curlpipe/ox
+    targets:
+      windows-x86_64:
+        asset: "{release}/ox.exe"
+      macos-x86_64:
+        asset: "{release}/ox-macos"
+        as: "ox"
+      linux-x86_64:
+        asset: "{release}/ox"
+
+  # Windows only by nature: it forwards notifications from WSL to the Windows host.
+  wsl-notify-send:
+    repository: https://github.com/stuartleeks/wsl-notify-send
+    targets:
+      windows-x86_64:
+        asset: "{release}/wsl-notify-send_windows_amd64.zip"
+        member: "wsl-notify-send.exe"
+
+  # Windows only here: upstream's Unix builds ship `.tar.xz`, which this tool does not extract.
+  fresh:
+    repository: https://github.com/sinelaw/fresh
+    targets:
+      windows-x86_64:
+        asset: "{release}/fresh-editor-x86_64-pc-windows-msvc.zip"
+        member: "fresh.exe"
+      windows-aarch64:
+        asset: "{release}/fresh-editor-aarch64-pc-windows-msvc.zip"
+        member: "fresh.exe"

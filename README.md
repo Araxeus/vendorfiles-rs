@@ -423,7 +423,23 @@ needed. Most projects need a few lines:
 
 `{target}` is the triple your host maps to, `{ext}` is `.zip` on Windows and `.tar.gz` elsewhere,
 and `{exe}` is `.exe` on Windows. Projects that name assets some other way spell each host out
-instead, with its own `asset` and `member`. Test your entry before opening the PR:
+instead, with its own `asset` and `member`.
+
+Projects that publish a bare binary rather than an archive leave `member` out entirely, and use
+`as` when the asset's name is not the command you would type:
+
+```yaml
+  ox:
+    repository: https://github.com/curlpipe/ox
+    targets:
+      windows-x86_64:
+        asset: "{release}/ox.exe"
+      macos-x86_64:
+        asset: "{release}/ox-macos"
+        as: "ox"
+```
+
+Test your entry before opening the PR:
 
 ```bash
 VENDOR_REGISTRY=./registry.yml vendor add <name>

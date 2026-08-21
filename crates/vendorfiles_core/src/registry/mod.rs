@@ -254,6 +254,10 @@ async fn filetime_now(file: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    // `{target}`, `{ext}` and `{release}` are registry placeholders, read by our own
+    // expander rather than by `format!`.
+    #![expect(clippy::literal_string_with_formatting_args, reason = "placeholders")]
+
     use super::Registry;
     use crate::model::FileEntry;
 
@@ -353,7 +357,7 @@ programs:
                 let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
                     panic!("{canonical} for {host}: expected one mapped entry");
                 };
-                let (asset, _) = files.iter().next().expect("one asset");
+                let (asset, target) = files.iter().next().expect("one asset");
                 assert!(
                     asset.starts_with("{release}/"),
                     "{canonical} for {host}: assets need the {{release}}/ prefix, found {asset}"
@@ -362,15 +366,18 @@ programs:
                     !asset.contains("{target}") && !asset.contains("{ext}"),
                     "{canonical} for {host}: host placeholders should be expanded, found {asset}"
                 );
-                let expected = if host.starts_with("windows") {
-                    ".zip"
-                } else {
-                    ".tar.gz"
-                };
-                assert!(
-                    asset.ends_with(expected),
-                    "{canonical} for {host}: expected a {expected} asset, found {asset}"
-                );
+                // An entry that names a member is extracted, so the asset has to be a
+                // container `archive::sniff` recognises. This is what catches a `.tar.xz`
+                // release, which looks reasonable and cannot be opened.
+                if matches!(target, crate::model::FileTarget::ExtractMap(_)) {
+                    const CONTAINERS: [&str; 7] =
+                        [".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".crx", ".xpi"];
+                    assert!(
+                        CONTAINERS.iter().any(|ext| asset.ends_with(ext)),
+                        "{canonical} for {host}: '{asset}' names a member, so it must be one of \
+                         {CONTAINERS:?}"
+                    );
+                }
                 checked += 1;
             }
         }
