@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/registry.schema.json",
+  "title": "vendorfiles program registry",
+  "description": "Programs `vendor add <name>` can install without being told a repository or its asset names. Describes version 1 of the format; a later version bumps the number and this file with it.",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Schema version. A vendor that does not understand the number refuses the file rather than misreading it.",
+      "const": 1
+    },
+    "programs": {
+      "description": "Programs by canonical name, which is also the config key `add` writes.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/program" }
+    }
+  },
+  "$defs": {
+    "program": {
+      "type": "object",
+      "required": ["repository"],
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "description": "Other names that resolve here. Canonical names win, so an alias can never redirect an existing name.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "repository": {
+          "description": "The GitHub repository releases come from. The same shape `vendor add <url>` takes, `www.` and plain `http` included.",
+          "type": "string",
+          "pattern": "^https?://(?:www\\.)?github\\.com/[^/]+/[^/]+$"
+        },
+        "releaseRegex": {
+          "description": "Which tags count, for a repository publishing several trains of releases. `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0`, and only the first carries binaries.",
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "description": "A file in the repository rather than a release asset. Mutually exclusive with `asset`, `member` and `targets`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "hashVersionFile": {
+          "description": "Track a repository file by commit rather than by tag. Only `path` entries have a commit to track, so `true` needs one.",
+          "type": "boolean"
+        },
+        "asset": {
+          "description": "The asset pattern shared by every target, for projects naming assets by target triple. Placeholders: {release}, {version}, {target}, {ext}, {exe}.",
+          "type": "string",
+          "minLength": 1
+        },
+        "member": {
+          "description": "The path inside the asset. Omit it when the asset *is* the executable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "as": {
+          "description": "The name to save it under, when the basename is not the command you would type: `ox-macos` becomes `ox`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "targets": {
+          "description": "What to fetch per host, keyed `{os}-{arch}` exactly as Rust reports them.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/hostKey" },
+          "additionalProperties": { "$ref": "#/$defs/target" },
+          "minProperties": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["path"] },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["asset"] },
+                { "required": ["member"] },
+                { "required": ["targets"] }
+              ]
+            }
+          },
+          "else": { "required": ["targets"] }
+        },
+        {
+          "if": { "not": { "required": ["asset"] } },
+          "then": {
+            "not": { "required": ["member"] },
+            "properties": {
+              "targets": {
+                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright — and each names its own `member`, the shared one having no asset to point into.",
+                "additionalProperties": { "$ref": "#/$defs/explicit" }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["hashVersionFile"],
+            "properties": { "hashVersionFile": { "const": true } }
+          },
+          "then": {
+            "description": "`true` tracks the first file's commit, which only a repository `path` has. A release asset would send the lookup after a path containing `{release}/`.",
+            "required": ["path"]
+          }
+        }
+      ]
+    },
+    "target": {
+      "description": "Either the target triple to substitute into the shared patterns, or an asset named outright.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/explicit" }
+      ]
+    },
+    "explicit": {
+      "type": "object",
+      "required": ["asset"],
+      "additionalProperties": false,
+      "properties": {
+        "asset": {
+          "description": "The release asset, including the `{release}/` prefix.",
+          "type": "string",
+          "minLength": 1
+        },
+        "member": {
+          "description": "The path to the executable inside it, or omitted when the asset is the executable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "as": {
+          "description": "The name to save it under.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hostKey": {
+      "description": "`{os}-{arch}` as `std::env::consts` reports them.",
+      "pattern": "^[a-z0-9_]+-[a-z0-9_]+$",
+      "examples": [
+        "windows-x86_64",
+        "windows-aarch64",
+        "macos-x86_64",
+        "macos-aarch64",
+        "linux-x86_64",
+        "linux-aarch64"
+      ]
+    }
+  }
+}

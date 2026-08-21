@@ -85,6 +85,9 @@ pub enum Command {
         /// Re-check the program registry rather than trusting the cached copy.
         #[arg(long = "refresh")]
         refresh: bool,
+        /// Print the entry that would be added, without downloading or writing anything.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 
     /// Uninstall all/selected dependencies.

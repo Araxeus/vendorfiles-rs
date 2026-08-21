@@ -176,9 +176,467 @@ programs:
         assert!(refused.is_err());
     }
 
+    /// A file that ships at the repository root, two directories above this crate.
+    fn repository_file(name: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()))
+    }
+
+    /// The published JSON Schema, which editors validate `registry.yml` against.
+    fn published_schema() -> serde_json::Value {
+        serde_json::from_str(&repository_file("registry.schema.json")).expect("valid JSON")
+    }
+
+    /// The same schema compiled as Draft 2020-12.
+    ///
+    /// Building it catches a `$ref` that resolves to nothing and a known keyword given a value
+    /// it does not take. It does *not* catch a misspelled keyword: the draft says an
+    /// unrecognised one is an annotation, so `minumLength` compiles and quietly constrains
+    /// nothing. Only the cases below, which run documents through the schema, notice that.
+    fn compiled_schema() -> jsonschema::Validator {
+        jsonschema::draft202012::new(&published_schema())
+            .expect("registry.schema.json compiles as Draft 2020-12")
+    }
+
+    /// A registry document as the validator wants it: YAML is JSON with a friendlier syntax, so
+    /// the fixtures stay in the form a contributor would actually write.
+    fn as_json(document: &str) -> serde_json::Value {
+        serde_yaml_ng::from_str(document).expect("valid YAML")
+    }
+
+    /// Every way one document offends the schema, for an assertion message worth reading.
+    fn why_invalid(validator: &jsonschema::Validator, document: &serde_json::Value) -> String {
+        validator
+            .iter_errors(document)
+            .map(|error| format!("  {}: {error}", error.instance_path()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The fields serde will accept, taken from its own complaint about one it will not.
+    ///
+    /// Asking serde rather than repeating the list keeps this honest: add a field to the struct
+    /// and this set grows on its own, so the schema cannot quietly fall behind.
+    fn fields_serde_accepts<T: serde::de::DeserializeOwned>(document: &str) -> Vec<String> {
+        let error = serde_yaml_ng::from_str::<T>(document)
+            .err()
+            .expect("the probe field must be rejected")
+            .to_string();
+        // serde words the list three ways depending on its length — "expected one of `a`, `b`",
+        // "expected `a` or `b`", "expected `a`" — so take every backticked name after "expected"
+        // rather than matching one phrasing.
+        let (_, listed) = error
+            .split_once("expected ")
+            .unwrap_or_else(|| panic!("unexpected serde wording: {error}"));
+        let mut fields: Vec<String> = listed
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect();
+        fields.sort();
+        assert!(!fields.is_empty(), "no fields parsed out of: {error}");
+        fields
+    }
+
+    fn schema_properties(schema: &serde_json::Value, pointer: &str) -> Vec<String> {
+        schema
+            .pointer(pointer)
+            .unwrap_or_else(|| panic!("no properties at {pointer}"))
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn the_published_schema_lists_exactly_the_fields_serde_accepts() {
+        let schema = published_schema();
+
+        for (what, probe, pointer) in [
+            (
+                "Document",
+                "version: 1
+nope: 1
+",
+                "/properties",
+            ),
+            (
+                "Program",
+                "repository: r
+targets: {}
+nope: 1
+",
+                "/$defs/program/properties",
+            ),
+            (
+                "Explicit",
+                "asset: a
+nope: 1
+",
+                "/$defs/explicit/properties",
+            ),
+        ] {
+            let expected = match what {
+                "Document" => fields_serde_accepts::<Document>(probe),
+                "Program" => fields_serde_accepts::<super::Program>(probe),
+                _ => fields_serde_accepts::<super::Explicit>(probe),
+            };
+            let mut published = schema_properties(&schema, pointer);
+            published.sort();
+            assert_eq!(
+                published, expected,
+                "registry.schema.json is out of step with `{what}`"
+            );
+        }
+    }
+
+    #[test]
+    fn the_schema_agrees_with_this_build_about_the_version() {
+        let schema = published_schema();
+        let declared = schema
+            .pointer("/properties/version/const")
+            .and_then(serde_json::Value::as_u64)
+            .expect("a version constant");
+        assert_eq!(
+            u32::try_from(declared).unwrap(),
+            SUPPORTED_VERSION,
+            "the schema documents a format this build does not support"
+        );
+    }
+
     #[test]
     fn an_empty_registry_is_valid() {
         let document = parse("version: 1\n").expect("valid");
         assert!(document.programs.is_empty());
+    }
+
+    /// The file this repository actually ships, against the schema that ships beside it. Nothing
+    /// else proves the two have ever met.
+    #[test]
+    fn the_shipped_registry_satisfies_the_published_schema() {
+        let text = repository_file("registry.yml");
+        parse(&text).expect("registry.yml parses");
+        let registry = as_json(&text);
+        let validator = compiled_schema();
+        assert!(
+            validator.is_valid(&registry),
+            "registry.yml does not satisfy registry.schema.json:\n{}",
+            why_invalid(&validator, &registry)
+        );
+    }
+
+    /// Entries the schema has to let through, for the rules that are easier to overshoot than to
+    /// miss. The explicit form is absent because `registry.yml` covers it: `fzf` names an asset
+    /// per host.
+    const ACCEPTED: &[(&str, &str)] = &[
+        ("the compact form", COMPACT),
+        (
+            "a repository file, which takes no targets",
+            r"
+version: 1
+programs:
+  starship-preset:
+    repository: https://github.com/starship/starship
+    path: docs/public/presets/toml/nerd-font-symbols.toml
+    hashVersionFile: true
+    as: starship.toml
+",
+        ),
+        (
+            "a release entry saying outright that it is not tracked by commit",
+            r#"
+version: 1
+programs:
+  untracked:
+    repository: https://github.com/example/untracked
+    hashVersionFile: false
+    asset: "{release}/untracked-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+    ];
+
+    #[test]
+    fn the_published_schema_accepts_every_form_an_entry_can_take() {
+        let validator = compiled_schema();
+        for (what, document) in ACCEPTED {
+            let value = as_json(document);
+            assert!(
+                validator.is_valid(&value),
+                "the schema refuses {what}:\n{}",
+                why_invalid(&validator, &value)
+            );
+            parse(document).unwrap_or_else(|error| panic!("{what} must parse: {error}"));
+        }
+    }
+
+    /// One malformed entry per rule the schema enforces, each named after the rule it breaks.
+    ///
+    /// Naming them one by one is the point: a failure says which constraint stopped holding
+    /// rather than only that something somewhere loosened.
+    const REFUSED: &[(&str, &str)] = &[
+        (
+            "a repository file that also names an asset",
+            r#"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    asset: "{release}/both{ext}"
+"#,
+        ),
+        (
+            "a repository file that also names a member",
+            r"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    member: inner/file
+",
+        ),
+        (
+            "a repository file that also lists targets",
+            r"
+version: 1
+programs:
+  both:
+    repository: https://github.com/example/both
+    path: config.toml
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "a release entry with no targets at all",
+            r"
+version: 1
+programs:
+  nowhere:
+    repository: https://github.com/example/nowhere
+",
+        ),
+        (
+            "an empty targets map",
+            r"
+version: 1
+programs:
+  nowhere:
+    repository: https://github.com/example/nowhere
+    targets: {}
+",
+        ),
+        (
+            "a host key that is not `{os}-{arch}`",
+            r"
+version: 1
+programs:
+  shouty:
+    repository: https://github.com/example/shouty
+    targets:
+      Windows-X86_64: x86_64-pc-windows-msvc
+",
+        ),
+        (
+            "a repository that is not a GitHub URL",
+            r"
+version: 1
+programs:
+  elsewhere:
+    repository: https://gitlab.com/example/elsewhere
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "an explicit target with no asset",
+            r"
+version: 1
+programs:
+  assetless:
+    repository: https://github.com/example/assetless
+    targets:
+      linux-x86_64:
+        member: inner/bin
+",
+        ),
+        (
+            "a field this build does not know",
+            r#"
+version: 1
+programs:
+  sneaky:
+    repository: https://github.com/example/sneaky
+    vendorFolder: "C:/Windows/System32"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "a program name `add` could not write to a config",
+            r"
+version: 1
+programs:
+  -dashed:
+    repository: https://github.com/example/dashed
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "a triple with no shared asset to substitute it into",
+            r"
+version: 1
+programs:
+  patternless:
+    repository: https://github.com/example/patternless
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+",
+        ),
+        (
+            "one triple among targets that otherwise name their assets outright",
+            r#"
+version: 1
+programs:
+  mixed:
+    repository: https://github.com/example/mixed
+    targets:
+      linux-x86_64:
+        asset: "{release}/mixed-linux.tar.gz"
+      macos-aarch64: aarch64-apple-darwin
+"#,
+        ),
+        (
+            "a shared member with no shared asset to point into",
+            r#"
+version: 1
+programs:
+  memberful:
+    repository: https://github.com/example/memberful
+    member: inner/bin
+    targets:
+      linux-x86_64:
+        asset: "{release}/memberful-linux.tar.gz"
+"#,
+        ),
+        (
+            "a release entry tracked by commit, which has none",
+            r#"
+version: 1
+programs:
+  tracked:
+    repository: https://github.com/example/tracked
+    hashVersionFile: true
+    asset: "{release}/tracked-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "a document with no version at all",
+            r"
+programs: {}
+",
+        ),
+        (
+            "a top-level key that is not part of the format",
+            r#"
+version: 1
+vendorFolder: "C:/Windows/System32"
+programs: {}
+"#,
+        ),
+        (
+            "a program with no repository to install from",
+            r#"
+version: 1
+programs:
+  nameless:
+    asset: "{release}/nameless-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "an explicit target with a key of its own invention",
+            r#"
+version: 1
+programs:
+  inventive:
+    repository: https://github.com/example/inventive
+    targets:
+      linux-x86_64:
+        asset: "{release}/inventive-linux.tar.gz"
+        vendorFolder: "C:/Windows/System32"
+"#,
+        ),
+        (
+            "a format version this build does not support",
+            r"
+version: 2
+programs: {}
+",
+        ),
+    ];
+
+    /// Repository URLs the schema and `template::is_github_url` must agree about.
+    ///
+    /// Asking the tool rather than restating its regex is the same trick the field-list test
+    /// plays on serde: the two cannot drift without this failing.
+    const REPOSITORY_URLS: &[&str] = &[
+        "https://github.com/junegunn/fzf",
+        "http://github.com/junegunn/fzf",
+        "https://www.github.com/junegunn/fzf",
+        "http://www.github.com/junegunn/fzf",
+        "https://github.com/junegunn/fzf/releases",
+        "https://github.com/junegunn",
+        "https://gitlab.com/junegunn/fzf",
+        "github.com/junegunn/fzf",
+        "https://notgithub.com/junegunn/fzf",
+    ];
+
+    /// A schema error for a URL `vendor add` would have accepted is a contributor's wasted
+    /// afternoon, so the editor's answer and the tool's have to be the same answer.
+    #[test]
+    fn the_published_schema_takes_exactly_the_repository_urls_the_tool_takes() {
+        let validator = compiled_schema();
+        for url in REPOSITORY_URLS {
+            let document = as_json(&format!(
+                r#"version: 1
+programs:
+  under-test:
+    repository: {url}
+    asset: "{{release}}/under-test-{{target}}{{ext}}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#
+            ));
+            assert_eq!(
+                validator.is_valid(&document),
+                crate::template::is_github_url(url),
+                "the schema and `is_github_url` disagree about {url}"
+            );
+        }
+    }
+
+    /// What the schema is for: telling a contributor their entry is wrong before CI does.
+    #[test]
+    fn the_published_schema_refuses_malformed_entries() {
+        let validator = compiled_schema();
+        for (what, document) in REFUSED {
+            assert!(
+                !validator.is_valid(&as_json(document)),
+                "the schema accepts {what}"
+            );
+        }
     }
 }

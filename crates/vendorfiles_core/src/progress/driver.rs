@@ -9,14 +9,15 @@
 //! runtime is saturated, and so any thread can report progress without an executor to hand.
 
 use std::io::{self, IsTerminal, Stdout, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::cursor::{MoveTo, Show};
+use ratatui::crossterm::cursor::{MoveTo, MoveToColumn, Show};
 use ratatui::crossterm::execute;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
@@ -27,6 +28,31 @@ use super::view;
 
 /// How often the display redraws, and so how fast a spinner turns.
 const TICK: Duration = Duration::from_millis(80);
+
+/// Set once the terminal has been given back, to keep any later frame from taking it again.
+///
+/// `Terminal::draw` hides the cursor on every frame, so a frame drawn after [`show_cursor`] would
+/// undo it — and on the interrupt path the process exits immediately afterwards, with no further
+/// frame to put things right. `Stop` alone cannot prevent that: it queues behind every pending
+/// `Print`. Only [`draw`] checks this, so teardown still gets its held lines out.
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+/// Held for the moment a frame is written, and for the moment the cursor is given back.
+///
+/// The flag on its own is a check, not a guarantee: [`draw`] can read it, wait on a state lock
+/// that a worker thread is holding, and only then write its frame — hiding the cursor after
+/// [`show_cursor`] has shown it. This makes the two mutually exclusive, so the decision to skip a
+/// frame and the frame itself cannot be split apart. It also gives the flag its ordering, which is
+/// why `Relaxed` is enough for it.
+static PAINT: Mutex<()> = Mutex::new(());
+
+/// Takes [`PAINT`], poisoned or not.
+///
+/// A panic mid-frame must not cost the cursor: leaving on a poisoned lock is the one outcome
+/// worse than painting over it.
+fn painting() -> MutexGuard<'static, ()> {
+    PAINT.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// The terminal we draw to.
 ///
@@ -59,6 +85,8 @@ impl Driver {
     /// the plain output instead of a live region.
     pub fn start(state: Arc<Mutex<RunState>>) -> Option<Self> {
         install_panic_hook();
+        // A new display draws again, whatever an earlier one was told.
+        STOPPING.store(false, Ordering::Relaxed);
         let terminal = open(0)?;
         let (commands, inbox) = channel();
         let thread = thread::Builder::new()
@@ -185,6 +213,9 @@ fn wipe(terminal: &mut Term) {
 
 /// Paints one frame from the current state.
 fn draw(terminal: &mut Term, state: &Mutex<RunState>, tick: usize) {
+    if STOPPING.load(Ordering::Relaxed) {
+        return;
+    }
     // A poisoned lock means some other thread panicked mid-update. Skipping the frame is better
     // than joining it.
     let Ok(mut state) = state.lock() else {
@@ -192,6 +223,14 @@ fn draw(terminal: &mut Term, state: &Mutex<RunState>, tick: usize) {
     };
     // Hand out rows before drawing, so a dependency keeps the row it already had.
     state.assign();
+    // After the state lock, never before it: taken the other way round, giving the cursor back
+    // would queue behind whatever a worker thread is doing to the state, on the very path that
+    // exists because the user will not wait. This way it waits for one frame's write at most.
+    let _painting = painting();
+    // The check at the top of this function only saves the work; this one is the guarantee.
+    if STOPPING.load(Ordering::Relaxed) {
+        return;
+    }
     let _ = terminal.draw(|frame| {
         let area = frame.area();
         view::view(&state, tick, area, frame.buffer_mut());
@@ -208,6 +247,25 @@ fn close(terminal: &mut Term) {
     let _ = out.flush();
 }
 
+/// Shows the cursor, whatever state the display was left in.
+///
+/// `Terminal::draw` hides it on every frame, so anything that ends a run without going through
+/// [`close`] has to put it back.
+pub fn show_cursor() {
+    // Under the lock and before the write: from here on the cursor belongs to the caller, and no
+    // frame — including one already decided on — may hide it again.
+    let _painting = painting();
+    STOPPING.store(true, Ordering::Relaxed);
+    let mut out = io::stdout();
+    // Without a terminal there was no display and so no hidden cursor to give back; the escape
+    // bytes would only land in whatever a pipe or `--pr` is collecting.
+    if !out.is_terminal() {
+        return;
+    }
+    let _ = execute!(out, MoveToColumn(0), Show);
+    let _ = out.flush();
+}
+
 /// Guards against installing the panic hook more than once.
 static HOOK: OnceLock<()> = OnceLock::new();
 
@@ -219,6 +277,8 @@ fn install_panic_hook() {
     HOOK.get_or_init(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
+            // No [`PAINT`] here: a panic inside a frame runs this on the thread that is holding
+            // it, and waiting for itself would cost the terminal rather than save it.
             let mut out = io::stdout();
             let _ = execute!(out, Show);
             let _ = out.flush();

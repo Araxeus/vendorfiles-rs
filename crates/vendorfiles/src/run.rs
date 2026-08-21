@@ -88,6 +88,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             name,
             files,
             refresh,
+            dry_run,
         } => {
             install(
                 &mut session,
@@ -95,7 +96,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 version,
                 name.flatten(),
                 files,
-                refresh,
+                Preview { refresh, dry_run },
             )
             .await?;
         }
@@ -221,6 +222,39 @@ fn merge_install_entry(
     entry
 }
 
+/// Prints the entry an install would add, and where its files would land.
+///
+/// Deliberately offline: resolving a name, merging the defaults and choosing the platform's asset
+/// all happen locally, and stopping before the first request is what makes this answer "what will
+/// this put in my config" instantly — and what lets the tests cover the registry without a
+/// network. The version is left to the install, being the one part that has to ask GitHub.
+fn report_entry(session: &Session, name: &str, entry: &RawDependency) -> Result<()> {
+    let folder = session
+        .workspace
+        .dependency_folder(entry.vendor_folder.as_deref(), name);
+    let mut wrapper = serde_json::Map::new();
+    wrapper.insert(
+        name.to_owned(),
+        serde_json::to_value(entry).map_err(|source| VendorError::SerializeConfig {
+            path: name.to_owned(),
+            message: source.to_string(),
+        })?,
+    );
+    let rendered =
+        serde_json::to_string_pretty(&serde_json::Value::Object(wrapper)).map_err(|source| {
+            VendorError::SerializeConfig {
+                path: name.to_owned(),
+                message: source.to_string(),
+            }
+        })?;
+
+    ui::info(format!("{name} would be added as:"));
+    vendorfiles_core::progress::print_out(&rendered);
+    ui::info(format!("files would be written to {}", folder.display()));
+    ui::info("nothing was downloaded or written");
+    Ok(())
+}
+
 /// What a `source` argument turned out to name.
 struct Source {
     /// The URL the reference builds, warts and all — `owner/repo` becomes
@@ -295,20 +329,28 @@ async fn resolve_source(
 }
 
 /// `vendor install <url/name> [version]`.
+/// How much of an install to actually perform.
+struct Preview {
+    /// Re-check the registry rather than trusting the cached copy.
+    refresh: bool,
+    /// Resolve and report, but download nothing and write nothing.
+    dry_run: bool,
+}
+
 async fn install(
     session: &mut Session,
     source: &str,
     version: Option<String>,
     name: Option<String>,
     files: Option<Vec<String>>,
-    refresh: bool,
+    preview: Preview,
 ) -> Result<()> {
     let Source {
         lookup,
         stored,
         known,
         listed,
-    } = resolve_source(session, source, files.is_some(), refresh).await?;
+    } = resolve_source(session, source, files.is_some(), preview.refresh).await?;
 
     if !is_github_url(&lookup) {
         bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
@@ -393,6 +435,10 @@ async fn install(
         }
     }
     let dependency = entry.resolve(&name)?;
+
+    if preview.dry_run {
+        return report_entry(session, &name, &entry);
+    }
 
     session
         .install(

@@ -81,8 +81,12 @@ fn expected_help(name: &str) -> String {
                 "  -h, --help              display help for command",
                 &format!(
                     "{:<24}{}
+{:<24}{}
   -h, --help              display help for command",
-                    "  --refresh", "Re-check the program registry"
+                    "  --refresh",
+                    "Re-check the program registry",
+                    "  --dry-run",
+                    "Print the entry, change nothing"
                 ),
             )
             .replace(
@@ -392,73 +396,194 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
 // Inheriting from a neighbouring entry
 // ---------------------------------------------------------------------------------------
 
-/// A project already vendoring Coloris under the name `first`, up to date on disk.
-///
-/// Up to date is what keeps this offline: `install` only skips the download when the name it is
-/// installing is already in the config *and* its lockfile matches. That rules out an end-to-end
-/// test of the inheriting case itself — the borrowed-from name is by definition not the name being
-/// added — so the wording of that warning is checked in `run.rs`'s unit tests instead, and what is
-/// left to check here is that adding a name back under itself stays quiet.
-fn neighbour_project() -> tempfile::TempDir {
-    let dir = project(
-        r#"{
-  "vendorDependencies": {
-    "first": {
-      "version": "v0.18.0",
-      "repository": "https://github.com/mdbassit/Coloris",
-      "files": ["LICENSE"]
-    }
-  }
+/// A config already vendoring `repository` under the name `first`.
+fn neighbour_project(entry: &str) -> tempfile::TempDir {
+    project(&format!(
+        r#"{{"vendorDependencies":{{"first":{{{entry}}}}}}}"#
+    ))
 }
-"#,
+
+/// The neighbour the surprising case needs: a repository, a version and files.
+fn described_neighbour(repository: &str) -> tempfile::TempDir {
+    neighbour_project(&format!(
+        r#""repository":"{repository}","version":"v1.0.0","files":["LICENSE"]"#
+    ))
+}
+
+/// A repository nothing will be fetched from — every test here stops at `--dry-run`, which is
+/// what keeps the warning decision checkable without a request.
+const NEIGHBOURED: &str = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
+
+#[test]
+fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
+    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
+    // version, and when that version already matches nothing is written at all.
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let warning = stderr(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {warning}");
+    assert!(warning.contains("'first' already vendors"), "{warning}");
+    assert!(
+        warning.contains("inherits its files and version"),
+        "{warning}"
     );
-    let folder = dir.path().join("vendor").join("first");
-    std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("LICENSE"), "MIT\n").unwrap();
-    std::fs::write(
-        folder.join("vendor-lock.json"),
-        r#"{
-  "first": {
-    "repository": "https://github.com/mdbassit/Coloris",
-    "version": "v0.18.0",
-    "files": { "LICENSE": "LICENSE" }
-  }
+    assert!(warning.contains("--files"), "{warning}");
 }
-"#,
-    )
-    .unwrap();
-    dir
+
+#[test]
+fn describing_it_with_files_still_borrows_the_version() {
+    // `--files` describes the files, but the neighbour is still the base of the new entry, so its
+    // version comes along — and that is the half that can skip the config write entirely.
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-f", "README.md"],
+    );
+    let warning = stderr(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {warning}");
+    assert!(warning.contains("inherits its version."), "{warning}");
+    assert!(
+        !warning.contains("its files"),
+        "the files were described, not borrowed: {warning}"
+    );
+    // And it really is borrowed: the entry a dry run prints says so.
+    assert!(
+        stdout(&out).contains(r#""version": "v1.0.0""#),
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]
 fn re_adding_the_same_name_says_nothing() {
-    // Updating an entry under its own name is ordinary, not a surprise: `first` is the name being
-    // added, so it is not a neighbour of itself. The explicit version and the matching lockfile
-    // keep the whole run off the network.
-    let dir = neighbour_project();
+    // Updating an entry under its own name is ordinary, not a surprise: `first` is not a
+    // neighbour of itself.
+    let dir = described_neighbour(NEIGHBOURED);
 
     let out = vendor(
         dir.path(),
-        &[
-            "add",
-            "https://github.com/mdbassit/Coloris",
-            "v0.18.0",
-            "-n",
-            "first",
-        ],
+        &["add", NEIGHBOURED, "--dry-run", "-n", "first"],
     );
     assert!(
         !stderr(&out).contains("already vendors"),
         "its own entry is not a neighbour: {}",
         stderr(&out)
     );
-    // Nothing was downloaded, which is also what proves no request was made.
+}
+
+#[test]
+fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
+    // No files anywhere, so the command fails asking for them. Warning first about files it never
+    // borrowed would be the worst of both.
+    let dir = neighbour_project(&format!(r#""repository":"{NEIGHBOURED}""#));
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    assert_ne!(code(&out), 0);
     assert!(
-        stdout(&out).contains("is up to date"),
-        "unexpected stdout: {}",
-        stdout(&out)
+        !stderr(&out).contains("already vendors"),
+        "nothing was inherited: {}",
+        stderr(&out)
     );
-    assert_eq!(code(&out), 0, "exit code: {}", stderr(&out));
+}
+
+/// A registry with one program, written next to the project.
+fn registry(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("registry.yml");
+    std::fs::write(
+        &path,
+        r#"
+version: 1
+programs:
+  fd:
+    aliases: [fdfind]
+    repository: https://github.com/sharkdp/fd
+    asset: "{release}/fd-v{version}-{target}{ext}"
+    member: "fd-v{version}-{target}/fd{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+"#,
+    )
+    .expect("writing the registry");
+    path
+}
+
+/// Runs the binary with a registry of our own and no network reachable through it.
+fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
+    let registry = registry(dir);
+    Command::new(env!("CARGO_BIN_EXE_vendor"))
+        .args(args)
+        .current_dir(dir)
+        .env_remove("VENDOR_CONFIG")
+        .env_remove("INIT_CWD")
+        .env_remove("PWD")
+        .env("GITHUB_TOKEN", "")
+        .env("VENDOR_REGISTRY", &registry)
+        .output()
+        .expect("running the vendor binary")
+}
+
+// ---------------------------------------------------------------------------------------
+// `--dry-run`, which is also how the registry path is covered without a network
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_dry_run_reports_the_registry_entry_and_writes_nothing() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let before = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+
+    let out = vendor_with_registry(dir.path(), &["add", "fd", "--dry-run"]);
+    let printed = stdout(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    // The platform's own asset, with `{version}` left for the install to resolve.
+    assert!(
+        printed.contains("\"repository\": \"https://github.com/sharkdp/fd\""),
+        "{printed}"
+    );
+    assert!(printed.contains("{release}/fd-v{version}-"), "{printed}");
+    assert!(printed.contains("{version}"), "{printed}");
+    assert!(printed.contains("would be added as"), "{printed}");
+    assert!(
+        printed.contains("nothing was downloaded or written"),
+        "{printed}"
+    );
+
+    // Nothing touched: no config change, no vendor folder, no lockfile.
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("vendor.json")).unwrap(),
+        before
+    );
+    assert!(!dir.path().join("vendor").exists(), "a folder was created");
+}
+
+#[test]
+fn a_dry_run_resolves_an_alias_to_its_canonical_name() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fdfind", "--dry-run"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    // Keyed `fd`, the canonical name, not the alias that was typed.
+    assert!(stdout(&out).contains("\"fd\": {"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_dry_run_of_an_unknown_name_never_reaches_the_network() {
+    // Not in the registry and not a URL, so the only way on is a GitHub search — which must not
+    // be attempted before `--files` is even satisfied.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(
+        dir.path(),
+        &["add", "definitely-not-a-program", "--dry-run"],
+    );
+    assert_ne!(code(&out), 0);
+    assert!(!dir.path().join("vendor").exists());
 }
 
 #[test]
