@@ -63,7 +63,7 @@ impl Driver {
         let (commands, inbox) = channel();
         let thread = thread::Builder::new()
             .name("vendorfiles-display".to_owned())
-            .spawn(move || run(terminal, state, inbox))
+            .spawn(move || run(terminal, &state, &inbox))
             .ok()?;
         Some(Self {
             commands,
@@ -134,7 +134,7 @@ pub fn fit(rows: usize) -> usize {
 }
 
 /// The thread body: draw on a tick, print on request, tear down on `Stop`.
-fn run(mut terminal: Term, state: Arc<Mutex<RunState>>, inbox: Receiver<Command>) {
+fn run(mut terminal: Term, state: &Mutex<RunState>, inbox: &Receiver<Command>) {
     let mut tick = 0_usize;
     let mut rows = 0_usize;
     loop {
@@ -156,7 +156,7 @@ fn run(mut terminal: Term, state: Arc<Mutex<RunState>>, inbox: Receiver<Command>
             Ok(Command::Stop) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => tick = tick.wrapping_add(1),
         }
-        draw(&mut terminal, &state, tick);
+        draw(&mut terminal, state, tick);
     }
     close(&mut terminal);
 }
@@ -184,7 +184,7 @@ fn wipe(terminal: &mut Term) {
 }
 
 /// Paints one frame from the current state.
-fn draw(terminal: &mut Term, state: &Arc<Mutex<RunState>>, tick: usize) {
+fn draw(terminal: &mut Term, state: &Mutex<RunState>, tick: usize) {
     // A poisoned lock means some other thread panicked mid-update. Skipping the frame is better
     // than joining it.
     let Ok(mut state) = state.lock() else {

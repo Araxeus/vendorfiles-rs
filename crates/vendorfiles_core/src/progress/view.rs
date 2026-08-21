@@ -58,7 +58,7 @@ const REGION_WIDTH: u16 = 84;
 /// A run with no rows to show — `outdated`, or a project already up to date — has no bytes to
 /// report either, so it loses the rule and the footer and sits in three lines.
 #[must_use]
-pub fn height(rows: usize) -> u16 {
+pub const fn height(rows: usize) -> u16 {
     if rows == 0 {
         3
     } else {
@@ -141,15 +141,15 @@ pub fn view(state: &RunState, tick: usize, area: Rect, buf: &mut Buffer) {
 fn summary_line(state: &RunState, width: usize) -> Line<'static> {
     let counter = format!("{:>3}/{:<3} ", state.done, state.total);
     let phase = format!("  {}", state.phase);
-    let counted = counter.chars().count();
-    let room = width.saturating_sub(counted + phase.chars().count());
+    let used = counter.chars().count();
+    let room = width.saturating_sub(used + phase.chars().count());
     let bar_width = SUMMARY_BAR.min(room).max(MIN_BAR);
     let (filled, rest) = bar(bar_width, state.ratio());
     Line::from(vec![
         Span::styled(counter, Style::new().bold()),
         Span::styled(filled, Style::new().fg(Color::Green)),
         Span::styled(rest, Style::new().dim()),
-        Span::raw(clip(&phase, width.saturating_sub(counted + bar_width))),
+        Span::raw(clip(&phase, width.saturating_sub(used + bar_width))),
     ])
 }
 
@@ -526,10 +526,10 @@ mod tests {
         state.bytes = 12_000_000;
         let frame = render(&state, 70);
         let footer = frame.last().map(String::as_str).unwrap_or_default();
-        let stats = &frame[frame.len() - 2];
-        assert!(stats.contains("2 waiting"), "{stats:?}");
-        assert!(stats.contains("2 queued"), "{stats:?}");
-        assert!(stats.contains("11.4 MiB"), "{stats:?}");
+        let counts = &frame[frame.len() - 2];
+        assert!(counts.contains("2 waiting"), "{counts:?}");
+        assert!(counts.contains("2 queued"), "{counts:?}");
+        assert!(counts.contains("11.4 MiB"), "{counts:?}");
         assert!(footer.starts_with('╰'), "{footer:?}");
     }
 

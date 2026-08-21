@@ -84,7 +84,7 @@ pub fn print_err(text: &str) {
 /// Only the `--pr` body, which never animates — it is the whole output of the command.
 pub fn print_raw(bytes: &[u8]) {
     debug_assert!(
-        ACTIVE.lock().map(|active| active.is_none()).unwrap_or(true),
+        ACTIVE.lock().map_or(true, |active| active.is_none()),
         "raw output would land inside a live region"
     );
     let mut stdout = std::io::stdout();
@@ -467,9 +467,27 @@ impl Drop for Transfer<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Reporter, column, print_out};
-    use crate::progress::state::{Outcome, Stage};
+    use crate::progress::state::{Bytes, Outcome, RunState, Stage};
     use crate::progress::view::NAME_WIDTH;
     use std::path::Path;
+
+    /// Reads from the run state without holding the lock past the read.
+    fn peek<T>(reporter: &Reporter, read: impl FnOnce(&RunState) -> T) -> T {
+        read(&reporter.state.lock().expect("state lock"))
+    }
+
+    /// The stage of one dependency.
+    fn stage_of(reporter: &Reporter, id: usize) -> Stage {
+        peek(reporter, |state| state.deps[id].stage.clone())
+    }
+
+    /// The transfer totals of a dependency that should be mid-download.
+    fn bytes_of(reporter: &Reporter, id: usize) -> Bytes {
+        match stage_of(reporter, id) {
+            Stage::Active { bytes, .. } => bytes,
+            other => panic!("expected an active stage, found {other:?}"),
+        }
+    }
 
     #[test]
     fn a_hidden_reporter_animates_nothing() {
@@ -505,8 +523,13 @@ mod tests {
         let second = reporter.dependency("bbb");
         let third = reporter.dependency("ccc");
         assert_eq!((first.id, second.id, third.id), (0, 1, 2));
-        let state = reporter.state.lock().unwrap();
-        let names: Vec<&str> = state.deps.iter().map(|dep| dep.name.as_str()).collect();
+        let names = peek(&reporter, |state| {
+            state
+                .deps
+                .iter()
+                .map(|dep| dep.name.clone())
+                .collect::<Vec<_>>()
+        });
         assert_eq!(names, ["aaa", "bbb", "ccc"]);
     }
 
@@ -520,23 +543,22 @@ mod tests {
         let second = dependency.transfer(Some(1024));
         first.advance(512);
         second.advance(256);
-        {
-            let state = reporter.state.lock().unwrap();
-            let Stage::Active { bytes, .. } = &state.deps[0].stage else {
-                panic!("expected an active stage");
-            };
-            assert_eq!(bytes.active, 2);
-            assert_eq!(bytes.done, 768);
-            assert_eq!(bytes.expected, 3072);
-            assert_eq!(state.bytes, 768, "the run total counts every transfer");
-        }
+        let bytes = bytes_of(&reporter, 0);
+        assert_eq!(bytes.active, 2);
+        assert_eq!(bytes.done, 768);
+        assert_eq!(bytes.expected, 3072);
+        assert_eq!(
+            peek(&reporter, |state| state.bytes),
+            768,
+            "the run total counts every transfer"
+        );
         drop(first);
         drop(second);
-        let state = reporter.state.lock().unwrap();
-        let Stage::Active { bytes, .. } = &state.deps[0].stage else {
-            panic!("expected an active stage");
-        };
-        assert_eq!(*bytes, super::Bytes::default(), "totals reset together");
+        assert_eq!(
+            bytes_of(&reporter, 0),
+            Bytes::default(),
+            "totals reset together"
+        );
     }
 
     #[test]
@@ -549,13 +571,7 @@ mod tests {
         let open_ended = dependency.transfer(None);
         measured.advance(128);
         open_ended.advance(128);
-        {
-            let state = reporter.state.lock().unwrap();
-            let Stage::Active { bytes, .. } = &state.deps[0].stage else {
-                panic!("expected an active stage");
-            };
-            assert_eq!(bytes.ratio(), None);
-        }
+        assert_eq!(bytes_of(&reporter, 0).ratio(), None);
         drop(measured);
         drop(open_ended);
         dependency.up_to_date();
@@ -568,10 +584,10 @@ mod tests {
         let dependency = reporter.dependency("yamlfmt");
         dependency.status("downloading");
         dependency.waiting();
-        let state = reporter.state.lock().unwrap();
-        assert_eq!(state.deps[0].stage, Stage::Waiting);
+        let stage = stage_of(&reporter, 0);
+        assert_eq!(stage, Stage::Waiting);
         assert_eq!(
-            state.deps[0].stage.priority(),
+            stage.priority(),
             Some(2),
             "it still wants a row, behind anything actually working"
         );
@@ -587,10 +603,16 @@ mod tests {
         let second = reporter.dependency("bbb");
         first.installed("1.0.0");
         second.finish_quietly();
-        let state = reporter.state.lock().unwrap();
-        assert_eq!(state.done, 2);
-        assert!(state.deps.iter().all(|dep| dep.stage == Stage::Gone));
-        assert!(state.selection().is_empty());
+        let (done, all_settled, rows_free) = peek(&reporter, |state| {
+            (
+                state.done,
+                state.deps.iter().all(|dep| dep.stage == Stage::Gone),
+                state.selection().is_empty(),
+            )
+        });
+        assert_eq!(done, 2);
+        assert!(all_settled);
+        assert!(rows_free);
     }
 
     #[test]
@@ -605,32 +627,29 @@ mod tests {
         let second = reporter.dependency("bbb");
         first.installed("1.0.0");
         second.up_to_date();
-        {
-            let state = reporter.state.lock().unwrap();
-            assert!(
-                matches!(
-                    state.deps[0].stage,
-                    Stage::Done {
-                        outcome: Outcome::Changed,
-                        ..
-                    }
-                ),
-                "{:?}",
-                state.deps[0].stage
-            );
-            assert!(
-                matches!(
-                    state.deps[1].stage,
-                    Stage::Done {
-                        outcome: Outcome::Unchanged,
-                        ..
-                    }
-                ),
-                "{:?}",
-                state.deps[1].stage
-            );
-        }
-        let held = reporter.results.lock().unwrap();
+        let installed = stage_of(&reporter, 0);
+        assert!(
+            matches!(
+                installed,
+                Stage::Done {
+                    outcome: Outcome::Changed,
+                    ..
+                }
+            ),
+            "{installed:?}"
+        );
+        let unchanged = stage_of(&reporter, 1);
+        assert!(
+            matches!(
+                unchanged,
+                Stage::Done {
+                    outcome: Outcome::Unchanged,
+                    ..
+                }
+            ),
+            "{unchanged:?}"
+        );
+        let held = reporter.results.lock().expect("results lock").clone();
         assert_eq!(held.len(), 2, "both lines are waiting for the end");
         assert!(held[0].contains("aaa") && held[0].contains("installed 1.0.0"));
         assert!(held[1].contains("bbb") && held[1].contains("up to date"));
