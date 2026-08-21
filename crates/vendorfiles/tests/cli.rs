@@ -389,59 +389,76 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Inheriting files from a neighbouring entry
+// Inheriting from a neighbouring entry
 // ---------------------------------------------------------------------------------------
 
-/// A config already vendoring `repository` under the name `first`.
-fn neighbour_project(repository: &str) -> tempfile::TempDir {
-    project(&format!(
-        r#"{{"vendorDependencies":{{"first":{{"repository":"{repository}","version":"v1.0.0","files":["LICENSE"]}}}}}}"#
-    ))
+/// A project already vendoring Coloris under the name `first`, up to date on disk.
+///
+/// Up to date is what keeps this offline: `install` only skips the download when the name it is
+/// installing is already in the config *and* its lockfile matches. That rules out an end-to-end
+/// test of the inheriting case itself — the borrowed-from name is by definition not the name being
+/// added — so the wording of that warning is checked in `run.rs`'s unit tests instead, and what is
+/// left to check here is that adding a name back under itself stays quiet.
+fn neighbour_project() -> tempfile::TempDir {
+    let dir = project(
+        r#"{
+  "vendorDependencies": {
+    "first": {
+      "version": "v0.18.0",
+      "repository": "https://github.com/mdbassit/Coloris",
+      "files": ["LICENSE"]
+    }
+  }
 }
-
-#[test]
-fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
-    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
-    // version, and when that version already matches nothing is written at all.
-    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
-    let dir = neighbour_project(repository);
-
-    let out = vendor(dir.path(), &["add", repository]);
-    let warning = stderr(&out);
-
-    assert!(warning.contains("'first' already vendors"), "{warning}");
-    assert!(
-        warning.contains("inherits its files and version"),
-        "{warning}"
+"#,
     );
-    assert!(warning.contains("--files"), "{warning}");
+    let folder = dir.path().join("vendor").join("first");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("LICENSE"), "MIT\n").unwrap();
+    std::fs::write(
+        folder.join("vendor-lock.json"),
+        r#"{
+  "first": {
+    "repository": "https://github.com/mdbassit/Coloris",
+    "version": "v0.18.0",
+    "files": { "LICENSE": "LICENSE" }
+  }
 }
-
-#[test]
-fn describing_it_with_files_says_nothing() {
-    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
-    let dir = neighbour_project(repository);
-
-    let out = vendor(dir.path(), &["add", repository, "-f", "README.md"]);
-    assert!(
-        !stderr(&out).contains("already vendors"),
-        "an explicit --files inherits nothing: {}",
-        stderr(&out)
-    );
+"#,
+    )
+    .unwrap();
+    dir
 }
 
 #[test]
 fn re_adding_the_same_name_says_nothing() {
-    // Updating an entry under its own name is ordinary, not a surprise.
-    let repository = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
-    let dir = neighbour_project(repository);
+    // Updating an entry under its own name is ordinary, not a surprise: `first` is the name being
+    // added, so it is not a neighbour of itself. The explicit version and the matching lockfile
+    // keep the whole run off the network.
+    let dir = neighbour_project();
 
-    let out = vendor(dir.path(), &["add", repository, "-n", "first"]);
+    let out = vendor(
+        dir.path(),
+        &[
+            "add",
+            "https://github.com/mdbassit/Coloris",
+            "v0.18.0",
+            "-n",
+            "first",
+        ],
+    );
     assert!(
         !stderr(&out).contains("already vendors"),
         "its own entry is not a neighbour: {}",
         stderr(&out)
     );
+    // Nothing was downloaded, which is also what proves no request was made.
+    assert!(
+        stdout(&out).contains("is up to date"),
+        "unexpected stdout: {}",
+        stdout(&out)
+    );
+    assert_eq!(code(&out), 0, "exit code: {}", stderr(&out));
 }
 
 #[test]
