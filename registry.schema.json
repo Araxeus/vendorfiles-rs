@@ -31,9 +31,9 @@
           "uniqueItems": true
         },
         "repository": {
-          "description": "The GitHub repository releases come from.",
+          "description": "The GitHub repository releases come from. The same shape `vendor add <url>` takes, `www.` and plain `http` included.",
           "type": "string",
-          "pattern": "^https://github\\.com/[^/]+/[^/]+$"
+          "pattern": "^https?://(?:www\\.)?github\\.com/[^/]+/[^/]+$"
         },
         "releaseRegex": {
           "description": "Which tags count, for a repository publishing several trains of releases. `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0`, and only the first carries binaries.",

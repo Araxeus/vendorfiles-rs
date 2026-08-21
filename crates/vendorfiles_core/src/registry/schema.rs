@@ -542,6 +542,44 @@ programs:
 "#,
         ),
         (
+            "a document with no version at all",
+            r"
+programs: {}
+",
+        ),
+        (
+            "a top-level key that is not part of the format",
+            r#"
+version: 1
+vendorFolder: "C:/Windows/System32"
+programs: {}
+"#,
+        ),
+        (
+            "a program with no repository to install from",
+            r#"
+version: 1
+programs:
+  nameless:
+    asset: "{release}/nameless-{target}{ext}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "an explicit target with a key of its own invention",
+            r#"
+version: 1
+programs:
+  inventive:
+    repository: https://github.com/example/inventive
+    targets:
+      linux-x86_64:
+        asset: "{release}/inventive-linux.tar.gz"
+        vendorFolder: "C:/Windows/System32"
+"#,
+        ),
+        (
             "a format version this build does not support",
             r"
 version: 2
@@ -549,6 +587,46 @@ programs: {}
 ",
         ),
     ];
+
+    /// Repository URLs the schema and `template::is_github_url` must agree about.
+    ///
+    /// Asking the tool rather than restating its regex is the same trick the field-list test
+    /// plays on serde: the two cannot drift without this failing.
+    const REPOSITORY_URLS: &[&str] = &[
+        "https://github.com/junegunn/fzf",
+        "http://github.com/junegunn/fzf",
+        "https://www.github.com/junegunn/fzf",
+        "http://www.github.com/junegunn/fzf",
+        "https://github.com/junegunn/fzf/releases",
+        "https://github.com/junegunn",
+        "https://gitlab.com/junegunn/fzf",
+        "github.com/junegunn/fzf",
+        "https://notgithub.com/junegunn/fzf",
+    ];
+
+    /// A schema error for a URL `vendor add` would have accepted is a contributor's wasted
+    /// afternoon, so the editor's answer and the tool's have to be the same answer.
+    #[test]
+    fn the_published_schema_takes_exactly_the_repository_urls_the_tool_takes() {
+        let validator = compiled_schema();
+        for url in REPOSITORY_URLS {
+            let document = as_json(&format!(
+                r#"version: 1
+programs:
+  under-test:
+    repository: {url}
+    asset: "{{release}}/under-test-{{target}}{{ext}}"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#
+            ));
+            assert_eq!(
+                validator.is_valid(&document),
+                crate::template::is_github_url(url),
+                "the schema and `is_github_url` disagree about {url}"
+            );
+        }
+    }
 
     /// What the schema is for: telling a contributor their entry is wrong before CI does.
     #[test]
