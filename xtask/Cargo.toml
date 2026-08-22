@@ -18,8 +18,12 @@ publish = false
 anyhow.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
+jsonc-parser.workspace = true
 semver.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
 toml_edit.workspace = true
+vendorfiles_core.workspace = true
 
 [lints]
 workspace = true

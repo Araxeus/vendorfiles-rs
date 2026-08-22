@@ -47,6 +47,11 @@ jobs:
       - name: Rustfmt check
         run: cargo fmt --all --check
 
+      # The README's YAML and TOML examples are generated from the JSON beside them; this fails
+      # when they no longer match it.
+      - name: README examples
+        run: cargo run -p xtask -- readme --check
+
       - name: Clippy
         run: >
           cargo clippy --all-targets --all-features

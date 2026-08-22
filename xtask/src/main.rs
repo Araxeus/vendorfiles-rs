@@ -3,6 +3,7 @@
 #![allow(clippy::multiple_crate_versions)]
 
 mod ci;
+mod readme;
 mod release;
 mod sh;
 
@@ -20,6 +21,12 @@ struct Cli {
 enum Command {
     /// Run every check CI runs: cargo check, rustfmt, clippy and the tests.
     Ci,
+    /// Regenerate the YAML and TOML tabs of the README's config examples.
+    Readme {
+        /// Fail instead of writing when the README is out of date.
+        #[arg(long)]
+        check: bool,
+    },
     /// Bump the workspace version, commit, and tag `v{version}`.
     Release,
 }
@@ -27,6 +34,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Ci => ci::run(),
+        Command::Readme { check } => readme::run(check),
         Command::Release => release::run(),
     }
 }

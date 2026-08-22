@@ -23,11 +23,13 @@ const CLIPPY: &[&str] = &[
     "warnings",
 ];
 
-/// Runs check, format, clippy and the tests, stopping at the first failure.
+/// Runs the README check, cargo check, format, clippy and the tests, stopping at the first
+/// failure.
 ///
-/// Ordered cheapest first, so a compile error or a stray space is reported in seconds rather
-/// than after the whole suite has run.
+/// Ordered cheapest first, so a stale README, a compile error or a stray space is reported in
+/// seconds rather than after the whole suite has run.
 pub fn run() -> Result<()> {
+    crate::readme::run(true)?;
     let root = sh::workspace_root()?;
     sh::run(
         &root,
