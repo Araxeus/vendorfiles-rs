@@ -26,11 +26,16 @@
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
 # member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, crx or xpi.
 #
-# A `member` may also be a *list*, for a program whose executable cannot run alone. The two forms
-# name their outputs differently, because they mean different things. One member is the
+# A `member` may also name more than one file, for a program whose executable cannot run alone.
+# The forms name their outputs differently, because they mean different things. One member is the
 # executable, so it lands under its basename - `fd-v10.3.0-x86_64-pc-windows-msvc/fd.exe` becomes
-# `fd.exe` - and `as` may rename it. A list is a layout, so every path is written out as it
-# stands, directories included, and `as` has no single file to rename and is refused.
+# `fd.exe` - and `as` may rename it. A *list* is a layout, so every path is written out as it
+# stands, directories included. A *map* is that layout with each destination spelled out, which is
+# how `x64/programz.exe` arrives as `program.exe`. Naming more than one file leaves `as` nothing
+# single to rename, so it is refused beside either.
+#
+# A host may name *several assets* instead of one, as a list of `asset`/`member` blocks, for a
+# release that splits what one host needs across an archive and a loose file beside it.
 #
 # `releaseRegex` narrows which tags count, for repositories that publish several trains of
 # releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`

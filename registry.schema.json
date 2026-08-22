@@ -88,8 +88,8 @@
             "not": { "required": ["member"] },
             "properties": {
               "targets": {
-                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright - and each names its own `member`, the shared one having no asset to point into.",
-                "additionalProperties": { "$ref": "#/$defs/explicit" }
+                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its assets outright - and each names its own `member`, the shared one having no asset to point into.",
+                "additionalProperties": { "$ref": "#/$defs/spelledOut" }
               }
             }
           }
@@ -107,20 +107,32 @@
         {
           "if": {
             "required": ["member"],
-            "properties": { "member": { "type": "array" } }
+            "properties": { "member": { "type": ["array", "object"] } }
           },
           "then": {
-            "description": "A list of members is written out as it stands, each file keeping its own path, so there is no single file for `as` to rename.",
+            "description": "More than one member means each file lands under its own name, so there is no single file for `as` to rename.",
             "not": { "required": ["as"] }
           }
         }
       ]
     },
     "target": {
-      "description": "Either the target triple to substitute into the shared patterns, or an asset named outright.",
+      "description": "Either the target triple to substitute into the shared patterns, or the assets named outright.",
       "oneOf": [
         { "type": "string", "minLength": 1 },
-        { "$ref": "#/$defs/explicit" }
+        { "$ref": "#/$defs/spelledOut" }
+      ]
+    },
+    "spelledOut": {
+      "description": "One asset named outright, or the several a host needs together - an archive holding the program, say, beside a loose file it reads.",
+      "oneOf": [
+        { "$ref": "#/$defs/explicit" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/explicit" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
       ]
     },
     "explicit": {
@@ -144,17 +156,17 @@
         {
           "if": {
             "required": ["member"],
-            "properties": { "member": { "type": "array" } }
+            "properties": { "member": { "type": ["array", "object"] } }
           },
           "then": {
-            "description": "A list of members is written out as it stands, each file keeping its own path, so there is no single file for `as` to rename.",
+            "description": "More than one member means each file lands under its own name, so there is no single file for `as` to rename.",
             "not": { "required": ["as"] }
           }
         }
       ]
     },
     "member": {
-      "description": "What to take out of the asset. One path is the executable, saved under its basename, which `as` may rename. A list is a layout every file of which is written out as it stands: `herdr.exe` loads the `conpty/` directory shipped beside it, and flattening would collide `conpty/x64/OpenConsole.exe` with the `arm64` build of the same name.",
+      "description": "What to take out of the asset. One path is the executable, saved under its basename, which `as` may rename. A list is a layout every file of which is written out as it stands: `herdr.exe` loads the `conpty/` directory shipped beside it, and flattening would collide `conpty/x64/OpenConsole.exe` with the `arm64` build of the same name. A map is that same layout with the destinations spelled out, for an archive that buries what you want: `x64/programz.exe` under the name `program.exe`.",
       "oneOf": [
         { "type": "string", "minLength": 1 },
         {
@@ -162,6 +174,12 @@
           "items": { "type": "string", "minLength": 1 },
           "minItems": 1,
           "uniqueItems": true
+        },
+        {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "type": "string", "minLength": 1 },
+          "minProperties": 1
         }
       ]
     },

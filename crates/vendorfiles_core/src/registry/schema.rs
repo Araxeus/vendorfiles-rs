@@ -67,11 +67,13 @@ pub struct Program {
     pub targets: IndexMap<String, Target>,
 }
 
-/// What to take out of an asset: one path, or the several a program needs together.
+/// What to take out of an asset: one path, the several a program needs together, or those
+/// several under names of your choosing.
 ///
-/// One path is the ordinary case, and its basename is the file that lands. A list is for an
-/// archive whose executable cannot run alone — `herdr.exe` loads the `conpty/` directory shipped
-/// beside it — so those are written out as they stand, directories and all.
+/// One path is the ordinary case, and its basename is the file that lands. The other two are for
+/// an archive whose executable cannot run alone — `herdr.exe` loads the `conpty/` directory
+/// shipped beside it. A list writes every path out as it stands, directories and all; a map does
+/// the same but says where each one goes, which is how `x64/programz.exe` becomes `program.exe`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Member {
@@ -79,22 +81,26 @@ pub enum Member {
     One(String),
     /// `member: [herdr.exe, conpty/conpty.dll, …]`.
     Many(Vec<String>),
+    /// `member: { x64/programz.exe: program.exe, data.bin: data.bin }`.
+    Mapped(IndexMap<String, String>),
 }
 
 impl Member {
-    /// The paths it names, in order, so callers need not care which form was written.
+    /// The paths inside the asset it names, in order, whichever form was written.
     #[must_use]
-    pub const fn paths(&self) -> &[String] {
+    pub fn inputs(&self) -> Vec<&String> {
         match self {
-            Self::One(path) => std::slice::from_ref(path),
-            Self::Many(paths) => paths.as_slice(),
+            Self::One(path) => vec![path],
+            Self::Many(paths) => paths.iter().collect(),
+            Self::Mapped(paths) => paths.keys().collect(),
         }
     }
 
-    /// Whether it was written as a list, which is what decides how the outputs are named.
+    /// Whether it names the one file that *is* the program, which is what decides how the output
+    /// is named: alone it lands under its basename, and `as` may rename it.
     #[must_use]
-    pub const fn is_list(&self) -> bool {
-        matches!(self, Self::Many(_))
+    pub const fn is_single(&self) -> bool {
+        matches!(self, Self::One(_))
     }
 }
 
@@ -106,6 +112,9 @@ pub enum Target {
     Triple(String),
     /// A spelled-out asset, for projects whose names follow no pattern.
     Explicit(Explicit),
+    /// Several of them, for a release that splits what one host needs across more than one asset
+    /// — an archive holding the program, say, beside a loose file it reads.
+    Several(Vec<Explicit>),
 }
 
 /// One host's asset, named outright.
@@ -173,8 +182,8 @@ programs:
             panic!("expected the explicit form");
         };
         assert_eq!(
-            explicit.member.as_ref().map(Member::paths),
-            Some(["fzf.exe".to_owned()].as_slice())
+            explicit.member.as_ref().map(Member::inputs),
+            Some(vec![&"fzf.exe".to_owned()])
         );
     }
 
@@ -201,8 +210,75 @@ programs:
             panic!("expected the explicit form");
         };
         let member = explicit.member.as_ref().expect("a member");
-        assert!(member.is_list(), "a sequence must not collapse to one path");
-        assert_eq!(member.paths(), ["herdr.exe", "conpty/x64/OpenConsole.exe"]);
+        assert!(
+            !member.is_single(),
+            "a sequence must not collapse to one path"
+        );
+        assert_eq!(member.inputs(), ["herdr.exe", "conpty/x64/OpenConsole.exe"]);
+    }
+
+    #[test]
+    fn a_member_map_parses() {
+        // The form that renames as it extracts, for a file buried in a subdirectory.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        asset: "{release}/programz-win.zip"
+        member:
+          x64/programz.exe: program.exe
+          data.bin: data.bin
+"#,
+        )
+        .expect("valid");
+        let Target::Explicit(explicit) = &document.programs["programz"].targets["windows-x86_64"]
+        else {
+            panic!("expected the explicit form");
+        };
+        let member = explicit.member.as_ref().expect("a member");
+        assert!(!member.is_single(), "a map must not collapse to one path");
+        assert_eq!(member.inputs(), ["x64/programz.exe", "data.bin"]);
+    }
+
+    #[test]
+    fn a_host_can_name_several_assets() {
+        // A release that splits what one host needs: an archive, and a loose file beside it.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  split:
+    repository: https://github.com/example/split
+    targets:
+      windows-x86_64:
+        - asset: "{release}/split-win.zip"
+          member:
+            x64/splitz.exe: split.exe
+        - asset: "{release}/split-extra.dll"
+      linux-x86_64:
+        asset: "{release}/split-linux"
+        as: split
+"#,
+        )
+        .expect("valid");
+        let targets = &document.programs["split"].targets;
+        let Target::Several(several) = &targets["windows-x86_64"] else {
+            panic!(
+                "expected several assets, found {:?}",
+                targets["windows-x86_64"]
+            );
+        };
+        assert_eq!(several.len(), 2);
+        assert_eq!(several[1].asset, "{release}/split-extra.dll");
+        // The forms mix freely: the other host still names one asset outright.
+        assert!(
+            matches!(targets["linux-x86_64"], Target::Explicit(_)),
+            "a lone map must not be read as a list"
+        );
     }
 
     #[test]
@@ -434,6 +510,25 @@ programs:
       - support/data.bin
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a host naming several assets, renaming out of one of them",
+            r#"
+version: 1
+programs:
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        - asset: "{release}/programz-win.zip"
+          member:
+            x64/programz.exe: program.exe
+            data.bin: data.bin
+        - asset: "{release}/programz-extra.dll"
+      linux-x86_64:
+        asset: "{release}/programz-linux"
+        as: programz
 "#,
         ),
     ];
@@ -720,6 +815,58 @@ programs:
       - "twice{exe}"
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a member map beside an `as` with no single file to rename",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    targets:
+      linux-x86_64:
+        asset: "{release}/renamed.tar.gz"
+        as: renamed
+        member:
+          bin/renamedz: renamed
+"#,
+        ),
+        (
+            "a member map with nothing in it",
+            r#"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    targets:
+      linux-x86_64:
+        asset: "{release}/empty.tar.gz"
+        member: {}
+"#,
+        ),
+        (
+            "a host naming no asset at all",
+            r"
+version: 1
+programs:
+  nothing:
+    repository: https://github.com/example/nothing
+    targets:
+      linux-x86_64: []
+",
+        ),
+        (
+            "a host naming the same asset twice",
+            r#"
+version: 1
+programs:
+  twice:
+    repository: https://github.com/example/twice
+    targets:
+      linux-x86_64:
+        - asset: "{release}/twice.tar.gz"
+        - asset: "{release}/twice.tar.gz"
 "#,
         ),
     ];

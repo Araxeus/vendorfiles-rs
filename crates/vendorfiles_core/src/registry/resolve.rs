@@ -6,7 +6,7 @@
 
 use indexmap::IndexMap;
 
-use super::schema::{Member, Program, Target};
+use super::schema::{Explicit, Member, Program, Target};
 use crate::error::{Result, VendorError};
 use crate::model::{FileEntry, FileTarget};
 
@@ -78,12 +78,20 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
         });
     };
 
-    let (asset, member, named) = match target {
-        Target::Explicit(explicit) => (
-            explicit.asset.clone(),
-            explicit.member.clone(),
-            explicit.output.clone().or_else(|| program.output.clone()),
-        ),
+    let assets: Vec<Wanted> = match target {
+        Target::Explicit(explicit) => vec![spelled_out(explicit, program)],
+        Target::Several(several) => {
+            if several.is_empty() {
+                return Err(VendorError::RegistryInvalidEntry {
+                    name: name.to_owned(),
+                    reason: format!("target '{host}' names no asset to fetch"),
+                });
+            }
+            several
+                .iter()
+                .map(|explicit| spelled_out(explicit, program))
+                .collect()
+        }
         Target::Triple(triple) => {
             let Some(asset) = program.asset.as_ref() else {
                 return Err(VendorError::RegistryInvalidEntry {
@@ -95,33 +103,106 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
                 });
             };
             let expanded = |pattern: &String| expand(pattern, triple, host);
-            (
-                expand(asset, triple, host),
-                program
+            vec![Wanted {
+                asset: expand(asset, triple, host),
+                member: program
                     .member
                     .as_ref()
                     .map(|member| expand_member(member, triple, host)),
-                program.output.as_ref().map(expanded),
-            )
+                named: program.output.as_ref().map(expanded),
+            }]
         }
     };
 
-    let target = match member {
-        // No member: the asset is the binary itself, saved under its own name or the one `as`
-        // gives it.
-        None => FileTarget::Rename(output_name(name, named.as_ref().unwrap_or(&asset))?),
-        Some(member) => FileTarget::ExtractMap(extraction(name, &member, named.as_ref())?),
-    };
-    let mut files = IndexMap::new();
-    files.insert(asset, target);
+    // One `files` element per asset, which is how a config written by hand reads: each entry is
+    // one download, and what happens to it sits underneath.
+    let files = assets
+        .into_iter()
+        .map(
+            |Wanted {
+                 asset,
+                 member,
+                 named,
+             }| {
+                let target = match member {
+                    // No member: the asset is the binary itself, saved under its own name or the one
+                    // `as` gives it.
+                    None => {
+                        FileTarget::Rename(output_name(name, named.as_ref().unwrap_or(&asset))?)
+                    }
+                    Some(member) => {
+                        FileTarget::ExtractMap(extraction(name, &member, named.as_ref())?)
+                    }
+                };
+                Ok(FileEntry::Mapped(
+                    std::iter::once((asset, target)).collect(),
+                ))
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
+    no_file_written_twice(name, host, &files)?;
 
     Ok(Entry {
         name: name.to_owned(),
         repository: program.repository.clone(),
-        files: vec![FileEntry::Mapped(files)],
+        files,
         release_regex: program.release_regex.clone(),
         hash_version_file: program.hash_version_file,
     })
+}
+
+/// Refuses a host whose files would land on top of one another.
+///
+/// Two bare assets inheriting one program-level `as`, or two members sent to the same name, would
+/// leave whichever arrived last and report success - the sort of entry that looks right until
+/// someone wonders where the other file went.
+///
+/// # Errors
+///
+/// Returns [`VendorError::RegistryInvalidEntry`] naming the file that would be written twice.
+fn no_file_written_twice(name: &str, host: &str, files: &[FileEntry]) -> Result<()> {
+    let mut written = std::collections::HashSet::new();
+    let outputs = files.iter().flat_map(|file| match file {
+        FileEntry::Mapped(mapped) => mapped
+            .values()
+            .flat_map(|target| match target {
+                FileTarget::Rename(output) => vec![output],
+                FileTarget::ExtractList(list) => list.iter().collect(),
+                FileTarget::ExtractMap(members) => members.values().collect(),
+            })
+            .collect(),
+        FileEntry::Simple(_) => Vec::new(),
+    });
+    for output in outputs {
+        if !written.insert(output) {
+            return Err(VendorError::RegistryInvalidEntry {
+                name: name.to_owned(),
+                reason: format!(
+                    "target '{host}' would write '{output}' twice, so one file would replace the \
+                     other"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// One asset a host asks for, with what to take out of it and what to call the result.
+struct Wanted {
+    asset: String,
+    member: Option<Member>,
+    named: Option<String>,
+}
+
+/// An asset the entry names outright, which needs no placeholder expanding.
+///
+/// `as` falls back to the program's, so a shared name need not be repeated per host.
+fn spelled_out(explicit: &Explicit, program: &Program) -> Wanted {
+    Wanted {
+        asset: explicit.asset.clone(),
+        member: explicit.member.clone(),
+        named: explicit.output.clone().or_else(|| program.output.clone()),
+    }
 }
 
 /// Resolves a program that vendors a file from the repository rather than a release.
@@ -165,22 +246,30 @@ fn expand_member(member: &Member, triple: &str, host: &str) -> Member {
                 .map(|path| expand(path, triple, host))
                 .collect(),
         ),
+        Member::Mapped(paths) => Member::Mapped(
+            paths
+                .iter()
+                .map(|(input, output)| (expand(input, triple, host), expand(output, triple, host)))
+                .collect(),
+        ),
     }
 }
 
 /// The members to take out of an asset, as input->output pairs.
 ///
-/// The two forms name their outputs differently, because they mean different things. One member
-/// is *the executable*, so it lands under its basename and `as` may rename it - a member nested
-/// in the archive's own versioned directory would otherwise recreate that directory inside the
-/// vendor folder. A list is *a layout*, so each path is written out as it stands: `herdr.exe`
-/// looks for `conpty/x64/OpenConsole.exe` beside it, and flattening would collide that with the
-/// `arm64` build of the same name.
+/// The forms name their outputs differently, because they mean different things. One member is
+/// *the executable*, so it lands under its basename and `as` may rename it - a member nested in
+/// the archive's own versioned directory would otherwise recreate that directory inside the vendor
+/// folder. A list is *a layout*, so each path is written out as it stands: `herdr.exe` looks for
+/// `conpty/x64/OpenConsole.exe` beside it, and flattening would collide that with the `arm64`
+/// build of the same name. A map is the same layout with the destinations spelled out, for an
+/// archive that buries what you want: `x64/programz.exe` under the name `program.exe`.
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::RegistryInvalidEntry`] for an empty list, for a list paired with `as`,
-/// and for any path that would write outside the vendor folder.
+/// Returns [`VendorError::RegistryInvalidEntry`] when nothing is named, when more than one file is
+/// named beside an `as` that could only rename one of them, and for any path in or out that would
+/// reach beyond the directory it belongs in.
 fn extraction(
     name: &str,
     member: &Member,
@@ -191,29 +280,43 @@ fn extraction(
         reason,
     };
 
-    let paths = member.paths();
-    if !member.is_list() {
-        let path = &paths[0];
+    let inputs = member.inputs();
+    if inputs.is_empty() {
+        return Err(refuse(
+            "'member' names no file to take out of the asset".to_owned(),
+        ));
+    }
+    // Every path is read under the directory the archive was unpacked into, so the same rule the
+    // outputs answer to applies going in: nothing may point out of it.
+    for input in &inputs {
+        member_path(name, input)?;
+    }
+
+    if let Member::One(path) = member {
         let output = output_name(name, named.unwrap_or(path))?;
         return Ok(std::iter::once((path.clone(), output)).collect());
     }
-
-    if paths.is_empty() {
-        return Err(refuse(
-            "'member' lists no file to take out of the asset".to_owned(),
-        ));
-    }
     if let Some(named) = named {
         return Err(refuse(format!(
-            "'member' lists {} files, written out as they stand, so there is no single file for \
-             'as' to rename to '{named}'",
-            paths.len()
+            "'member' names {} files, each landing under its own name, so there is no single file \
+             for 'as' to rename to '{named}'",
+            inputs.len()
         )));
     }
-    paths
-        .iter()
-        .map(|path| member_path(name, path).map(|output| (path.clone(), output)))
-        .collect()
+
+    match member {
+        // Already returned above, but the compiler cannot know it.
+        Member::One(path) => Ok(std::iter::once((path.clone(), path.clone())).collect()),
+        // A list is its own destination; a map says where each file goes instead.
+        Member::Many(paths) => paths
+            .iter()
+            .map(|path| member_path(name, path).map(|output| (path.clone(), output)))
+            .collect(),
+        Member::Mapped(paths) => paths
+            .iter()
+            .map(|(input, output)| member_path(name, output).map(|output| (input.clone(), output)))
+            .collect(),
+    }
 }
 
 /// The relative path a listed member is written to, which is the member's own.
@@ -736,6 +839,249 @@ programs:
         let error =
             for_host("empty", &document.programs["empty"], "linux-x86_64").expect_err("refused");
         assert!(error.to_string().contains("no file"), "{error}");
+    }
+
+    #[test]
+    fn a_host_can_name_several_assets_and_rename_out_of_one() {
+        // The shape a release takes when what one host needs is split up: an archive holding two
+        // files, one of them buried and wanting a different name, beside a loose file of its own.
+        let document = program(
+            r#"
+version: 1
+programs:
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        - asset: "{release}/programz-win.zip"
+          member:
+            x64/programz.exe: program.exe
+            data.bin: data.bin
+        - asset: "{release}/programz-extra.dll"
+"#,
+        );
+        let entry = for_host("programz", &document.programs["programz"], "windows-x86_64").unwrap();
+
+        // One `files` element per asset, in the order the entry lists them.
+        let [FileEntry::Mapped(zip), FileEntry::Mapped(loose)] = entry.files.as_slice() else {
+            panic!("expected two mapped entries, found {:?}", entry.files);
+        };
+
+        let (asset, target) = zip.iter().next().unwrap();
+        assert_eq!(asset, "{release}/programz-win.zip");
+        let FileTarget::ExtractMap(members) = target else {
+            panic!("expected an extraction map, found {target:?}");
+        };
+        assert_eq!(
+            members.iter().collect::<Vec<_>>(),
+            [
+                (&"x64/programz.exe".to_owned(), &"program.exe".to_owned()),
+                (&"data.bin".to_owned(), &"data.bin".to_owned()),
+            ],
+            "the map says where each file goes; the subfolder is not carried over"
+        );
+
+        let (asset, target) = loose.iter().next().unwrap();
+        assert_eq!(asset, "{release}/programz-extra.dll");
+        assert_eq!(target, &FileTarget::Rename("programz-extra.dll".to_owned()));
+    }
+
+    #[test]
+    fn a_member_map_may_send_a_file_into_a_directory_of_its_own() {
+        // The counterpart to renaming: a destination that is a path, not just a name.
+        let document = program(
+            r#"
+version: 1
+programs:
+  nested:
+    repository: https://github.com/example/nested
+    targets:
+      linux-x86_64:
+        asset: "{release}/nested.tar.gz"
+        member:
+          build/nested: nested
+          build/share/nested.dat: share/nested.dat
+"#,
+        );
+        let entry = for_host("nested", &document.programs["nested"], "linux-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("build/nested".to_owned(), "nested".to_owned()),
+                (
+                    "build/share/nested.dat".to_owned(),
+                    "share/nested.dat".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_path_of_a_member_map_is_expanded_for_the_host() {
+        // Both sides of the map, so a versioned directory going in can drop out coming back.
+        let document = program(
+            r#"
+version: 1
+programs:
+  mapped:
+    repository: https://github.com/example/mapped
+    asset: "{release}/mapped-{target}{ext}"
+    member:
+      "mapped-{version}-{target}/mapped{exe}": "mapped{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        );
+        let entry = for_host("mapped", &document.programs["mapped"], "windows-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [(
+                "mapped-{version}-x86_64-pc-windows-msvc/mapped.exe".to_owned(),
+                "mapped.exe".to_owned()
+            )],
+            "the config placeholder stays symbolic; the host ones do not"
+        );
+    }
+
+    #[test]
+    fn two_assets_of_one_host_may_not_land_on_the_same_file() {
+        // A program-level `as` reaches every asset a host names, so two bare ones would both try
+        // to be `thing` and the second would quietly win.
+        let document = program(
+            r#"
+version: 1
+programs:
+  thing:
+    repository: https://github.com/example/thing
+    as: thing
+    targets:
+      linux-x86_64:
+        - asset: "{release}/thing-core"
+        - asset: "{release}/thing-extra"
+"#,
+        );
+        let error = for_host("thing", &document.programs["thing"], "linux-x86_64")
+            .expect_err("must be refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("'thing'") && message.contains("twice"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn two_members_may_not_land_on_the_same_file_either() {
+        // The same mistake inside one archive: two inputs, one destination.
+        let document = program(
+            r#"
+version: 1
+programs:
+  thing:
+    repository: https://github.com/example/thing
+    targets:
+      linux-x86_64:
+        asset: "{release}/thing.tar.gz"
+        member:
+          x64/thing: thing
+          arm64/thing: thing
+"#,
+        );
+        let error = for_host("thing", &document.programs["thing"], "linux-x86_64")
+            .expect_err("must be refused");
+        assert!(error.to_string().contains("twice"), "{error}");
+    }
+
+    #[test]
+    fn a_host_that_names_no_asset_at_all_is_refused() {
+        // An empty list would install nothing while reporting success.
+        let document = program(
+            r"
+version: 1
+programs:
+  nothing:
+    repository: https://github.com/example/nothing
+    targets:
+      linux-x86_64: []
+",
+        );
+        let error = for_host("nothing", &document.programs["nothing"], "linux-x86_64")
+            .expect_err("must be refused");
+        assert!(error.to_string().contains("no asset"), "{error}");
+    }
+
+    #[test]
+    fn a_member_map_beside_an_as_is_refused() {
+        // Same reason as the list: `as` renames one downloaded file, and a map already says where
+        // every file goes.
+        let document = program(
+            r"
+version: 1
+programs:
+  thing:
+    repository: https://github.com/example/thing
+    targets:
+      linux-x86_64:
+        asset: '{release}/thing.tar.gz'
+        as: thing
+        member:
+          bin/thingz: thing
+          share/thing.dat: thing.dat
+",
+        );
+        let error = for_host("thing", &document.programs["thing"], "linux-x86_64")
+            .expect_err("must be refused");
+        assert!(error.to_string().contains("'as'"), "{error}");
+    }
+
+    #[test]
+    fn a_member_map_with_nothing_in_it_is_refused() {
+        let document = program(
+            r"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    targets:
+      linux-x86_64:
+        asset: '{release}/empty.tar.gz'
+        member: {}
+",
+        );
+        let error =
+            for_host("empty", &document.programs["empty"], "linux-x86_64").expect_err("refused");
+        assert!(error.to_string().contains("no file"), "{error}");
+    }
+
+    #[test]
+    fn a_member_reaching_out_of_the_archive_is_refused_going_in_as_well_as_out() {
+        // The input is joined onto the directory the archive was unpacked into, so a climbing path
+        // there would move a file from outside it into the vendor folder. Both sides are checked.
+        for (what, yaml) in [
+            (
+                "an input that climbs",
+                "        member:\n          ../../../secret: secret",
+            ),
+            (
+                "an output that climbs",
+                "        member:\n          bin/tool: ../../tool",
+            ),
+            ("a list whose input climbs", "        member: [../secret]"),
+            (
+                "a lone member that climbs",
+                "        member: ../../../secret",
+            ),
+        ] {
+            let document = program(&format!(
+                "version: 1\nprograms:\n  sneaky:\n    repository: https://github.com/e/c\n    targets:\n      linux-x86_64:\n        asset: '{{release}}/sneaky.tar.gz'\n{yaml}\n"
+            ));
+            let error = for_host("sneaky", &document.programs["sneaky"], "linux-x86_64")
+                .expect_err("must be refused");
+            assert!(
+                error.to_string().contains("plain relative path")
+                    || error.to_string().contains("not a plain file name"),
+                "{what}: {error}"
+            );
+        }
     }
 
     #[test]

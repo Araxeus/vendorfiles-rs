@@ -413,35 +413,56 @@ programs:
             for host in program.targets.keys() {
                 let entry = super::resolve::for_host(canonical, program, host)
                     .unwrap_or_else(|error| panic!("{canonical} for {host}: {error}"));
-                let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
-                    panic!("{canonical} for {host}: expected one mapped entry");
-                };
-                let (asset, target) = files.iter().next().expect("one asset");
+                let named = assets(&entry);
                 assert!(
-                    asset.starts_with("{release}/"),
-                    "{canonical} for {host}: assets need the {{release}}/ prefix, found {asset}"
+                    !named.is_empty(),
+                    "{canonical} for {host}: names no asset to fetch"
                 );
-                assert!(
-                    !asset.contains("{target}") && !asset.contains("{ext}"),
-                    "{canonical} for {host}: host placeholders should be expanded, found {asset}"
-                );
-                // An entry that names a member is extracted, so the asset has to be a
-                // container `archive::sniff` recognises. This is what catches a `.tar.xz`
-                // release, which looks reasonable and cannot be opened.
-                if matches!(target, crate::model::FileTarget::ExtractMap(_)) {
-                    const CONTAINERS: [&str; 9] = [
-                        ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".crx", ".xpi",
-                    ];
+                for (asset, target) in named {
                     assert!(
-                        CONTAINERS.iter().any(|ext| asset.ends_with(ext)),
-                        "{canonical} for {host}: '{asset}' names a member, so it must be one of \
-                         {CONTAINERS:?}"
+                        asset.starts_with("{release}/"),
+                        "{canonical} for {host}: assets need the {{release}}/ prefix, found {asset}"
                     );
+                    assert!(
+                        !asset.contains("{target}") && !asset.contains("{ext}"),
+                        "{canonical} for {host}: host placeholders should be expanded, found {asset}"
+                    );
+                    // An entry that names a member is extracted, so the asset has to be a
+                    // container `archive::sniff` recognises. This is what catches a `.tar.xz`
+                    // release, which looks reasonable and cannot be opened.
+                    if matches!(target, crate::model::FileTarget::ExtractMap(_)) {
+                        const CONTAINERS: [&str; 9] = [
+                            ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".crx",
+                            ".xpi",
+                        ];
+                        assert!(
+                            CONTAINERS.iter().any(|ext| asset.ends_with(ext)),
+                            "{canonical} for {host}: '{asset}' names a member, so it must be one of \
+                         {CONTAINERS:?}"
+                        );
+                    }
+                    checked += 1;
                 }
-                checked += 1;
             }
         }
         assert!(checked > 0, "the registry should not be empty");
+    }
+
+    /// Every asset a resolved entry names, with what it does with each.
+    ///
+    /// A host may name more than one - an archive holding the program beside a loose file it reads
+    /// - so nothing here may stop at the first.
+    fn assets(entry: &super::Entry) -> Vec<(&String, &crate::model::FileTarget)> {
+        entry
+            .files
+            .iter()
+            .filter_map(|file| match file {
+                FileEntry::Mapped(mapped) => Some(mapped.iter()),
+                // Only a repository `path` resolves to one, and those never reach here.
+                FileEntry::Simple(_) => None,
+            })
+            .flatten()
+            .collect()
     }
 
     /// Every entry, checked against the release GitHub actually publishes.
@@ -494,24 +515,22 @@ programs:
                         continue;
                     }
                 };
-                let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
-                    problems.push(format!("{canonical} for {host}: unexpected files shape"));
-                    continue;
-                };
-                let (asset, target) = files.iter().next().expect("one asset");
-                // The same substitution the install path performs, so this checks the real name.
-                let wanted = strip_release_prefix(&replace_version(asset, &release.tag_name));
-                if published.contains(&wanted.as_str()) {
-                    checked += 1;
-                } else {
-                    problems.push(format!(
-                        "{canonical} for {host}: '{wanted}' is not in {} — published: {}",
-                        release.tag_name,
-                        published.join(", ")
-                    ));
+                for (asset, target) in assets(&entry) {
+                    // The same substitution the install path performs, so this checks the real
+                    // name.
+                    let wanted = strip_release_prefix(&replace_version(asset, &release.tag_name));
+                    if published.contains(&wanted.as_str()) {
+                        checked += 1;
+                    } else {
+                        problems.push(format!(
+                            "{canonical} for {host}: '{wanted}' is not in {} — published: {}",
+                            release.tag_name,
+                            published.join(", ")
+                        ));
+                    }
+                    // A bare binary has no member to look inside, so nothing more to say about it.
+                    let _ = matches!(target, FileTarget::Rename(_));
                 }
-                // A bare binary has no member to look inside, so nothing more to say about it.
-                let _ = matches!(target, FileTarget::Rename(_));
             }
         }
 
@@ -525,18 +544,21 @@ programs:
         println!("verified {checked} asset names against live releases");
     }
 
-    /// The host whose asset holds archive members, preferring the platform running the test.
+    /// One archive an entry names, with the members it claims are inside it.
+    type Archive = (String, indexmap::IndexMap<String, String>);
+
+    /// The host whose assets hold archive members, preferring the platform running the test.
     ///
     /// A host whose target is a bare binary has nothing to look inside — the asset *is* the file,
     /// already checked by name — so keep looking rather than giving up on the entry, which may mix
-    /// bare binaries and archives across platforms. Returns the host, its asset, and the members
-    /// the entry claims are inside it.
+    /// bare binaries and archives across platforms. Returns the host and, for each of its assets
+    /// that is an archive, the members the entry claims are inside it.
     fn member_bearing_host(
         canonical: &str,
         program: &super::schema::Program,
         local_host: &str,
         problems: &mut Vec<String>,
-    ) -> Option<(String, String, indexmap::IndexMap<String, String>)> {
+    ) -> Option<(String, Vec<Archive>)> {
         use crate::model::FileTarget;
 
         let mut hosts: Vec<&str> = program.targets.keys().map(String::as_str).collect();
@@ -550,12 +572,15 @@ programs:
                     continue;
                 }
             };
-            let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
-                continue;
-            };
-            let (asset, target) = files.iter().next().expect("one asset");
-            if let FileTarget::ExtractMap(members) = target {
-                return Some((host.to_owned(), asset.clone(), members.clone()));
+            let archives: Vec<_> = assets(&entry)
+                .into_iter()
+                .filter_map(|(asset, target)| match target {
+                    FileTarget::ExtractMap(members) => Some((asset.clone(), members.clone())),
+                    _ => None,
+                })
+                .collect();
+            if !archives.is_empty() {
+                return Some((host.to_owned(), archives));
             }
         }
         None
@@ -591,7 +616,7 @@ programs:
             if program.path.is_some() {
                 continue; // A repository file: no archive to look inside.
             }
-            let Some((host, asset, wanted_members)) =
+            let Some((host, archives)) =
                 member_bearing_host(canonical, program, &local_host, &mut problems)
             else {
                 continue; // Bare binaries on every platform: no archive to look inside.
@@ -609,60 +634,69 @@ programs:
                 }
             };
             let tag = release.tag_name.clone();
-            let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
 
-            let response = match github
-                .download_release_asset(&repo, &asset_name, &tag, program.release_regex.as_deref())
-                .await
-            {
-                Ok(response) => response,
-                Err(error) => {
-                    problems.push(format!("{canonical} for {host}: {asset_name}: {error}"));
+            for (asset, wanted_members) in archives {
+                let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
+
+                let response = match github
+                    .download_release_asset(
+                        &repo,
+                        &asset_name,
+                        &tag,
+                        program.release_regex.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(error) => {
+                        problems.push(format!("{canonical} for {host}: {asset_name}: {error}"));
+                        continue;
+                    }
+                };
+                // Saved under the asset's own name, as the install path does: a lone `.gz` or `.xz`
+                // extracts to its name minus the suffix, so a random temporary name would list the
+                // wrong member.
+                let temporary = tempfile::Builder::new()
+                    .prefix("vendorfiles-check-")
+                    .tempdir()
+                    .expect("a temporary directory");
+                let downloaded = temporary.path().join(&asset_name);
+                if let Err(error) =
+                    crate::fsx::stream_to_file(response, &downloaded, true, None).await
+                {
+                    problems.push(format!("{canonical} for {host}: {error}"));
                     continue;
                 }
-            };
-            // Saved under the asset's own name, as the install path does: a lone `.gz` or `.xz`
-            // extracts to its name minus the suffix, so a random temporary name would list the
-            // wrong member.
-            let temporary = tempfile::Builder::new()
-                .prefix("vendorfiles-check-")
-                .tempdir()
-                .expect("a temporary directory");
-            let downloaded = temporary.path().join(&asset_name);
-            if let Err(error) = crate::fsx::stream_to_file(response, &downloaded, true, None).await
-            {
-                problems.push(format!("{canonical} for {host}: {error}"));
-                continue;
-            }
-            let held = match crate::archive::members(&downloaded) {
-                Ok(held) => held,
-                Err(error) => {
-                    problems.push(format!(
-                        "{canonical} for {host}: unreadable archive: {error}"
-                    ));
-                    continue;
-                }
-            };
+                let held = match crate::archive::members(&downloaded) {
+                    Ok(held) => held,
+                    Err(error) => {
+                        problems.push(format!(
+                            "{canonical} for {host}: unreadable archive: {error}"
+                        ));
+                        continue;
+                    }
+                };
 
-            // Resolved the way installation resolves it — `join_normalized` under the directory
-            // the archive was unpacked into — rather than compared as raw spellings. That is what
-            // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
-            // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
-            // is enough: both sides go through the same one.
-            let root = std::path::Path::new("extracted");
-            let held_paths: Vec<_> = held
-                .iter()
-                .map(|held| crate::fsx::join_normalized(root, &[held]))
-                .collect();
-            for member in wanted_members.keys() {
-                let expected = replace_version(member, &tag);
-                if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
-                    checked += 1;
-                } else {
-                    problems.push(format!(
+                // Resolved the way installation resolves it — `join_normalized` under the directory
+                // the archive was unpacked into — rather than compared as raw spellings. That is what
+                // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
+                // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
+                // is enough: both sides go through the same one.
+                let root = std::path::Path::new("extracted");
+                let held_paths: Vec<_> = held
+                    .iter()
+                    .map(|held| crate::fsx::join_normalized(root, &[held]))
+                    .collect();
+                for member in wanted_members.keys() {
+                    let expected = replace_version(member, &tag);
+                    if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
+                        checked += 1;
+                    } else {
+                        problems.push(format!(
                         "{canonical} for {host}: '{expected}' is not in {asset_name} — holds: {}",
                         held.join(", ")
                     ));
+                    }
                 }
             }
         }

@@ -943,10 +943,26 @@ the directories were dropped:
         as: herdr
 ```
 
-Every path is relative to the archive root; one that is absolute or climbs out of it is refused,
-as is `as` beside a list - it renames a single downloaded file, and a list has no single file to
-mean. One `member` still lands under its basename, so the archive's own versioned directory does
-not end up in your vendor folder.
+Give `member` a *map* instead of a list to say where each file goes, which is how something
+buried in the archive arrives under the name you want. And where a release splits what one host
+needs across more than one asset, the host names them as a list:
+
+```yaml
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        - asset: "{release}/programz-win.zip"
+          member:
+            x64/programz.exe: program.exe    # renamed out of a subdirectory
+            data.bin: data.bin               # taken as it stands
+        - asset: "{release}/programz-extra.dll"
+```
+
+Every path is relative to the archive root, going in as well as coming out; one that is absolute
+or climbs out of it is refused. So is `as` beside a list or a map - it renames a single downloaded
+file, and those name several. One `member` still lands under its basename, so the archive's own
+versioned directory does not end up in your vendor folder.
 
 Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
 and a file from the repository is vendored with `path` instead of an asset:
