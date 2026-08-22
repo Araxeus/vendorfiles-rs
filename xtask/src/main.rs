@@ -3,6 +3,7 @@
 #![allow(clippy::multiple_crate_versions)]
 
 mod ci;
+mod gh;
 mod readme;
 mod release;
 mod sh;
@@ -27,14 +28,15 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// Bump the workspace version, commit, and tag `v{version}`.
-    Release,
+    /// Bump the workspace version, commit and tag `v{version}`, then push, publish and open a
+    /// draft release - each one asked about, or taken as read from its flag.
+    Release(release::Options),
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Ci => ci::run(),
         Command::Readme { check } => readme::run(check),
-        Command::Release => release::run(),
+        Command::Release(options) => release::run(&options),
     }
 }

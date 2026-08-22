@@ -2,16 +2,91 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::thread::JoinHandle;
 
 use anyhow::{Context, Result, bail};
-use dialoguer::{Select, theme::ColorfulTheme};
+use clap::Args;
+use dialoguer::{Confirm, Select, theme::ColorfulTheme};
 use semver::Version;
 
-use crate::sh;
+use crate::{gh, sh};
 
-/// Runs the release flow: clean check, version prompt, manifest and README update, format,
-/// commit, tag.
-pub fn run() -> Result<()> {
+/// What to do once the version is committed and tagged.
+///
+/// Passing any flag makes those three steps non-interactive - the flags given are the steps
+/// taken, and everything else is skipped - so a scripted release never stops on a prompt. With
+/// no flag at all the steps are asked about instead. Choosing the version is a prompt either
+/// way: there is no flag for it, because there is nothing to script it from.
+#[derive(Args)]
+pub struct Options {
+    /// Push the release commit and its tag to `origin main` without asking.
+    #[arg(long)]
+    push: bool,
+    /// Run `cargo publish --workspace` without asking. Implies `--push`.
+    #[arg(long)]
+    publish: bool,
+    /// Open a draft GitHub release for the new tag without asking. Implies `--push`: the tag has
+    /// to be on the remote first, or GitHub would create it at the default branch's head
+    /// instead of at the release commit.
+    #[arg(long)]
+    draft_release: bool,
+}
+
+/// The three steps, resolved from the flags or from the answers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Plan {
+    push: bool,
+    publish: bool,
+    draft_release: bool,
+}
+
+impl Options {
+    /// The plan the flags describe, or `None` when none were passed and the flow should ask.
+    const fn plan(&self) -> Option<Plan> {
+        if !self.push && !self.publish && !self.draft_release {
+            return None;
+        }
+        Some(Plan {
+            // Both of the later steps want the commit on the remote, so asking for one is asking
+            // for the push as well - the same nesting the prompts have.
+            push: true,
+            publish: self.publish,
+            draft_release: self.draft_release,
+        })
+    }
+}
+
+/// Asks about the three steps, skipping the last two when nothing is being pushed.
+fn ask() -> Result<Plan> {
+    if !confirm("push the release commit and tag to origin main?")? {
+        return Ok(Plan {
+            push: false,
+            publish: false,
+            draft_release: false,
+        });
+    }
+    Ok(Plan {
+        push: true,
+        publish: confirm("publish the crates to crates.io?")?,
+        draft_release: confirm("create a draft GitHub release?")?,
+    })
+}
+
+/// A yes/no prompt, where dismissing it cancels the release.
+///
+/// Every prompt runs before the manifest is touched, so cancelling here leaves nothing behind.
+fn confirm(prompt: &str) -> Result<bool> {
+    Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .default(true)
+        .interact_opt()
+        .context("reading confirmation")?
+        .context("Release cancelled.")
+}
+
+/// Runs the release flow: clean check, prompts, manifest and README update, format, commit, tag,
+/// and then whichever of push, publish and draft release was asked for.
+pub fn run(options: &Options) -> Result<()> {
     let root = sh::workspace_root()?;
 
     let status = git(&root, &["status", "--porcelain"])?;
@@ -46,6 +121,13 @@ pub fn run() -> Result<()> {
     };
     let new_version = candidates[choice].1.clone();
 
+    let plan = match options.plan() {
+        Some(plan) => plan,
+        None => ask()?,
+    };
+    // Started here rather than at the release step, so the check overlaps the commit and tag.
+    let gh_probe = plan.draft_release.then(gh::probe);
+
     set_version(&mut document, &new_version)?;
     std::fs::write(&manifest_path, document.to_string())
         .with_context(|| format!("writing {}", manifest_path.display()))?;
@@ -69,27 +151,82 @@ pub fn run() -> Result<()> {
     )?;
     sh::run(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
 
+    let tag = format!("v{new_version}");
     sh::run(&root, "Staging changes", "git", &["add", "."])?;
     sh::run(
         &root,
-        &format!("Committing v{new_version}"),
+        &format!("Committing {tag}"),
         "git",
-        &["commit", "-m", &format!("v{new_version}")],
+        &["commit", "-m", &tag],
     )?;
-    sh::run(
-        &root,
-        &format!("Tagging v{new_version}"),
-        "git",
-        &["tag", &format!("v{new_version}")],
-    )?;
+    sh::run(&root, &format!("Tagging {tag}"), "git", &["tag", &tag])?;
+    println!("Committed and tagged version {tag} successfully.");
 
-    println!(
-        "Committed and tagged version v{new_version} successfully.\n\
-         run 'git push origin main && git push --tags origin main' to push changes.\n\
-         run 'cargo publish --workspace' to publish crates.
-         "
-    );
+    finish(&root, plan, &tag, gh_probe)
+}
+
+/// Takes whichever of the three steps the plan asked for, and prints the command for each step it
+/// leaves alone - including a release the probe says `gh` cannot make from here.
+fn finish(
+    root: &Path,
+    plan: Plan,
+    tag: &str,
+    gh_probe: Option<JoinHandle<gh::Status>>,
+) -> Result<()> {
+    // Each skipped step prints its own command as it is passed over, rather than all of them at
+    // the end: a step after it can fail, and the hint is what the user needs either way.
+    if plan.push {
+        sh::run(root, "Pushing commit", "git", &["push", "origin", "main"])?;
+        sh::run(
+            root,
+            "Pushing tag",
+            "git",
+            &["push", "--tags", "origin", "main"],
+        )?;
+    } else {
+        println!("run 'git push origin main && git push --tags origin main' to push changes.");
+    }
+
+    if plan.publish {
+        sh::run(
+            root,
+            "Publishing crates",
+            "cargo",
+            &["publish", "--workspace"],
+        )?;
+    } else {
+        println!("run 'cargo publish --workspace' to publish crates.");
+    }
+
+    if let Some(probe) = gh_probe {
+        // A panicked probe is indistinguishable from an unusable `gh`, and has the same fallback.
+        match probe.join().unwrap_or(gh::Status::Missing).blocker() {
+            None => sh::run(
+                root,
+                &format!("Creating draft release {tag}"),
+                "gh",
+                &[
+                    "release",
+                    "create",
+                    tag,
+                    "--draft",
+                    "--title",
+                    tag,
+                    "--generate-notes",
+                ],
+            )?,
+            Some(blocker) => println!("{blocker} - {}", draft_release_hint(tag)),
+        }
+    }
     Ok(())
+}
+
+/// The `gh` invocation to run by hand, for when this cannot run it.
+fn draft_release_hint(tag: &str) -> String {
+    format!(
+        "run 'gh release create {tag} --draft --title \"{tag}\" --generate-notes' \
+         to create a draft release."
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -237,7 +374,10 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, bump, current_version, set_readme_version, set_version};
+    use super::{
+        Level, Options, Plan, bump, current_version, draft_release_hint, set_readme_version,
+        set_version,
+    };
     use semver::Version;
 
     const MANIFEST: &str = "\
@@ -361,6 +501,59 @@ anyhow = \"1.0\"
             set_readme_version(&readme, &version).unwrap(),
             readme,
             "the README's vendorfiles-rs example is not on v{version}; run `cargo xtask release`"
+        );
+    }
+
+    #[test]
+    fn no_flag_leaves_the_steps_to_the_prompts() {
+        let options = Options {
+            push: false,
+            publish: false,
+            draft_release: false,
+        };
+        assert_eq!(options.plan(), None);
+    }
+
+    #[test]
+    fn a_later_step_brings_the_push_with_it() {
+        let options = Options {
+            push: false,
+            publish: false,
+            draft_release: true,
+        };
+        assert_eq!(
+            options.plan(),
+            Some(Plan {
+                push: true,
+                publish: false,
+                draft_release: true,
+            })
+        );
+    }
+
+    #[test]
+    fn a_lone_push_flag_skips_the_other_two_steps() {
+        let options = Options {
+            push: true,
+            publish: false,
+            draft_release: false,
+        };
+        assert_eq!(
+            options.plan(),
+            Some(Plan {
+                push: true,
+                publish: false,
+                draft_release: false,
+            })
+        );
+    }
+
+    #[test]
+    fn the_fallback_hint_quotes_the_release_title() {
+        assert_eq!(
+            draft_release_hint("v2.0.5"),
+            "run 'gh release create v2.0.5 --draft --title \"v2.0.5\" --generate-notes' \
+             to create a draft release."
         );
     }
 }
