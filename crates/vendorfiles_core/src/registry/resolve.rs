@@ -6,7 +6,7 @@
 
 use indexmap::IndexMap;
 
-use super::schema::{Program, Target};
+use super::schema::{Member, Program, Target};
 use crate::error::{Result, VendorError};
 use crate::model::{FileEntry, FileTarget};
 
@@ -97,26 +97,20 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
             let expanded = |pattern: &String| expand(pattern, triple, host);
             (
                 expand(asset, triple, host),
-                program.member.as_ref().map(expanded),
+                program
+                    .member
+                    .as_ref()
+                    .map(|member| expand_member(member, triple, host)),
                 program.output.as_ref().map(expanded),
             )
         }
     };
 
-    // Whichever names the file: the member inside an archive, or the asset itself when the asset
-    // *is* the executable.
-    let output = output_name(name, named.as_ref().or(member.as_ref()).unwrap_or(&asset))?;
-
     let target = match member {
-        // An extraction map, not a list: a list maps each member to itself, which for a member
-        // nested in the archive's own directory would recreate that directory inside the folder.
-        Some(member) => {
-            let mut members = IndexMap::new();
-            members.insert(member, output);
-            FileTarget::ExtractMap(members)
-        }
-        // No member: the asset is the binary, saved under `output` as it stands.
-        None => FileTarget::Rename(output),
+        // No member: the asset is the binary itself, saved under its own name or the one `as`
+        // gives it.
+        None => FileTarget::Rename(output_name(name, named.as_ref().unwrap_or(&asset))?),
+        Some(member) => FileTarget::ExtractMap(extraction(name, &member, named.as_ref())?),
     };
     let mut files = IndexMap::new();
     files.insert(asset, target);
@@ -161,6 +155,86 @@ fn expand(pattern: &str, triple: &str, host: &str) -> String {
         .replace("{exe}", executable_suffix(host))
 }
 
+/// Substitutes the host-dependent placeholders in every path a member names.
+fn expand_member(member: &Member, triple: &str, host: &str) -> Member {
+    match member {
+        Member::One(path) => Member::One(expand(path, triple, host)),
+        Member::Many(paths) => Member::Many(
+            paths
+                .iter()
+                .map(|path| expand(path, triple, host))
+                .collect(),
+        ),
+    }
+}
+
+/// The members to take out of an asset, as input->output pairs.
+///
+/// The two forms name their outputs differently, because they mean different things. One member
+/// is *the executable*, so it lands under its basename and `as` may rename it - a member nested
+/// in the archive's own versioned directory would otherwise recreate that directory inside the
+/// vendor folder. A list is *a layout*, so each path is written out as it stands: `herdr.exe`
+/// looks for `conpty/x64/OpenConsole.exe` beside it, and flattening would collide that with the
+/// `arm64` build of the same name.
+///
+/// # Errors
+///
+/// Returns [`VendorError::RegistryInvalidEntry`] for an empty list, for a list paired with `as`,
+/// and for any path that would write outside the vendor folder.
+fn extraction(
+    name: &str,
+    member: &Member,
+    named: Option<&String>,
+) -> Result<IndexMap<String, String>> {
+    let refuse = |reason: String| VendorError::RegistryInvalidEntry {
+        name: name.to_owned(),
+        reason,
+    };
+
+    let paths = member.paths();
+    if !member.is_list() {
+        let path = &paths[0];
+        let output = output_name(name, named.unwrap_or(path))?;
+        return Ok(std::iter::once((path.clone(), output)).collect());
+    }
+
+    if paths.is_empty() {
+        return Err(refuse(
+            "'member' lists no file to take out of the asset".to_owned(),
+        ));
+    }
+    if let Some(named) = named {
+        return Err(refuse(format!(
+            "'member' lists {} files, written out as they stand, so there is no single file for \
+             'as' to rename to '{named}'",
+            paths.len()
+        )));
+    }
+    paths
+        .iter()
+        .map(|path| member_path(name, path).map(|output| (path.clone(), output)))
+        .collect()
+}
+
+/// The relative path a listed member is written to, which is the member's own.
+///
+/// The trust check [`output_name`] makes, without the flattening: every segment has to be a plain
+/// name, so nothing absolute, climbing or drive-qualified reaches `join_normalized` - which
+/// resolves `..` against the folder it joins onto, and would let one escape.
+fn member_path(name: &str, member: &str) -> Result<String> {
+    let segments: Vec<&str> = member.split(['/', '\\']).collect();
+    let plain = |segment: &&str| {
+        !segment.is_empty() && *segment != "." && *segment != ".." && !segment.contains(':')
+    };
+    if !segments.iter().all(plain) {
+        return Err(VendorError::RegistryInvalidEntry {
+            name: name.to_owned(),
+            reason: format!("'{member}' is not a plain relative path"),
+        });
+    }
+    Ok(segments.join("/"))
+}
+
 /// The name the extracted member is written under: its basename.
 ///
 /// Also the trust check. A registry says what to fetch, never where it goes, so an output that is
@@ -193,7 +267,7 @@ mod tests {
     // expander rather than by `format!`.
     #![expect(clippy::literal_string_with_formatting_args, reason = "placeholders")]
 
-    use super::{Entry, for_host, host, output_name};
+    use super::{Entry, for_host, host, member_path, output_name};
     use crate::model::{FileEntry, FileTarget};
     use crate::registry::schema::Document;
 
@@ -225,6 +299,21 @@ programs:
         };
         let (member, output) = members.iter().next().expect("one member");
         (asset.clone(), member.clone(), output.clone())
+    }
+
+    /// Every input->output pair of a single-asset entry, in order.
+    fn extracted(entry: &Entry) -> Vec<(String, String)> {
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("expected one mapped entry");
+        };
+        let (_, target) = files.iter().next().expect("one asset");
+        let FileTarget::ExtractMap(members) = target else {
+            panic!("expected an extraction map, found {target:?}");
+        };
+        members
+            .iter()
+            .map(|(input, output)| (input.clone(), output.clone()))
+            .collect()
     }
 
     #[test]
@@ -502,6 +591,172 @@ programs:
         );
         let error = for_host("broken", &document.programs["broken"], "windows-x86_64").unwrap_err();
         assert!(error.to_string().contains("asset"), "{error}");
+    }
+
+    /// An entry whose Windows asset holds a layout rather than a lone executable.
+    const HERDR: &str = r#"
+version: 1
+programs:
+  herdr:
+    repository: https://github.com/herdrdev/herdr
+    targets:
+      windows-x86_64:
+        asset: "{release}/herdr-windows-x86_64.zip"
+        member:
+          - herdr.exe
+          - conpty/conpty.dll
+          - conpty/x64/OpenConsole.exe
+          - conpty/arm64/OpenConsole.exe
+      linux-x86_64:
+        asset: "{release}/herdr-linux-x86_64"
+        as: herdr
+"#;
+
+    #[test]
+    fn a_listed_member_keeps_the_path_it_has_in_the_archive() {
+        // `herdr.exe` loads `conpty/` from beside itself, so the directories have to survive -
+        // and the two `OpenConsole.exe` builds would collide the moment they did not.
+        let document = program(HERDR);
+        let entry = for_host("herdr", &document.programs["herdr"], "windows-x86_64").unwrap();
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("expected one mapped entry");
+        };
+        let (asset, target) = files.iter().next().expect("one asset");
+        assert_eq!(asset, "{release}/herdr-windows-x86_64.zip");
+        let FileTarget::ExtractMap(members) = target else {
+            panic!("expected an extraction map, found {target:?}");
+        };
+        assert_eq!(
+            members.iter().collect::<Vec<_>>(),
+            [
+                (&"herdr.exe".to_owned(), &"herdr.exe".to_owned()),
+                (
+                    &"conpty/conpty.dll".to_owned(),
+                    &"conpty/conpty.dll".to_owned()
+                ),
+                (
+                    &"conpty/x64/OpenConsole.exe".to_owned(),
+                    &"conpty/x64/OpenConsole.exe".to_owned()
+                ),
+                (
+                    &"conpty/arm64/OpenConsole.exe".to_owned(),
+                    &"conpty/arm64/OpenConsole.exe".to_owned()
+                ),
+            ]
+        );
+
+        // The hosts that publish a bare binary are untouched by any of it.
+        let entry = for_host("herdr", &document.programs["herdr"], "linux-x86_64").unwrap();
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("expected one mapped entry");
+        };
+        let (asset, target) = files.iter().next().unwrap();
+        assert_eq!(asset, "{release}/herdr-linux-x86_64");
+        assert_eq!(target, &FileTarget::Rename("herdr".to_owned()));
+    }
+
+    #[test]
+    fn every_listed_member_is_expanded_for_the_host() {
+        // The compact form substitutes into each path, not only into the first.
+        let document = program(
+            r#"
+version: 1
+programs:
+  layout:
+    repository: https://github.com/example/layout
+    asset: "{release}/layout-{target}{ext}"
+    member:
+      - "layout{exe}"
+      - "support/{target}/data.bin"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        );
+        let layout = &document.programs["layout"];
+
+        let entry = for_host("layout", layout, "windows-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("layout.exe".to_owned(), "layout.exe".to_owned()),
+                (
+                    "support/x86_64-pc-windows-msvc/data.bin".to_owned(),
+                    "support/x86_64-pc-windows-msvc/data.bin".to_owned()
+                ),
+            ]
+        );
+
+        let entry = for_host("layout", layout, "linux-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("layout".to_owned(), "layout".to_owned()),
+                (
+                    "support/x86_64-unknown-linux-gnu/data.bin".to_owned(),
+                    "support/x86_64-unknown-linux-gnu/data.bin".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_member_list_beside_an_as_is_refused() {
+        // `as` renames one downloaded file; a list is a layout, and there is no one file to mean.
+        for entry in [
+            "    asset: '{release}/thing.zip'\n    as: thing\n    member: [thing, extra/data.bin]\n    targets:\n      linux-x86_64: x86_64-unknown-linux-gnu",
+            "    targets:\n      linux-x86_64:\n        asset: '{release}/thing.zip'\n        as: thing\n        member: [thing, extra/data.bin]",
+        ] {
+            let yaml = format!(
+                "version: 1\nprograms:\n  thing:\n    repository: https://github.com/e/c\n{entry}\n"
+            );
+            let document = program(&yaml);
+            let error = for_host("thing", &document.programs["thing"], "linux-x86_64")
+                .expect_err("must be refused");
+            let message = error.to_string();
+            assert!(message.contains("'as'"), "for {entry:?}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_member_list_with_nothing_in_it_is_refused() {
+        // Silently extracting nothing would leave an "installed" dependency with no files.
+        let document = program(
+            r"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    targets:
+      linux-x86_64:
+        asset: '{release}/empty.tar.gz'
+        member: []
+",
+        );
+        let error =
+            for_host("empty", &document.programs["empty"], "linux-x86_64").expect_err("refused");
+        assert!(error.to_string().contains("no file"), "{error}");
+    }
+
+    #[test]
+    fn a_listed_member_that_would_leave_the_vendor_folder_is_refused() {
+        // `join_normalized` resolves `..` against the folder, so a climbing segment escapes it.
+        for bad in [
+            "../outside",
+            "conpty/../../outside",
+            "/etc/passwd",
+            "C:/Windows/System32/evil.dll",
+            "conpty//OpenConsole.exe",
+            "conpty/",
+        ] {
+            assert!(member_path("x", bad).is_err(), "{bad} must be refused");
+        }
+        // A plain relative path is kept whole, separators normalised to the archive's own.
+        assert_eq!(member_path("x", "herdr.exe").unwrap(), "herdr.exe");
+        assert_eq!(
+            member_path("x", "conpty\\x64\\OpenConsole.exe").unwrap(),
+            "conpty/x64/OpenConsole.exe"
+        );
     }
 
     #[test]

@@ -56,7 +56,7 @@ pub struct Program {
     /// Omitted when the asset *is* the executable — plenty of projects publish a bare binary
     /// rather than an archive.
     #[serde(default)]
-    pub member: Option<String>,
+    pub member: Option<Member>,
     /// The name to save it under, when the basename is not what you want to type.
     ///
     /// `ox-macos` and `shfmt_v3.13.1_linux_amd64` are assets; `ox` and `shfmt` are commands.
@@ -65,6 +65,37 @@ pub struct Program {
     /// What to fetch per host, keyed `{os}-{arch}`. Absent for a repository file.
     #[serde(default)]
     pub targets: IndexMap<String, Target>,
+}
+
+/// What to take out of an asset: one path, or the several a program needs together.
+///
+/// One path is the ordinary case, and its basename is the file that lands. A list is for an
+/// archive whose executable cannot run alone — `herdr.exe` loads the `conpty/` directory shipped
+/// beside it — so those are written out as they stand, directories and all.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Member {
+    /// `member: "fd-v{version}-{target}/fd{exe}"`.
+    One(String),
+    /// `member: [herdr.exe, conpty/conpty.dll, …]`.
+    Many(Vec<String>),
+}
+
+impl Member {
+    /// The paths it names, in order, so callers need not care which form was written.
+    #[must_use]
+    pub const fn paths(&self) -> &[String] {
+        match self {
+            Self::One(path) => std::slice::from_ref(path),
+            Self::Many(paths) => paths.as_slice(),
+        }
+    }
+
+    /// Whether it was written as a list, which is what decides how the outputs are named.
+    #[must_use]
+    pub const fn is_list(&self) -> bool {
+        matches!(self, Self::Many(_))
+    }
 }
 
 /// What one host gets.
@@ -85,7 +116,7 @@ pub struct Explicit {
     pub asset: String,
     /// The path to the executable inside it, or omitted when the asset is the executable.
     #[serde(default)]
-    pub member: Option<String>,
+    pub member: Option<Member>,
     /// The name to save it under; defaults to the basename of whichever of the two is used.
     #[serde(rename = "as", default)]
     pub output: Option<String>,
@@ -93,7 +124,7 @@ pub struct Explicit {
 
 #[cfg(test)]
 mod tests {
-    use super::{Document, SUPPORTED_VERSION, Target};
+    use super::{Document, Member, SUPPORTED_VERSION, Target};
 
     const COMPACT: &str = r#"
 version: 1
@@ -141,7 +172,37 @@ programs:
         let Target::Explicit(explicit) = &document.programs["fzf"].targets["windows-x86_64"] else {
             panic!("expected the explicit form");
         };
-        assert_eq!(explicit.member.as_deref(), Some("fzf.exe"));
+        assert_eq!(
+            explicit.member.as_ref().map(Member::paths),
+            Some(["fzf.exe".to_owned()].as_slice())
+        );
+    }
+
+    #[test]
+    fn a_member_list_parses() {
+        // The form that lets one target take a whole layout out of an archive.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  herdr:
+    repository: https://github.com/herdrdev/herdr
+    targets:
+      windows-x86_64:
+        asset: "{release}/herdr-windows-x86_64.zip"
+        member:
+          - herdr.exe
+          - conpty/x64/OpenConsole.exe
+"#,
+        )
+        .expect("valid");
+        let Target::Explicit(explicit) = &document.programs["herdr"].targets["windows-x86_64"]
+        else {
+            panic!("expected the explicit form");
+        };
+        let member = explicit.member.as_ref().expect("a member");
+        assert!(member.is_list(), "a sequence must not collapse to one path");
+        assert_eq!(member.paths(), ["herdr.exe", "conpty/x64/OpenConsole.exe"]);
     }
 
     #[test]
@@ -358,6 +419,21 @@ programs:
     asset: "{release}/untracked-{target}{ext}"
     targets:
       linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "a shared member naming every file the executable needs beside it",
+            r#"
+version: 1
+programs:
+  layout:
+    repository: https://github.com/example/layout
+    asset: "{release}/layout-{target}{ext}"
+    member:
+      - "layout{exe}"
+      - support/data.bin
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
 "#,
         ),
     ];
@@ -585,6 +661,66 @@ programs:
 version: 2
 programs: {}
 ",
+        ),
+        (
+            "a member list beside an `as` with no single file to rename",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    asset: "{release}/renamed{ext}"
+    as: renamed
+    member:
+      - "renamed{exe}"
+      - support/data.bin
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a target whose member list is paired with an `as`",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    targets:
+      windows-x86_64:
+        asset: "{release}/renamed.zip"
+        as: renamed.exe
+        member:
+          - renamed.exe
+          - support/data.bin
+"#,
+        ),
+        (
+            "a member list with nothing in it",
+            r#"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    asset: "{release}/empty{ext}"
+    member: []
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a member list naming the same file twice",
+            r#"
+version: 1
+programs:
+  twice:
+    repository: https://github.com/example/twice
+    asset: "{release}/twice{ext}"
+    member:
+      - "twice{exe}"
+      - "twice{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
         ),
     ];
 

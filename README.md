@@ -922,6 +922,32 @@ Projects that publish a bare binary rather than an archive leave `member` out en
         as: "ox"
 ```
 
+A program whose executable cannot run alone gives `member` a *list* instead, and every path in it
+is written out as it stands rather than flattened to its basename. `herdr.exe` loads the `conpty/`
+directory shipped beside it, and the two `OpenConsole.exe` builds in there would collide the moment
+the directories were dropped:
+
+```yaml
+  herdr:
+    repository: https://github.com/herdrdev/herdr
+    targets:
+      windows-x86_64:
+        asset: "{release}/herdr-windows-x86_64.zip"
+        member:
+          - herdr.exe
+          - conpty/conpty.dll
+          - conpty/x64/OpenConsole.exe
+          - conpty/arm64/OpenConsole.exe
+      linux-x86_64:
+        asset: "{release}/herdr-linux-x86_64"
+        as: herdr
+```
+
+Every path is relative to the archive root; one that is absolute or climbs out of it is refused,
+as is `as` beside a list - it renames a single downloaded file, and a list has no single file to
+mean. One `member` still lands under its basename, so the archive's own versioned directory does
+not end up in your vendor folder.
+
 Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
 and a file from the repository is vendored with `path` instead of an asset:
 
@@ -976,7 +1002,7 @@ INFO: nothing was downloaded or written
 Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
 host it lists, and that anything with a `member` is a container the extractor can open. A change to
 `registry.yml` additionally queries GitHub: the asset each entry names must exist for every host it
-claims, and the `member` inside it is downloaded and checked on one platform. The same checks run
+claims, and the members inside it are downloaded and checked on one platform. The same checks run
 weekly, since a project can rename its assets without anyone touching this repository.
 
 Members are verified on one platform rather than all of them - every platform would mean

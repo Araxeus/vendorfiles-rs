@@ -54,11 +54,7 @@
           "type": "string",
           "minLength": 1
         },
-        "member": {
-          "description": "The path inside the asset. Omit it when the asset *is* the executable.",
-          "type": "string",
-          "minLength": 1
-        },
+        "member": { "$ref": "#/$defs/member" },
         "as": {
           "description": "The name to save it under, when the basename is not the command you would type: `ox-macos` becomes `ox`.",
           "type": "string",
@@ -107,6 +103,16 @@
             "description": "`true` tracks the first file's commit, which only a repository `path` has. A release asset would send the lookup after a path containing `{release}/`.",
             "required": ["path"]
           }
+        },
+        {
+          "if": {
+            "required": ["member"],
+            "properties": { "member": { "type": "array" } }
+          },
+          "then": {
+            "description": "A list of members is written out as it stands, each file keeping its own path, so there is no single file for `as` to rename.",
+            "not": { "required": ["as"] }
+          }
         }
       ]
     },
@@ -127,17 +133,37 @@
           "type": "string",
           "minLength": 1
         },
-        "member": {
-          "description": "The path to the executable inside it, or omitted when the asset is the executable.",
-          "type": "string",
-          "minLength": 1
-        },
+        "member": { "$ref": "#/$defs/member" },
         "as": {
           "description": "The name to save it under.",
           "type": "string",
           "minLength": 1
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["member"],
+            "properties": { "member": { "type": "array" } }
+          },
+          "then": {
+            "description": "A list of members is written out as it stands, each file keeping its own path, so there is no single file for `as` to rename.",
+            "not": { "required": ["as"] }
+          }
+        }
+      ]
+    },
+    "member": {
+      "description": "What to take out of the asset. One path is the executable, saved under its basename, which `as` may rename. A list is a layout every file of which is written out as it stands: `herdr.exe` loads the `conpty/` directory shipped beside it, and flattening would collide `conpty/x64/OpenConsole.exe` with the `arm64` build of the same name.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      ]
     },
     "hostKey": {
       "description": "`{os}-{arch}` as `std::env::consts` reports them.",
