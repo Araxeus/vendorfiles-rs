@@ -392,6 +392,104 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Inheriting from a neighbouring entry
+// ---------------------------------------------------------------------------------------
+
+/// A config already vendoring `repository` under the name `first`.
+fn neighbour_project(entry: &str) -> tempfile::TempDir {
+    project(&format!(
+        r#"{{"vendorDependencies":{{"first":{{{entry}}}}}}}"#
+    ))
+}
+
+/// The neighbour the surprising case needs: a repository, a version and files.
+fn described_neighbour(repository: &str) -> tempfile::TempDir {
+    neighbour_project(&format!(
+        r#""repository":"{repository}","version":"v1.0.0","files":["LICENSE"]"#
+    ))
+}
+
+/// A repository nothing will be fetched from — every test here stops at `--dry-run`, which is
+/// what keeps the warning decision checkable without a request.
+const NEIGHBOURED: &str = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
+
+#[test]
+fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
+    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
+    // version, and when that version already matches nothing is written at all.
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let warning = stderr(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {warning}");
+    assert!(warning.contains("'first' already vendors"), "{warning}");
+    assert!(
+        warning.contains("inherits its files and version"),
+        "{warning}"
+    );
+    assert!(warning.contains("--files"), "{warning}");
+}
+
+#[test]
+fn describing_it_with_files_still_borrows_the_version() {
+    // `--files` describes the files, but the neighbour is still the base of the new entry, so its
+    // version comes along — and that is the half that can skip the config write entirely.
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-f", "README.md"],
+    );
+    let warning = stderr(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {warning}");
+    assert!(warning.contains("inherits its version."), "{warning}");
+    assert!(
+        !warning.contains("its files"),
+        "the files were described, not borrowed: {warning}"
+    );
+    // And it really is borrowed: the entry a dry run prints says so.
+    assert!(
+        stdout(&out).contains(r#""version": "v1.0.0""#),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn re_adding_the_same_name_says_nothing() {
+    // Updating an entry under its own name is ordinary, not a surprise: `first` is not a
+    // neighbour of itself.
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "first"],
+    );
+    assert!(
+        !stderr(&out).contains("already vendors"),
+        "its own entry is not a neighbour: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
+    // No files anywhere, so the command fails asking for them. Warning first about files it never
+    // borrowed would be the worst of both.
+    let dir = neighbour_project(&format!(r#""repository":"{NEIGHBOURED}""#));
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    assert_ne!(code(&out), 0);
+    assert!(
+        !stderr(&out).contains("already vendors"),
+        "nothing was inherited: {}",
+        stderr(&out)
+    );
+}
+
 /// A registry with one program, written next to the project.
 fn registry(dir: &Path) -> std::path::PathBuf {
     let path = dir.join("registry.yml");
