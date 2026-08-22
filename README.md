@@ -70,7 +70,10 @@ cargo build --release        # target/release/vendor
 
 ## Quick Start
 
-Create a `vendor.json` in your project:
+Create a config file in your project:
+
+<details open>
+<summary>vendor.json</summary>
 
 ```json
 {
@@ -83,6 +86,35 @@ Create a `vendor.json` in your project:
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>vendor.yml</summary>
+
+```yml
+vendorDependencies:
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+      - dist/coloris.min.css
+```
+
+</details>
+
+<details>
+<summary>vendor.toml</summary>
+
+```toml
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js', 'dist/coloris.min.css']
+```
+
+</details>
 
 Run:
 
@@ -98,9 +130,13 @@ Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, 
 `vendor.json`, `package.json`. Only the current directory is searched - there is no upward
 walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
 
-All examples below are JSON; TOML and YAML work identically. See [`examples/`](./examples/).
+The first examples show every format; the rest are JSON only - TOML and YAML work
+identically. See [`examples/`](./examples/).
 
 ### Basic Setup
+
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -114,11 +150,43 @@ All examples below are JSON; TOML and YAML work identically. See [`examples/`](.
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  Cooltipz:
+    version: v2.2.0
+    repository: https://github.com/jackdomleo7/Cooltipz.css
+    files:
+      - cooltipz.min.css
+      - LICENSE
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.Cooltipz]
+version = 'v2.2.0'
+repository = 'https://github.com/jackdomleo7/Cooltipz.css'
+files = ['cooltipz.min.css', 'LICENSE']
+```
+
+</details>
+
 By default files are saved to `./vendor/{dependency-name}/`.
 
 ### Custom Output Paths
 
 Change the base folder with `vendorConfig`:
+
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -128,8 +196,33 @@ Change the base folder with `vendorConfig`:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: ./my-vendors
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = './my-vendors'
+```
+
+</details>
+
 Each dependency can override its own folder. `{vendorFolder}` expands to the base folder, and
 a dependency that sets `vendorFolder` does **not** get its name appended:
+
+<details open>
+<summary>JSON</summary>
 
 ```json5
 {
@@ -150,6 +243,53 @@ a dependency that sets `vendorFolder` does **not** get its name appended:
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: ./my-vendors
+vendorDependencies:
+  Cooltipz:
+    version: v2.2.0
+    repository: https://github.com/jackdomleo7/Cooltipz.css
+    files:
+      - cooltipz.min.css
+    vendorFolder: '{vendorFolder}/Cooltipz' # → ./my-vendors/Cooltipz
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+    vendorFolder: '{vendorFolder}' # → ./my-vendors/
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = './my-vendors'
+
+[vendorDependencies.Cooltipz]
+version = 'v2.2.0'
+repository = 'https://github.com/jackdomleo7/Cooltipz.css'
+files = ['cooltipz.min.css']
+vendorFolder = '{vendorFolder}/Cooltipz' # → ./my-vendors/Cooltipz
+
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js']
+vendorFolder = '{vendorFolder}' # → ./my-vendors/
+```
+
+</details>
 
 ### Renaming Files
 
