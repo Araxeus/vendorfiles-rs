@@ -1054,7 +1054,7 @@ That writes an entry pointing at this repository's release asset for your platfo
 {
     "vendorDependencies": {
         "vendorfiles-rs": {
-            "version": "v2.0.4",
+            "version": "v2.1.0",
             "repository": "https://github.com/Araxeus/vendorfiles-rs",
             "files": [
                 {
@@ -1075,7 +1075,7 @@ That writes an entry pointing at this repository's release asset for your platfo
 ```yml
 vendorDependencies:
   vendorfiles-rs:
-    version: v2.0.4
+    version: v2.1.0
     repository: https://github.com/Araxeus/vendorfiles-rs
     files:
       - '{release}/vendor_v{version}_windows.zip':
@@ -1090,7 +1090,7 @@ vendorDependencies:
 
 ```toml
 [vendorDependencies.vendorfiles-rs]
-version = 'v2.0.4'
+version = 'v2.1.0'
 repository = 'https://github.com/Araxeus/vendorfiles-rs'
 files = [{ '{release}/vendor_v{version}_windows.zip' = ['vendor.exe'] }]
 vendorFolder = 'C:/tools/bin'
