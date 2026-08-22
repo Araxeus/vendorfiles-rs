@@ -70,7 +70,11 @@ cargo build --release        # target/release/vendor
 
 ## Quick Start
 
-Create a `vendor.json` in your project:
+Create a config file in your project:
+
+<!-- formats: files -->
+<details open>
+<summary>vendor.json</summary>
 
 ```json
 {
@@ -83,6 +87,36 @@ Create a `vendor.json` in your project:
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>vendor.yml</summary>
+
+```yml
+vendorDependencies:
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+      - dist/coloris.min.css
+```
+
+</details>
+
+<details>
+<summary>vendor.toml</summary>
+
+```toml
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js', 'dist/coloris.min.css']
+```
+
+</details>
+<!-- /formats -->
 
 Run:
 
@@ -98,9 +132,14 @@ Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, 
 `vendor.json`, `package.json`. Only the current directory is searched - there is no upward
 walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
 
-All examples below are JSON; TOML and YAML work identically. See [`examples/`](./examples/).
+Every example below is shown in all three formats, JSON open by default. See
+[`examples/`](./examples/).
 
 ### Basic Setup
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -114,11 +153,45 @@ All examples below are JSON; TOML and YAML work identically. See [`examples/`](.
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  Cooltipz:
+    version: v2.2.0
+    repository: https://github.com/jackdomleo7/Cooltipz.css
+    files:
+      - cooltipz.min.css
+      - LICENSE
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.Cooltipz]
+version = 'v2.2.0'
+repository = 'https://github.com/jackdomleo7/Cooltipz.css'
+files = ['cooltipz.min.css', 'LICENSE']
+```
+
+</details>
+<!-- /formats -->
+
 By default files are saved to `./vendor/{dependency-name}/`.
 
 ### Custom Output Paths
 
 Change the base folder with `vendorConfig`:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -128,10 +201,37 @@ Change the base folder with `vendorConfig`:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: ./my-vendors
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = './my-vendors'
+```
+
+</details>
+<!-- /formats -->
+
 Each dependency can override its own folder. `{vendorFolder}` expands to the base folder, and
 a dependency that sets `vendorFolder` does **not** get its name appended:
 
-```json5
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```jsonc
 {
     "vendorConfig": { "vendorFolder": "./my-vendors" },
     "vendorDependencies": {
@@ -151,9 +251,61 @@ a dependency that sets `vendorFolder` does **not** get its name appended:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: ./my-vendors
+vendorDependencies:
+  Cooltipz:
+    version: v2.2.0
+    repository: https://github.com/jackdomleo7/Cooltipz.css
+    files:
+      - cooltipz.min.css
+    vendorFolder: '{vendorFolder}/Cooltipz' # → ./my-vendors/Cooltipz
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+    vendorFolder: '{vendorFolder}' # → ./my-vendors/
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = './my-vendors'
+
+[vendorDependencies.Cooltipz]
+version = 'v2.2.0'
+repository = 'https://github.com/jackdomleo7/Cooltipz.css'
+files = ['cooltipz.min.css']
+vendorFolder = '{vendorFolder}/Cooltipz' # → ./my-vendors/Cooltipz
+
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js']
+vendorFolder = '{vendorFolder}' # → ./my-vendors/
+```
+
+</details>
+<!-- /formats -->
+
 ### Renaming Files
 
 Use an object with `source: destination`:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -170,10 +322,44 @@ Use an object with `source: destination`:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+      - LICENSE: ../licenses/COLORIS_LICENSE
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
+```
+
+</details>
+<!-- /formats -->
+
 ### Commit-Based Versioning
 
 By default versions track GitHub releases. To track a file's latest commit instead, use
 `hashVersionFile`:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -194,6 +380,50 @@ By default versions track GitHub releases. To track a file's latest commit inste
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  Cooltipz:
+    repository: https://github.com/jackdomleo7/Cooltipz.css
+    version: f6ec482ea395cead4fd849c05df6edd8da284a52
+    hashVersionFile: package.json
+    files:
+      - cooltipz.min.css
+      - package.json
+  Coloris:
+    repository: https://github.com/mdbassit/Coloris
+    version: v0.17.1
+    hashVersionFile: true
+    files:
+      - dist/coloris.min.js
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.Cooltipz]
+repository = 'https://github.com/jackdomleo7/Cooltipz.css'
+version = 'f6ec482ea395cead4fd849c05df6edd8da284a52'
+hashVersionFile = 'package.json'
+files = ['cooltipz.min.css', 'package.json']
+
+[vendorDependencies.Coloris]
+repository = 'https://github.com/mdbassit/Coloris'
+version = 'v0.17.1'
+hashVersionFile = true
+files = ['dist/coloris.min.js']
+```
+
+</details>
+<!-- /formats -->
+
 - **String**: track that file's latest commit hash
 - **`true`**: track the first entry in `files`
 
@@ -201,6 +431,10 @@ By default versions track GitHub releases. To track a file's latest commit inste
 
 Download release assets with `{release}/` in the path. `{version}` expands to the semver core
 of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -218,7 +452,46 @@ of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - LICENSE
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+      - '{release}/fzf-{version}-windows_amd64.zip': fzf-windows.zip
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  'LICENSE',
+  '{release}/fzf-{version}-linux_amd64.tar.gz',
+  { '{release}/fzf-{version}-windows_amd64.zip' = 'fzf-windows.zip' },
+]
+```
+
+</details>
+<!-- /formats -->
+
 **Extracting from archives** - give a list (keep names) or a map (rename):
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -239,6 +512,40 @@ of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz':
+          - fzf
+        '{release}/fzf-{version}-windows_amd64.zip':
+          fzf.exe: my-custom-fzf.exe
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  { '{release}/fzf-{version}-linux_amd64.tar.gz' = ['fzf'], '{release}/fzf-{version}-windows_amd64.zip' = { 'fzf.exe' = 'my-custom-fzf.exe' } },
+]
+```
+
+</details>
+<!-- /formats -->
+
 The container format is detected from the file's magic bytes, not its name: zip, tar, gzip, xz,
 tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
 
@@ -246,6 +553,10 @@ tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
 
 `releaseRegex` controls which releases count as "latest". It is tested against each release's
 tag and title, newest first.
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
 
 ```json
 {
@@ -259,6 +570,37 @@ tag and title, newest first.
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    releaseRegex: ^v\d+\.\d+\.\d+$
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+releaseRegex = '^v\d+\.\d+\.\d+$'
+files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
+```
+
+</details>
+<!-- /formats -->
 
 Common patterns:
 
@@ -275,6 +617,10 @@ backreferences a JavaScript pattern may use are supported.
 
 `locked: true` pins a dependency:
 
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
 ```json
 {
     "vendorDependencies": {
@@ -288,6 +634,37 @@ backreferences a JavaScript pattern may use are supported.
 }
 ```
 
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  Coloris:
+    version: v0.17.1
+    repository: https://github.com/mdbassit/Coloris
+    files:
+      - dist/coloris.min.js
+    locked: true
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.Coloris]
+version = 'v0.17.1'
+repository = 'https://github.com/mdbassit/Coloris'
+files = ['dist/coloris.min.js']
+locked = true
+```
+
+</details>
+<!-- /formats -->
+
 Locked dependencies are still downloaded by `vendor sync` if missing, are skipped by
 `vendor update`, and do not appear in `vendor outdated`.
 
@@ -296,11 +673,43 @@ Locked dependencies are still downloaded by `vendor sync` if missing, are skippe
 A `default` (or `defaultVendorOptions`) object supplies values for every dependency that does
 not set them:
 
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorConfig": {
+        "vendorFolder": "."
+    },
+    "default": {
+        "vendorFolder": "{vendorFolder}",
+        "repository": "https://github.com/nushell/nu_scripts",
+        "hashVersionFile": true
+    },
+    "vendorDependencies": {
+        "nu-winget-completions": {
+            "files": "custom-completions/winget/winget-completions.nu",
+            "version": "912bea4588ba089aebe956349488e7f78e56061c"
+        },
+        "nu-cargo-completions": {
+            "files": "custom-completions/cargo/cargo-completions.nu",
+            "version": "afde2592a6254be7c14ccac520cb608bd1adbaf9"
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
 ```yml
 vendorConfig:
   vendorFolder: .
 default:
-  vendorFolder: "{vendorFolder}"
+  vendorFolder: '{vendorFolder}'
   repository: https://github.com/nushell/nu_scripts
   hashVersionFile: true
 vendorDependencies:
@@ -311,6 +720,32 @@ vendorDependencies:
     files: custom-completions/cargo/cargo-completions.nu
     version: afde2592a6254be7c14ccac520cb608bd1adbaf9
 ```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = '.'
+
+[default]
+vendorFolder = '{vendorFolder}'
+repository = 'https://github.com/nushell/nu_scripts'
+hashVersionFile = true
+
+[vendorDependencies.nu-winget-completions]
+files = 'custom-completions/winget/winget-completions.nu'
+version = '912bea4588ba089aebe956349488e7f78e56061c'
+
+[vendorDependencies.nu-cargo-completions]
+files = 'custom-completions/cargo/cargo-completions.nu'
+version = 'afde2592a6254be7c14ccac520cb608bd1adbaf9'
+```
+
+</details>
+<!-- /formats -->
 
 ## Commands
 
@@ -394,6 +829,10 @@ vendor add rg          # keys the entry `ripgrep`, its canonical name
 That writes an ordinary entry — nothing registry-specific, so it keeps working whatever happens to
 the registry later:
 
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
 ```json
 {
     "vendorDependencies": {
@@ -411,6 +850,38 @@ the registry later:
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fd:
+    version: v10.4.2
+    repository: https://github.com/sharkdp/fd
+    files:
+      - '{release}/fd-v{version}-x86_64-pc-windows-msvc.zip':
+          fd-v{version}-x86_64-pc-windows-msvc/fd.exe: fd.exe
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fd]
+version = 'v10.4.2'
+repository = 'https://github.com/sharkdp/fd'
+files = [
+  { '{release}/fd-v{version}-x86_64-pc-windows-msvc.zip' = { 'fd-v{version}-x86_64-pc-windows-msvc/fd.exe' = 'fd.exe' } },
+]
+```
+
+</details>
+<!-- /formats -->
 
 The asset picked is the one for your platform, and `{version}` stays symbolic so `vendor update`
 keeps working afterwards.
@@ -531,6 +1002,10 @@ vendor add vendorfiles
 That writes an entry pointing at this repository's release asset for your platform, with
 `vendorFolder` set to the directory the running binary sits in:
 
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
 ```json
 {
     "vendorDependencies": {
@@ -542,11 +1017,43 @@ That writes an entry pointing at this repository's release asset for your platfo
                     "{release}/vendor_v{version}_windows.zip": ["vendor.exe"]
                 }
             ],
-            "vendorFolder": "C:\tools\bin"
+            "vendorFolder": "C:/tools/bin"
         }
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  vendorfiles-rs:
+    version: v2.0.4
+    repository: https://github.com/Araxeus/vendorfiles-rs
+    files:
+      - '{release}/vendor_v{version}_windows.zip':
+          - vendor.exe
+    vendorFolder: C:/tools/bin
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.vendorfiles-rs]
+version = 'v2.0.4'
+repository = 'https://github.com/Araxeus/vendorfiles-rs'
+files = [{ '{release}/vendor_v{version}_windows.zip' = ['vendor.exe'] }]
+vendorFolder = 'C:/tools/bin'
+```
+
+</details>
+<!-- /formats -->
 
 On Linux and macOS the asset is `vendor_v{version}_linux.tar.gz` or
 `vendor_v{version}_macos.tar.gz` and the member inside it is `vendor`. `vendor add vendorfiles-rs`
@@ -639,7 +1146,11 @@ recorded file is missing, or the `files` declaration changed.
 [`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format, so editors
 can validate and autocomplete it:
 
-```json
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```jsonc
 {
     "$schema": "https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json",
     "vendorDependencies": {
@@ -647,6 +1158,32 @@ can validate and autocomplete it:
     }
 }
 ```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json
+vendorDependencies:
+  #...
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+#:schema https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json
+
+[vendorDependencies]
+#...
+```
+
+</details>
+<!-- /formats -->
 
 ## Differences from the TypeScript version
 

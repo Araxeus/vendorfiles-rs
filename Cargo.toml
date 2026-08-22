@@ -26,6 +26,11 @@ fancy-regex = "0.19.0"
 flate2 = "1.1.9"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.0", features = ["serde"] }
+# Reads the README's config examples for `cargo xtask readme`. The `cst` feature is the reason
+# for the crate: it keeps comments as ordinary sibling nodes, so a `//` note on an example
+# survives into the generated YAML and TOML instead of being dropped on the way through a value
+# tree. `serde` gives the same text back as a `serde_json::Value` for the round-trip check.
+jsonc-parser = { version = "0.33", default-features = false, features = ["cst", "serde"] }
 # Validates `registry.schema.json` in the tests, so a broken `$ref` or a regression in the
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
