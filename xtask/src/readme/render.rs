@@ -222,7 +222,27 @@ fn normalize(value: Json) -> Json {
 #[cfg(test)]
 mod tests {
     use super::super::jsonc;
-    use super::{FILES, NAMES, check_comments, group, verify};
+    use super::{FILES, NAMES, check_comments, comments_in, group, verify};
+
+    #[test]
+    fn a_doubled_quote_inside_a_string_does_not_expose_its_hash() {
+        // YAML escapes a quote inside a single-quoted string by doubling it. Toggling on each
+        // quote closes and reopens the string with no character in between, so every character
+        // lands on the side a real parser would put it on and the `#` stays protected.
+        assert!(comments_in("a: 'don''t #1'").is_empty());
+        assert!(comments_in("a: '''#x'").is_empty());
+        assert_eq!(comments_in("a: 'x''' # note"), [" note"]);
+        assert_eq!(comments_in("a: 'a''b''c #1' # note"), [" note"]);
+        assert_eq!(comments_in("'k''#': 'v' # note"), [" note"]);
+        assert_eq!(comments_in("a = \"he said \\\" #1\" # note"), [" note"]);
+    }
+
+    #[test]
+    fn a_value_holding_both_a_quote_and_a_hash_survives() {
+        let out = group(r#"{ "a": "don't #1" }"#, "json", NAMES).unwrap();
+        assert!(out.contains("a: 'don''t #1'"), "{out}");
+        assert!(out.contains("a = \"don't #1\""), "{out}");
+    }
 
     #[test]
     fn renders_three_details_with_json_open() {
