@@ -286,18 +286,9 @@ fn extraction(
             "'member' names no file to take out of the asset".to_owned(),
         ));
     }
-    // Every path is read under the directory the archive was unpacked into, so the same rule the
-    // outputs answer to applies going in: a `..` there would move a file from outside that
-    // directory into the dependency's folder.
-    for input in &inputs {
-        member_path(name, input)?;
-    }
-
-    if let Member::One(path) = member {
-        let output = output_name(name, named.unwrap_or(path))?;
-        return Ok(std::iter::once((path.clone(), output)).collect());
-    }
-    if let Some(named) = named {
+    if !member.is_single()
+        && let Some(named) = named
+    {
         return Err(refuse(format!(
             "'member' names {} files, each landing under its own name, so there is no single file \
              for 'as' to rename to '{named}'",
@@ -305,19 +296,39 @@ fn extraction(
         )));
     }
 
-    match member {
-        // Already returned above, but the compiler cannot know it.
-        Member::One(path) => Ok(std::iter::once((path.clone(), path.clone())).collect()),
+    // Both sides are *normalised*, not merely checked. The input is joined onto the directory the
+    // archive was unpacked into, and `\` is a separator only on Windows - so a member written
+    // `conpty\x64\OpenConsole.exe` would be looked for under that whole string as a single file
+    // name on Unix, and never found. Normalising going in is also what keeps a `..` out of that
+    // directory, which would otherwise move a file from outside it into the dependency's folder.
+    let pairs: Vec<(String, String)> = match member {
+        // One member is the executable: its own path going in, its basename coming out.
+        Member::One(path) => vec![(
+            member_path(name, path)?,
+            output_name(name, named.unwrap_or(path))?,
+        )],
         // A list is its own destination; a map says where each file goes instead.
         Member::Many(paths) => paths
             .iter()
-            .map(|path| member_path(name, path).map(|output| (path.clone(), output)))
-            .collect(),
+            .map(|path| member_path(name, path).map(|path| (path.clone(), path)))
+            .collect::<Result<_>>()?,
         Member::Mapped(paths) => paths
             .iter()
-            .map(|(input, output)| member_path(name, output).map(|output| (input.clone(), output)))
-            .collect(),
+            .map(|(input, output)| Ok((member_path(name, input)?, member_path(name, output)?)))
+            .collect::<Result<_>>()?,
+    };
+
+    // Normalising can turn two spellings into one key, which would quietly drop whatever the first
+    // of them asked for.
+    let mut members = IndexMap::new();
+    for (input, output) in pairs {
+        if members.insert(input.clone(), output).is_some() {
+            return Err(refuse(format!(
+                "'member' names '{input}' twice, under two spellings of the same path"
+            )));
+        }
     }
+    Ok(members)
 }
 
 /// The relative path a listed member is written to, which is the member's own.
@@ -1023,6 +1034,64 @@ programs:
         let error = for_host("nothing", &document.programs["nothing"], "linux-x86_64")
             .expect_err("must be refused");
         assert!(error.to_string().contains("no asset"), "{error}");
+    }
+
+    #[test]
+    fn a_member_is_stored_the_way_the_archive_holds_it() {
+        // `\` is a separator on Windows and an ordinary character everywhere else, so a member
+        // written that way has to be normalised *into* the map, not merely validated - otherwise
+        // installing on Unix looks for one file called `bin\tool` and never finds it.
+        let document = program(
+            r#"
+version: 1
+programs:
+  winsep:
+    repository: https://github.com/example/winsep
+    targets:
+      linux-x86_64:
+        asset: "{release}/winsep.tar.gz"
+        member:
+          - "bin\\tool"
+          - "./share//winsep.dat"
+      macos-x86_64:
+        asset: "{release}/winsep.tar.gz"
+        member: "bin\\tool"
+"#,
+        );
+        let winsep = &document.programs["winsep"];
+
+        let entry = for_host("winsep", winsep, "linux-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("bin/tool".to_owned(), "bin/tool".to_owned()),
+                ("share/winsep.dat".to_owned(), "share/winsep.dat".to_owned()),
+            ]
+        );
+
+        // The lone-member form too: its key is the archive's spelling, its output the basename.
+        let entry = for_host("winsep", winsep, "macos-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [("bin/tool".to_owned(), "tool".to_owned())]
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_member_are_refused() {
+        // Textually distinct, so the schema's `uniqueItems` lets them through; the same file once
+        // normalised, so the second would silently replace the first in the map.
+        for member in [
+            "        member: [bin/tool, bin//tool]",
+            "        member:\n          bin/tool: a\n          ./bin/tool: b",
+        ] {
+            let document = program(&format!(
+                "version: 1\nprograms:\n  twice:\n    repository: https://github.com/e/c\n    targets:\n      linux-x86_64:\n        asset: '{{release}}/twice.tar.gz'\n{member}\n"
+            ));
+            let error = for_host("twice", &document.programs["twice"], "linux-x86_64")
+                .expect_err("must be refused");
+            assert!(error.to_string().contains("twice"), "{member:?}: {error}");
+        }
     }
 
     #[test]

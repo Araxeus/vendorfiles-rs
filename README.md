@@ -352,6 +352,8 @@ files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
 </details>
 <!-- /formats -->
 
+An absolute destination is taken at its word, like an absolute `vendorFolder`.
+
 ### Commit-Based Versioning
 
 By default versions track GitHub releases. To track a file's latest commit instead, use
@@ -959,10 +961,10 @@ needs across more than one asset, the host names them as a list:
         - asset: "{release}/programz-extra.dll"
 ```
 
-Every path is relative to the archive root, going in as well as coming out; one that is absolute
-or climbs out of it is refused. So is `as` beside a list or a map - it renames a single downloaded
-file, and those name several. One `member` still lands under its basename, so the archive's own
-versioned directory does not end up in your vendor folder.
+Every path is relative to the archive root, going in as well as coming out; one that climbs out
+of it is refused. So is `as` beside a list or a map - it renames a single downloaded file, and
+those name several. One `member` still lands under its basename, so the archive's own versioned
+directory does not end up in your vendor folder.
 
 Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
 and a file from the repository is vendored with `path` instead of an asset:

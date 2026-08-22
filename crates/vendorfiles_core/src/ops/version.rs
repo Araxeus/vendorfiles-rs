@@ -102,10 +102,7 @@ impl Session {
                 dependency.version.as_deref().unwrap_or_default(),
             );
             for file in flat_files(&lock_files) {
-                files.insert(
-                    crate::fsx::join_normalized(&folder, &[file.as_str()]),
-                    name.clone(),
-                );
+                files.insert(crate::fsx::anchor(&folder, file.as_str()), name.clone());
             }
         }
         files

@@ -68,6 +68,25 @@ pub fn join_normalized(base: &Path, parts: &[&str]) -> PathBuf {
     normalize(Path::new(&joined))
 }
 
+/// Where a declared path lands, given the folder it belongs to.
+///
+/// A relative path hangs off `folder`, which is the ordinary case and keeps a checked-in project
+/// working wherever it is cloned. An absolute one names a destination of its own and is taken at
+/// its word: `vendorFolder` has always struck that bargain, and a single file gets it too, so one
+/// binary can be dropped somewhere on `PATH` without moving the rest of the dependency.
+///
+/// The one rule for *where things go*, so placing a file and deleting it later cannot disagree.
+#[must_use]
+pub fn anchor(folder: &Path, path: &str) -> PathBuf {
+    // `has_root` rather than `is_absolute` so a leading separator counts on Windows too;
+    // `C:relative`, which has no root, stays relative on both.
+    if Path::new(path).has_root() {
+        normalize(Path::new(path))
+    } else {
+        join_normalized(folder, &[path])
+    }
+}
+
 /// Whether `text` begins with a plain drive root such as `C:\`.
 fn starts_with_drive(text: &str) -> bool {
     let mut chars = text.chars();
@@ -178,7 +197,7 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
 /// Returns [`VendorError::ReadFile`] if `root` cannot be resolved or the file is not there.
 pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> Result<()> {
     let root = real_path(root)?;
-    let filepath = join_normalized(&root, &[relative_path]);
+    let filepath = anchor(&root, relative_path);
     tokio::fs::remove_file(&filepath)
         .await
         .map_err(|source| VendorError::ReadFile {
@@ -301,7 +320,8 @@ async fn write_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_running_executable, join_normalized, normalize, simplify, staged_beside, stream_to_file,
+        anchor, is_running_executable, join_normalized, normalize, simplify, staged_beside,
+        stream_to_file,
     };
     use std::path::{Path, PathBuf};
 
@@ -490,6 +510,49 @@ mod tests {
         assert_eq!(normalize(Path::new("../a")), PathBuf::from("..").join("a"));
         #[cfg(unix)]
         assert_eq!(normalize(Path::new("/a/../../b")), PathBuf::from("/b"));
+    }
+
+    #[test]
+    fn a_relative_destination_hangs_off_the_folder() {
+        let folder = PathBuf::from("proj").join("vendor").join("dep");
+        assert_eq!(anchor(&folder, "tool.exe"), folder.join("tool.exe"));
+        assert_eq!(
+            anchor(&folder, "bin/tool.exe"),
+            folder.join("bin").join("tool.exe")
+        );
+        // `..` still climbs, as it does for any relative output the config declares.
+        assert_eq!(
+            anchor(&folder, "../licenses/L"),
+            PathBuf::from("proj")
+                .join("vendor")
+                .join("licenses")
+                .join("L")
+        );
+    }
+
+    #[test]
+    fn an_absolute_destination_is_taken_at_its_word() {
+        // What `vendorFolder` has always done, now for a single file too: one binary can land on
+        // `PATH` without the rest of the dependency moving with it.
+        let folder = PathBuf::from("proj").join("vendor").join("dep");
+
+        assert_eq!(
+            anchor(&folder, "/opt/tools/tool"),
+            normalize(Path::new("/opt/tools/tool"))
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            anchor(&folder, r"C:\tools\tool.exe"),
+            PathBuf::from(r"C:\tools\tool.exe")
+        );
+
+        // `C:relative` has no root on either platform, so it takes the relative branch rather
+        // than being mistaken for a destination of its own. What `normalize` then makes of a
+        // drive-prefixed segment mid-path is its own affair, and not what this rule decides.
+        assert_eq!(
+            anchor(&folder, "C:relative"),
+            join_normalized(&folder, &["C:relative"])
+        );
     }
 
     #[test]
