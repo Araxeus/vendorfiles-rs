@@ -92,7 +92,7 @@
             "not": { "required": ["member"] },
             "properties": {
               "targets": {
-                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright — and each names its own `member`, the shared one having no asset to point into.",
+                "description": "With no shared `asset` there is no pattern for a triple to substitute into, so every host has to name its asset outright - and each names its own `member`, the shared one having no asset to point into.",
                 "additionalProperties": { "$ref": "#/$defs/explicit" }
               }
             }

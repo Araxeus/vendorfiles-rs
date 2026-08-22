@@ -34,7 +34,7 @@ pub fn find(name: &str) -> Option<Known> {
 /// An entry that keeps this binary up to date.
 ///
 /// The asset is the one the release workflow publishes for this platform, and the folder is
-/// wherever the running binary sits — so the extracted member's destination *is* the running
+/// wherever the running binary sits - so the extracted member's destination *is* the running
 /// executable, and `ops::install` swaps it in place rather than writing over a locked image.
 fn itself() -> Known {
     let (asset, member) = release_asset();

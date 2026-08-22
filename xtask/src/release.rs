@@ -1,4 +1,4 @@
-//! `cargo xtask release` — the Rust counterpart of the reference project's `scripts/release.ts`.
+//! `cargo xtask release` - the Rust counterpart of the reference project's `scripts/release.ts`.
 
 use std::path::Path;
 use std::process::Command;

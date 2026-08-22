@@ -133,7 +133,7 @@ impl Workspace {
 
 /// Resolves the folder (or file) the config search starts from.
 ///
-/// `-c` beats `VENDOR_CONFIG` beats `INIT_CWD` beats `PWD` beats the process cwd — and, as in
+/// `-c` beats `VENDOR_CONFIG` beats `INIT_CWD` beats `PWD` beats the process cwd - and, as in
 /// the reference, an empty value falls through to the next candidate.
 fn resolve_start_path(config_location: Option<&str>) -> PathBuf {
     let from_env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());

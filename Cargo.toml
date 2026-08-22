@@ -46,7 +46,7 @@ apple-native-keyring-store = { version = "1.0.2", default-features = false, feat
     "keychain",
 ] }
 # Preferred on Linux: the Secret Service persists to disk, so a token survives a reboot. The
-# `zbus` implementation rather than the `dbus` one keeps this pure Rust — no libdbus to link.
+# `zbus` implementation rather than the `dbus` one keeps this pure Rust - no libdbus to link.
 # `rt-async-io-crypto-rust` drives zbus's blocking API on its own async-io executor, so it never
 # interacts with the tool's tokio runtime, and encrypts the bus session without OpenSSL.
 zbus-secret-service-keyring-store = { version = "1.0.1", default-features = false, features = [
@@ -54,7 +54,7 @@ zbus-secret-service-keyring-store = { version = "1.0.1", default-features = fals
 ] }
 # The fallback when no Secret Service is running (headless boxes, minimal containers, WSL).
 linux-keyutils-keyring-store = "1.0.0"
-# `.tar.xz` releases. Pure Rust, like every other codec here — `xz2`/`liblzma` would bind the C
+# `.tar.xz` releases. Pure Rust, like every other codec here - `xz2`/`liblzma` would bind the C
 # library and put a build toolchain between a user and `cargo install`.
 lzma-rs = "0.3.0"
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
@@ -73,7 +73,7 @@ octocrab = { version = "0.54.1", default-features = false, features = [
 ] }
 open = "5.4.1"
 # The live display. Default features off: only the crossterm backend is wanted, and the inline
-# viewport is the whole reason for the dependency — a fixed region we redraw from a state
+# viewport is the whole reason for the dependency - a fixed region we redraw from a state
 # snapshot, rather than cursor arithmetic of our own.
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 regex = "1.13.1"

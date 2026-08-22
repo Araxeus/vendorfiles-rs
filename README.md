@@ -771,12 +771,12 @@ Commands:
 
 Both root options are global, so they read naturally on either side of the subcommand:
 `vendor -c ./conf.json sync` and `vendor sync -c ./conf.json` are the same command. `-c` requires
-its value — naming the option is only ever a request for a specific config — so it can never claim
+its value - naming the option is only ever a request for a specific config - so it can never claim
 a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
 are set.
 
 Completions are generated from the parser itself, so they always match the flags this build
-accepts — including anything added since the last release:
+accepts - including anything added since the last release:
 
 ```bash
 vendor completions bash > /etc/bash_completion.d/vendor
@@ -785,7 +785,7 @@ vendor completions fish > ~/.config/fish/completions/vendor.fish
 vendor completions powershell >> $PROFILE
 ```
 
-`-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead —
+`-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead -
 the same output a redirected stdout gets. It works on either side of the subcommand
 (`vendor -p sync`, `vendor sync --plain`).
 
@@ -826,7 +826,7 @@ vendor add fd          # or fdfind, or fd-find
 vendor add rg          # keys the entry `ripgrep`, its canonical name
 ```
 
-That writes an ordinary entry — nothing registry-specific, so it keeps working whatever happens to
+That writes an ordinary entry - nothing registry-specific, so it keeps working whatever happens to
 the registry later:
 
 <!-- formats -->
@@ -889,7 +889,7 @@ keeps working afterwards.
 ### Adding a program to the registry
 
 The list lives in [`registry.yml`](./registry.yml) at the root of this repository. Open a pull
-request adding an entry and, once merged, `vendor add <name>` works for everyone — no new release
+request adding an entry and, once merged, `vendor add <name>` works for everyone - no new release
 needed. Most projects need a few lines:
 
 ```yaml
@@ -943,7 +943,7 @@ and a file from the repository is vendored with `path` instead of an asset:
 
 [`registry.schema.json`](./registry.schema.json) describes the format, and `registry.yml` points
 at it, so an editor with YAML language-server support flags a wrong field or a malformed host key
-as you type — before CI, and before the PR. Test your entry too:
+as you type - before CI, and before the PR. Test your entry too:
 
 ```bash
 VENDOR_REGISTRY=./registry.yml vendor add <name> --dry-run   # what it resolves to
@@ -979,8 +979,8 @@ host it lists, and that anything with a `member` is a container the extractor ca
 claims, and the `member` inside it is downloaded and checked on one platform. The same checks run
 weekly, since a project can rename its assets without anyone touching this repository.
 
-Members are verified on one platform rather than all of them — every platform would mean
-downloading every asset — so an entry whose layout differs *between* platforms still deserves a
+Members are verified on one platform rather than all of them - every platform would mean
+downloading every asset - so an entry whose layout differs *between* platforms still deserves a
 manual look. `microsoft/edit` and `sinelaw/fresh` both nest their binary on one platform and not
 another.
 
@@ -988,7 +988,7 @@ A few notes on how it behaves. The registry is only read by `install`/`add`, nev
 `update`. It is cached for a day, so the usual install makes no request at all; after that the
 check is conditional, and `--refresh` forces it. If it cannot be reached, `vendor` says so and
 carries on with its normal search, so being offline costs you nothing but the shorthand. And an
-entry can only say *what* to fetch — there is no `vendorFolder` in the format, and unknown keys are
+entry can only say *what* to fetch - there is no `vendorFolder` in the format, and unknown keys are
 refused, so a registry can never redirect writes on your machine.
 
 ## Keeping vendor updated
@@ -1061,14 +1061,14 @@ and `vendor add vendor` write the same entry.
 
 From then on `vendor update` upgrades the tool along with everything else, and `vendor outdated`
 tells you when a release is waiting. Because the file being installed *is* the running binary, it
-cannot simply be written over — Windows keeps the image locked, and replacing it underneath a live
+cannot simply be written over - Windows keeps the image locked, and replacing it underneath a live
 process is unsafe everywhere. `vendor` notices that the destination is itself and swaps it in place
 instead: the new build is staged beside the old one, the old image is moved aside, and the
 operating system deletes it once the process exits. Clearing a previous install skips the running
 binary for the same reason.
 
 `vendor uninstall vendorfiles-rs` drops the entry and its lockfile but leaves the binary where it
-is — stopping tracking should not remove the tool you are running.
+is - stopping tracking should not remove the tool you are running.
 
 ## Authentication
 

@@ -1,4 +1,4 @@
-//! Command dispatch — the layer between parsed arguments and the library's operations.
+//! Command dispatch - the layer between parsed arguments and the library's operations.
 
 use anyhow::{Result, bail};
 use vendorfiles_core::error::VendorError;
@@ -126,7 +126,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// `vendor update <name>` — re-resolve one dependency to its latest version.
+/// `vendor update <name>` - re-resolve one dependency to its latest version.
 async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
     let entry = session
         .workspace
@@ -158,7 +158,7 @@ async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// What a new entry takes from a *neighbour* — an entry under a different name that already
+/// What a new entry takes from a *neighbour* - an entry under a different name that already
 /// vendors the same repository.
 ///
 /// The whole neighbour is used as the base of the new entry, so in principle everything unset on
@@ -169,7 +169,7 @@ async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
 ///   with no files leaves a known name or the registry to describe them, and nothing is borrowed.
 /// * `version`, always: the new entry starts out claiming the neighbour's, so when that already
 ///   matches what gets installed the entry is never written to the config at all. An explicit
-///   version on the command line does not stop this — it decides what to install, not what the
+///   version on the command line does not stop this - it decides what to install, not what the
 ///   entry starts out at.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Inherited {
@@ -197,8 +197,8 @@ impl Inherited {
     fn warning(self, neighbour: &str, name: &str, repository: &str) -> Option<String> {
         let (borrowed, advice) = match (self.files, self.version) {
             // `--files` replaces the files and only the files. Saying it describes the new entry
-            // "separately" would promise more than it delivers, since the version — the half that
-            // can swallow the config write — comes from the neighbour whatever the command says.
+            // "separately" would promise more than it delivers, since the version - the half that
+            // can swallow the config write - comes from the neighbour whatever the command says.
             (true, true) => (
                 "its files and version",
                 format!(
@@ -241,7 +241,7 @@ fn merge_install_entry(
 ///
 /// Deliberately offline: resolving a name, merging the defaults and choosing the platform's asset
 /// all happen locally, and stopping before the first request is what makes this answer "what will
-/// this put in my config" instantly — and what lets the tests cover the registry without a
+/// this put in my config" instantly - and what lets the tests cover the registry without a
 /// network. The version is left to the install, being the one part that has to ask GitHub.
 fn report_entry(session: &Session, name: &str, entry: &RawDependency) -> Result<()> {
     let folder = session
@@ -359,7 +359,7 @@ fn completions(shell: &str) -> Result<()> {
 
 /// What a `source` argument turned out to name.
 struct Source {
-    /// The URL the reference builds, warts and all — `owner/repo` becomes
+    /// The URL the reference builds, warts and all - `owner/repo` becomes
     /// `https://www.github.com/owner/repo`, and that exact string is what config entries are
     /// compared against.
     lookup: String,
@@ -460,7 +460,7 @@ async fn install(
 
     let name = match name.filter(|n| !n.is_empty()) {
         Some(name) => name,
-        // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` — the
+        // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` - the
         // canonical name, not the alias that was typed.
         None => match listed.as_ref() {
             Some(listed) => listed.name.clone(),
@@ -469,7 +469,7 @@ async fn install(
     };
 
     // Files may be inherited from an entry under this name, or from any entry pointing at the
-    // same repository — the reference looks in both places.
+    // same repository - the reference looks in both places.
     let under_this_name = session.workspace.dependencies.get(&name).cloned();
     // Which *other* entry it would be borrowed from, when there is nothing under this name. Worth
     // knowing separately: inheriting from an entry the user did not name is the surprising half.
@@ -513,7 +513,7 @@ async fn install(
     // command is known to have something to install. Borrowing from an entry the user never
     // named is the surprising half of `install`, and the borrowed `version` is the sharp edge:
     // the new entry starts out claiming it, so when it already matches what gets installed the
-    // entry is never written at all — which looks like nothing happening for no reason.
+    // entry is never written at all - which looks like nothing happening for no reason.
     if let Some(((neighbour, _), inherited)) = neighbour.as_ref().zip(inherited)
         && let Some(warning) = inherited.warning(neighbour, &name, &lookup)
     {

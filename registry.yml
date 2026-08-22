@@ -5,7 +5,7 @@
 # To add one, open a pull request against this file. Every pull request proves the file parses and
 # that each entry resolves for every host it lists. A change to this file also queries GitHub: the
 # asset each entry names must exist for every host, and the `member` inside it is checked for real
-# on one platform — the runner's own where the entry covers it. So a wrong `member` is caught, and
+# on one platform - the runner's own where the entry covers it. So a wrong `member` is caught, and
 # the failure lists what the archive actually holds.
 #
 # Test your entry before opening the PR:
@@ -30,7 +30,7 @@
 # releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`
 # to track it by commit; it takes no `targets`, being the same everywhere.
 #
-# An entry says *what* to download. It cannot say where files land — there is no `vendorFolder`
+# An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
 
 version: 1
@@ -238,7 +238,7 @@ programs:
         asset: "{release}/wsl-notify-send_windows_amd64.zip"
         member: "wsl-notify-send.exe"
 
-  # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` — so every host is
+  # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
   fresh:
     repository: https://github.com/sinelaw/fresh

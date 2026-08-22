@@ -1,13 +1,13 @@
-//! `install` — resolve a version, refresh the dependency folder, update config and lockfile.
+//! `install` - resolve a version, refresh the dependency folder, update config and lockfile.
 //!
 //! An install is split into three stages so `sync` can overlap the slow one across
 //! dependencies:
 //!
-//! 1. [`Session::prepare`] — decide the version and whether anything is stale. Read-only.
-//! 2. [`download`] — fetch and extract into the dependency folder, reporting to the
+//! 1. [`Session::prepare`] - decide the version and whether anything is stale. Read-only.
+//! 2. [`download`] - fetch and extract into the dependency folder, reporting to the
 //!    dependency's own progress line as it goes. Owns everything it needs, so it can run on
 //!    its own task.
-//! 3. [`Session::commit`] — write the lockfile, update the config, settle the line. Ordered.
+//! 3. [`Session::commit`] - write the lockfile, update the config, settle the line. Ordered.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -210,7 +210,7 @@ impl Session {
     ///
     /// The in-memory `dependencies` map is left alone for entries that already existed. The
     /// reference keeps a deep copy of them, so a version written mid-run is never visible to
-    /// the staleness checks of later dependencies — and neither is it here.
+    /// the staleness checks of later dependencies - and neither is it here.
     async fn record_version(&mut self, dependency: &Dependency, new_version: &str) -> Result<()> {
         let name = dependency.name.clone();
         if self.workspace.dependencies.contains_key(&name) {
@@ -230,7 +230,7 @@ impl Session {
                 name: None,
             };
             // The resolved dependency has the `default` block folded into it. Writing those
-            // values back would restate the defaults in every entry, so drop them again —
+            // values back would restate the defaults in every entry, so drop them again -
             // `load` will fold them in next time just the same.
             let written = {
                 let mut written = entry.clone();
@@ -312,8 +312,8 @@ async fn remove_previously_installed(
         if !path.exists() {
             continue;
         }
-        // The running binary cannot be deleted while it runs — on Windows the attempt fails
-        // outright — and it does not need to be: the download that follows replaces it in place.
+        // The running binary cannot be deleted while it runs - on Windows the attempt fails
+        // outright - and it does not need to be: the download that follows replaces it in place.
         if fsx::is_running_executable(&path) {
             continue;
         }
@@ -466,7 +466,7 @@ async fn download_release_file(
 /// Moves an extracted member into the dependency folder.
 ///
 /// Falls back to copy-then-delete when the temp directory is on another filesystem, which
-/// `rename` cannot cross — the reference fails outright in that case.
+/// `rename` cannot cross - the reference fails outright in that case.
 async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
     let fail = |source_error: std::io::Error| VendorError::MoveFailed {
         from: source.display().to_string(),

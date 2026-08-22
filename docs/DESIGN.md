@@ -1,4 +1,4 @@
-# vendorfiles-rs — Design
+# vendorfiles-rs - Design
 
 A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) (TypeScript/Bun) with
 byte-level parity on CLI surface, config files and lockfiles.
@@ -24,7 +24,7 @@ vendorfiles-rs/
 │   ├── vendorfiles_core/     # library: all behaviour, `thiserror` errors, no process exits
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── error.rs      # VendorError — Display == user-facing message
+│   │       ├── error.rs      # VendorError - Display == user-facing message
 │   │       ├── ui.rs         # ANSI colors, INFO/SUCCESS/WARNING/ERROR routing, RunOptions
 │   │       ├── progress/     # the live display, and the plain-line fallback
 │   │       ├── model.rs      # FileEntry / FileTarget / VendorDependency / VendorConfig
@@ -59,7 +59,7 @@ vendorfiles-rs/
 └── xtask/                    # `cargo xtask release`
 ```
 
-Rationale: the library never calls `process::exit` and never prints usage — it returns
+Rationale: the library never calls `process::exit` and never prints usage - it returns
 `VendorError`. The binary owns the terminal contract (exit codes, help text, `ERROR:` prefix).
 This is the only split that lets integration tests assert on behaviour without spawning
 processes, while keeping exit-code parity in one small place.
@@ -87,7 +87,7 @@ pub enum FileTarget {
 `IndexMap` everywhere: lockfile key order is observable output, and the TS `Object.assign`
 merge order must be reproduced exactly (first insertion wins position, later value wins).
 
-### 3.2 Workspace — the single owner
+### 3.2 Workspace - the single owner
 
 ```rust
 pub struct Workspace {
@@ -110,7 +110,7 @@ pub struct Session {
 Operations *clone the single `RawDependency`* they act on (a handful of small `String`s)
 rather than juggling a split borrow of `dependencies` against `file`. This keeps every
 signature lifetime-free at a cost that is invisible next to a network round-trip, and turns
-`&mut self` into the mechanism that serialises config writes (see §4) — no lock required.
+`&mut self` into the mechanism that serialises config writes (see §4) - no lock required.
 
 Borrowed data is used where it is free and unambiguous: `&Dependency`, `&VendorConfig` and
 `&Path` flow down into pure helpers (`dependency_folder`, `config_files_to_lock_files`). The
@@ -126,7 +126,7 @@ Write-back must preserve keys the tool does not model (`package.json` has dozens
 pub enum ConfigDocument {
     /// JSON and YAML: structural round-trip through an order-preserving JSON value.
     Structural(serde_json::Value),
-    /// TOML: `toml_edit` document — preserves comments and layout.
+    /// TOML: `toml_edit` document - preserves comments and layout.
     Toml(Box<toml_edit::DocumentMut>),
 }
 ```
@@ -159,7 +159,7 @@ next to the `ring` one octocrab already uses; `cargo tree` shows neither aws-lc,
 native-tls in the graph.
 
 The cache stores a `OnceCell` *per key* rather than a value, so the concurrent version-resolution
-pass collapses duplicate lookups into one request instead of racing — the anonymous rate limit
+pass collapses duplicate lookups into one request instead of racing - the anonymous rate limit
 is 60 requests an hour, so a duplicate is not free. `Arc<Release>` means cache hits do not clone
 asset lists. The lookup also reproduces the TS quirk: a request for a tag is satisfied by any
 already-resolved release of the same repository whose `tag_name` matches.
@@ -176,12 +176,12 @@ There is no cross-platform keyring facade in the dependency graph. `keyring-core
 | macOS | `apple-native-keyring-store` (`keychain`) | `UntilDelete` |
 | Linux, first choice | `zbus-secret-service-keyring-store` | `UntilDelete` |
 | Linux, fallback | `linux-keyutils-keyring-store` | `UntilReboot` |
-| other | — | store unavailable |
+| other | - | store unavailable |
 
 Linux is the only target with a choice to make, and it is made at runtime: the Secret Service
 persists to disk but needs a daemon that headless boxes, minimal containers and WSL usually
 lack, so `native()` tries it first and falls back to keyutils. The `zbus` implementation is
-used rather than the `dbus` one because it is pure Rust — `cargo tree` shows no libdbus — and
+used rather than the `dbus` one because it is pure Rust - `cargo tree` shows no libdbus - and
 its `rt-async-io-crypto-rust` feature drives zbus's blocking API on its own async-io executor,
 so it never interacts with the tool's tokio runtime.
 
@@ -196,8 +196,8 @@ Two consequences worth being deliberate about:
   that is: the warning follows whatever `native()` actually opened.
 
 `credentials` builds entries from a store handle it owns (`CredentialStoreApi::build`) rather
-than registering one with `keyring_core::set_default_store`. That keeps a process-global — and
-its initialise-before-first-use ordering hazard — out of the design; the store opens lazily,
+than registering one with `keyring_core::set_default_store`. That keeps a process-global - and
+its initialise-before-first-use ordering hazard - out of the design; the store opens lazily,
 once, behind a `OnceLock`.
 
 Keyring access is blocking IPC (on Linux it can prompt to unlock), so the CLI reaches it
@@ -222,21 +222,21 @@ changing what the user sees required splitting an install into three stages, in 
 
 `sync` then:
 
-1. resolves every version with one `join_all` — single-flight per release key, so two
+1. resolves every version with one `join_all` - single-flight per release key, so two
    dependencies on the same repo still cost one request;
 2. `tokio::spawn`s a download task per dependency (a semaphore caps in-flight work);
 3. awaits those handles **in order**, committing each as it arrives.
 
 Because step 3 awaits in order, output still streams out dependency by dependency in exactly
 the TS tool's sequence while later dependencies are still downloading. The `&mut self` on
-`commit` is what serialises config writes — no lock needed, and the borrow checker enforces it.
+`commit` is what serialises config writes - no lock needed, and the borrow checker enforces it.
 
 `Arc<GitHubClient>` is the only shared ownership in the design; everything else is a borrow
 from `Session`. The log lines a download would have printed are returned from the stage rather
 than printed inside it, which is what makes the ordering property structural rather than
 incidental.
 
-Within a dependency, plain files download concurrently and then release assets do — the two
+Within a dependency, plain files download concurrently and then release assets do - the two
 `Promise.all` batches in `commands.ts`. Their log lines come back in declaration order instead
 of completion order, a strict narrowing of what the TS tool could emit.
 
@@ -255,55 +255,153 @@ Measured against `vendorfiles@1.4.2` on a config with 8 dependencies:
 | `outdated` | 3426 ms | 908 ms |
 | `--version` | 706 ms | 54 ms |
 
-### 4.1 Reporting
-
-`progress` owns the display. Each dependency holds an `Arc<progress::Dependency>` — shared
-because the download task and the ordered `commit` describe the same line. `fsx::stream_to_file`
-advances that line per chunk, so it tracks bytes actually written.
-
-The display is a fixed region at the bottom of the terminal, drawn with ratatui's inline viewport
-and redrawn from a snapshot of `RunState` on an 80 ms tick. Four modules, one of which touches a
-terminal:
-
-| Module | Responsibility |
-| --- | --- |
-| `state` | `RunState`, `Stage`, row assignment, byte accounting. Plain data. |
-| `view` | `view(&RunState, tick, area, buf)` — pure, so frames are asserted cell by cell in tests. |
-| `driver` | The render thread: owns the `Terminal`, ticks, inserts lines above, tears down. |
-| `ansi` | Parses our own SGR strings back into ratatui text. |
-
-The region is `5 + rows` lines and at most `REGION_WIDTH` columns: frame, summary bar, worker rows,
-rule, footer. `rows` is fixed once, after staleness is known, at
-`min(MAX_CONCURRENT_DOWNLOADS, stale, rows_that_fit(terminal))`; at zero — `outdated`, or a project
-already up to date — the rule and footer go and the box is three lines.
-
-Rows are places, not a list. `RunState::assign` gives a dependency a row and it keeps that row
-until it has nothing left to show; a freed row is refilled in place and an empty row stays empty,
-so no row moves for an event that concerned another. Empty rows are filled by `Stage::priority` —
-committing, then active, then waiting, then settled — and then by config order. Anything in flight
-without a row is counted in the footer.
-
-A settled dependency reports on its own row; its outcome line is held until `Reporter::end` prints
-them all as the region comes down. Emitting them as they happen pushes the region a row down the
-screen each time, since `insert_before` only scrolls above the region when the region already sits
-on the last row. Warnings and errors still go up immediately.
-
-Every terminal write goes through `print_out` or `print_err`, which hand the line to the render
-thread; a raw `println!` lands wherever the cursor happens to be. `driver::wipe` returns the cursor
-to the region's first row after clearing, since `Terminal::clear` leaves it at the bottom.
-
-Animation requires **stdout** to be a terminal and `--pr` to be off. Stdout rather than stderr is
-forced: anchoring an inline viewport asks for the cursor position, and crossterm sends that query to
-stdout whatever the backend holds. When it does not animate, a dependency buffers its `INFO:` lines
-and flushes them as it settles, so piped output keeps the bytes and ordering it had before the
-display existed.
-
-The region is wiped and the cursor restored on every exit — `end()` on each of `sync`'s error paths,
-a `Drop` on the driver, and a panic hook, since `draw` hides the cursor.
-
-Within a dependency, `record` notes destinations after each batch of transfers joins rather than
-as each one lands, so the piped record follows the `files` array even though the network decides
-completion order. `ui` routes every line through the render thread, so a warning arriving
+### 4.1 Reporting
+
+-
+
+
+
+`progress` owns the display. Each dependency holds an `Arc<progress::Dependency>` - shared
+
+
+because the download task and the ordered `commit` describe the same line. `fsx::stream_to_file`
+
+
+advances that line per chunk, so it tracks bytes actually written.
+-
+
+
+
+
+The display is a fixed region at the bottom of the terminal, drawn with ratatui's inline viewport
+-
+-
+and redrawn from a snapshot of `RunState` on an 80 ms tick. Four modules, one of which touches a
+
+
+terminal:-
+-
+
+
+
+
+| Module | Responsibility |
+
+
+| --- | --- |
+
+
+| `state` | `RunState`, `Stage`, row assignment, byte accounting. Plain data. |
+
+
+| `view` | `view(&RunState, tick, area, buf)` - pure, so frames are asserted cell by cell in tests. |
+
+
+| `driver` | The render thread: owns the `Terminal`, ticks, inserts lines above, tears down. |
+-
+
+| `ansi` | Parses our own SGR strings back into ratatui text. |
+
+
+
+
+
+The region is `5 + rows` lines and at most `REGION_WIDTH` columns: frame, summary bar, worker rows,
+
+
+rule, footer. `rows` is fixed once, after staleness is known, at
+
+
+`min(MAX_CONCURRENT_DOWNLOADS, stale, rows_that_fit(terminal))`; at zero - `outdated`, or a project
+
+
+already up to date - the rule and footer go and the box is three lines.-
+
+
+
+
+
+Rows are places, not a list. `RunState::assign` gives a dependency a row and it keeps that row
+
+
+until it has nothing left to show; a freed row is refilled in place and an empty row stays empty,
+
+
+so no row moves for an event that concerned another. Empty rows are filled by `Stage::priority` -
+
+
+committing, then active, then waiting, then settled - and then by config order. Anything in flight
+
+
+without a row is counted in the footer.
+
+
+
+
+
+A settled dependency reports on its own row; its outcome line is held until `Reporter::end` prints
+
+
+them all as the region comes down. Emitting them as they happen pushes the region a row down the
+
+
+screen each time, since `insert_before` only scrolls above the region when the region already sits
+
+
+on the last row. Warnings and errors still go up immediately.
+-
+
+
+
+
+Every terminal write goes through `print_out` or `print_err`, which hand the line to the render
+
+
+thread; a raw `println!` lands wherever the cursor happens to be. `driver::wipe` returns the cursor
+
+
+to the region's first row after clearing, since `Terminal::clear` leaves it at the bottom.
+--
+
+
+
+
+Animation requires **stdout** to be a terminal and `--pr` to be off. Stdout rather than stderr is
+
+
+forced: anchoring an inline viewport asks for the cursor position, and crossterm sends that query to
+
+
+stdout w-atever the backend holds. When it does not animate, a dependency buffers its `INFO:` lines
+
+
+and flushes them as it settles, so piped output keeps the bytes and ordering it had before the
+
+
+display existed.-
+
+
+
+
+-
+The region is wiped and the cu-sor restored on every exit - `end()` on each of `sync`'s error paths,
+
+
+a `Drop` on the driver, and a panic hook, since `draw` hides the cursor.
+
+
+
+
+
+Within a dependency, `record` notes destinations after each batch of transfers joins rather than
+
+
+as each one lands, so the piped record follows the `files` array even though the network decides
+
+
+completion order. `ui` routes every line through the render thread, so a warning arriving
+
+-
 mid-run appears above the region instead of being overwritten.
 
 ## 5. Parity contract
@@ -315,7 +413,7 @@ Verified against the installed `vendor@1.4.2` binary in isolated fixtures:
 * Argument errors use commander's wording: `error: unknown command 'x'`,
   `error: unknown option '--x'`, `error: missing required argument 'url/name'`.
 * Bare `vendor` prints the root help to **stderr** and exits 1.
-* ANSI colors are emitted unconditionally (no tty/`NO_COLOR` detection) — the TS tool
+* ANSI colors are emitted unconditionally (no tty/`NO_COLOR` detection) - the TS tool
   hard-codes the escapes.
 * `INFO`/`SUCCESS` and the `outdated` listing go to stdout; `WARNING`/`ERROR` to stderr.
   `--pr` suppresses `INFO`/`SUCCESS`/`WARNING` only.
@@ -349,7 +447,7 @@ code and the complete resulting file tree (including binary payloads). Covered:
 ## 6. Deliberate deviations
 
 1. **`install <new-dep>` works.** The TS tool throws `TypeError: Cannot read properties of
-   undefined (reading 'match')` when installing a repo that is not already in the config —
+   undefined (reading 'match')` when installing a repo that is not already in the config -
    it discards the CLI-provided URL and files. The Rust port implements the documented
    behaviour: install the files and add the dependency to the config.
 2. **Auth header.** The TS tool passes `Authorization` as an endpoint *parameter*, so it
@@ -361,7 +459,7 @@ code and the complete resulting file tree (including binary payloads). Covered:
    token is treated as absent so a TS-era entry degrades to "not logged in" rather than 401.
 4. **TOML comments survive** a version bump (`toml_edit`); the TS tool drops them. Removing a
    dependency collapses the trailing blank lines that would otherwise accumulate.
-5. **Failures the TS tool never handled** — a nonexistent tag, for instance — print the message
+5. **Failures the TS tool never handled** - a nonexistent tag, for instance - print the message
    the source already had for them and exit 1, instead of dumping an unhandled Octokit
    rejection and exiting 127.
 6. **`vendor login` needs no config file**, and **`vendor update <name>` honours the `default`
@@ -372,19 +470,19 @@ code and the complete resulting file tree (including binary payloads). Covered:
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
 9. **`-p`/`--plain`** turns the live display off, and is the reason `--pr` no longer has a short
-   form — a global flag that means one thing everywhere is worth more than the letter the
+   form - a global flag that means one thing everywhere is worth more than the letter the
    reference spent on `update`'s only option. The two help screens differ from the captured
    reference by exactly those two lines; `tests/fixtures/help` keeps the reference text and the
    test applies the delta, so both stay checkable.
 10. **Root options are global**, so `-c`/`--config` and `-p`/`--plain` are accepted on either side
    of the subcommand; Commander only reads them before it. `CommandSpec::option_for` falls back to
-   `ROOT_OPTIONS` for this reason — without it the operand scanner counts a root option's value as a
+   `ROOT_OPTIONS` for this reason - without it the operand scanner counts a root option's value as a
    positional and misreports the count in `too many arguments`. `-c` also **requires** its value,
    where the reference declares `[file/folder path]`: an optional value would let `-c` claim the
    next word after a command that takes names, and naming the option is only ever a request for a
    specific config. Help says `<file/folder path>` accordingly.
-11. **`vendor` can vendor itself.** `install` resolves a few names without a search — `vendorfiles`,
-   `vendorfiles-rs`, `vendor` — to an entry for this repository's release asset, rooted at the
+11. **`vendor` can vendor itself.** `install` resolves a few names without a search - `vendorfiles`,
+   `vendorfiles-rs`, `vendor` - to an entry for this repository's release asset, rooted at the
    directory holding the running binary (`crates/vendorfiles/src/known.rs`). When a download's
    destination *is* the running executable, `fsx::replace_running_executable` stages it alongside
    and hands the swap to `self-replace`, because the image is locked on Windows and unsafe to
@@ -401,7 +499,7 @@ code and the complete resulting file tree (including binary payloads). Covered:
    `path`; `releaseRegex` picks the tag train. Entries carry no `vendorFolder` and refuse unknown
    keys, so remote data cannot decide where files land. Two gates: every pull request checks the
    file parses and resolves, and the `registry` workflow checks the named assets exist and that one
-   platform's `member` is really inside its archive — neither of which the offline half can know.
+   platform's `member` is really inside its archive - neither of which the offline half can know.
 13. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.
