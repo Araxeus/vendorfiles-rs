@@ -14,13 +14,27 @@ const STEP: usize = 2;
 
 pub fn to_string(node: &Node) -> String {
     let mut out = String::new();
+    // A note written above the example's opening brace, and one written after its closing brace,
+    // both belong to the document rather than to any member.
+    write_leading(&mut out, node, "");
     match &node.value {
-        Value::Object(props) if !props.is_empty() => write_mapping(&mut out, props, 0),
-        Value::Array(items) if !items.is_empty() => write_sequence(&mut out, items, 0),
+        Value::Object(props) if !props.is_empty() => {
+            write_mapping(&mut out, props, 0);
+            if let Some(text) = &node.trailing {
+                let _ = writeln!(out, "#{text}");
+            }
+        }
+        Value::Array(items) if !items.is_empty() => {
+            write_sequence(&mut out, items, 0);
+            if let Some(text) = &node.trailing {
+                let _ = writeln!(out, "#{text}");
+            }
+        }
         other => {
-            let _ = writeln!(out, "{}", scalar(other));
+            let _ = writeln!(out, "{}{}", scalar(other), trailing(node));
         }
     }
+    write_inner(&mut out, node, 0);
     out
 }
 
@@ -33,10 +47,13 @@ fn write_mapping(out: &mut String, props: &[(String, Node)], at: usize) {
             Value::Object(inner) if !inner.is_empty() => {
                 let _ = writeln!(out, "{pad}{key}:{}", trailing(node));
                 write_mapping(out, inner, at + STEP);
+                // A note left after the last member, before the closing brace.
+                write_inner(out, node, at + STEP);
             }
             Value::Array(items) if !items.is_empty() => {
                 let _ = writeln!(out, "{pad}{key}:{}", trailing(node));
                 write_sequence(out, items, at + STEP);
+                write_inner(out, node, at + STEP);
             }
             Value::Object(_) | Value::Array(_) if !node.inner.is_empty() => {
                 // A container whose only content is a comment: the comment is the body.
@@ -56,21 +73,32 @@ fn write_sequence(out: &mut String, items: &[Node], at: usize) {
         write_leading(out, node, &pad);
         match &node.value {
             Value::Object(props) if !props.is_empty() => {
-                // The first key shares the dash's line; the rest align past it.
                 let mut nested = String::new();
                 write_mapping(&mut nested, props, at + STEP);
-                let _ = write!(out, "{pad}- {}", nested.trim_start_matches(' '));
+                write_inner(&mut nested, node, at + STEP);
+                write_dash(out, &pad, &nested, node);
             }
             Value::Array(inner) if !inner.is_empty() => {
                 let mut nested = String::new();
                 write_sequence(&mut nested, inner, at + STEP);
-                let _ = write!(out, "{pad}- {}", nested.trim_start_matches(' '));
+                write_inner(&mut nested, node, at + STEP);
+                write_dash(out, &pad, &nested, node);
             }
             value => {
                 let _ = writeln!(out, "{pad}- {}{}", scalar(value), trailing(node));
+                write_inner(out, node, at + STEP);
             }
         }
     }
+}
+
+/// Writes a container item: its first line shares the dash, and its own trailing comment closes
+/// that line, so `[{ "a": 1 } // note]` keeps the note beside the item it was written on.
+fn write_dash(out: &mut String, pad: &str, nested: &str, node: &Node) {
+    let body = nested.trim_start_matches(' ');
+    let (first, rest) = body.split_once('\n').unwrap_or((body, ""));
+    let _ = writeln!(out, "{pad}- {first}{}", trailing(node));
+    out.push_str(rest);
 }
 
 fn write_leading(out: &mut String, node: &Node, pad: &str) {
@@ -174,6 +202,48 @@ mod tests {
             to_string(&node),
             "files:\n  - '{release}/f.zip':\n      - f.exe\n"
         );
+    }
+
+    #[test]
+    fn keeps_comments_written_outside_the_members() {
+        let node = parse(
+            r#"// header
+{
+    "a": 1
+    // dangling
+}
+// footer"#,
+        )
+        .unwrap();
+        assert_eq!(to_string(&node), "# header\na: 1\n# dangling\n# footer\n");
+    }
+
+    #[test]
+    fn a_dangling_comment_stays_inside_the_block_it_was_written_in() {
+        let node = parse(
+            r#"{
+    "a": {
+        "b": 1
+        // dangling
+    }
+}"#,
+        )
+        .unwrap();
+        assert_eq!(to_string(&node), "a:\n  b: 1\n  # dangling\n");
+    }
+
+    #[test]
+    fn a_trailing_comment_on_a_sequence_item_stays_on_its_line() {
+        let node = parse(
+            r#"{
+    "files": [
+        { "a": "b" }, // after
+        "c"
+    ]
+}"#,
+        )
+        .unwrap();
+        assert_eq!(to_string(&node), "files:\n  - a: b # after\n  - c\n");
     }
 
     #[test]

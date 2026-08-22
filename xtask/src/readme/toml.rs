@@ -13,10 +13,22 @@ const WIDTH: usize = 90;
 
 pub fn to_string(node: &Node) -> String {
     let mut out = String::new();
+    // A note above the example's opening brace belongs to the document, and the root never gets
+    // a header to hang it on.
+    for comment in &node.leading {
+        let _ = writeln!(out, "#{comment}");
+    }
     if let Value::Object(props) = &node.value {
-        write_table(&mut out, props, &[], node);
+        write_table(&mut out, props, &[], node, &mut Vec::new());
+        if let Some(text) = &node.trailing {
+            let _ = writeln!(out, "#{text}");
+        }
     } else {
-        let _ = writeln!(out, "{}", inline(&node.value));
+        let _ = writeln!(out, "{}{}", inline(&node.value), trailing(node));
+    }
+    // Anything written after the last member closes the document.
+    for comment in &node.inner {
+        let _ = writeln!(out, "#{comment}");
     }
     out
 }
@@ -26,14 +38,28 @@ pub fn to_string(node: &Node) -> String {
 /// TOML reads every key after a header as part of that table, so scalars have to come first.
 /// That is the one place the output's order differs from the source's, and the round-trip check
 /// in `render` is what proves the reordering changed nothing.
-fn write_table(out: &mut String, props: &[(String, Node)], path: &[&str], owner: &Node) {
+///
+/// `pending` carries the comments of tables that print no header of their own. A note above
+/// `"vendorDependencies"` has nowhere to sit when that key only implies `[vendorDependencies.x]`,
+/// so it waits here and is written above the first header that does appear.
+fn write_table(
+    out: &mut String,
+    props: &[(String, Node)],
+    path: &[&str],
+    owner: &Node,
+    pending: &mut Vec<String>,
+) {
     let (values, tables): (Vec<_>, Vec<_>) = props.iter().partition(|(_, node)| !is_table(node));
 
     // The root has no header, and neither does a table that only exists to hold other tables:
     // `[vendorDependencies.fzf]` already implies `vendorDependencies`.
-    if !path.is_empty() && (!values.is_empty() || !owner.inner.is_empty()) {
+    let prints_header = !path.is_empty() && (!values.is_empty() || !owner.inner.is_empty());
+    if prints_header {
         if !out.is_empty() {
             out.push('\n');
+        }
+        for comment in pending.drain(..) {
+            let _ = writeln!(out, "#{comment}");
         }
         for comment in &owner.leading {
             let _ = writeln!(out, "#{comment}");
@@ -44,9 +70,9 @@ fn write_table(out: &mut String, props: &[(String, Node)], path: &[&str], owner:
             .collect::<Vec<_>>()
             .join(".");
         let _ = writeln!(out, "[{header}]{}", trailing(owner));
-        for comment in &owner.inner {
-            let _ = writeln!(out, "#{comment}");
-        }
+    } else if !path.is_empty() {
+        pending.extend(owner.leading.iter().cloned());
+        pending.extend(owner.trailing.clone());
     }
 
     for (name, node) in values {
@@ -62,13 +88,21 @@ fn write_table(out: &mut String, props: &[(String, Node)], path: &[&str], owner:
         );
     }
 
+    // Written after the members, where the source had them: just before the closing brace. The
+    // root's own are left to `to_string`, which puts them at the end of the document.
+    if !path.is_empty() {
+        for comment in &owner.inner {
+            let _ = writeln!(out, "#{comment}");
+        }
+    }
+
     for (name, node) in tables {
         let Value::Object(inner) = &node.value else {
             unreachable!("partitioned on `is_table`");
         };
         let mut nested: Vec<&str> = path.to_vec();
         nested.push(name);
-        write_table(out, inner, &nested, node);
+        write_table(out, inner, &nested, node, pending);
     }
 }
 
@@ -214,6 +248,37 @@ mod tests {
         assert_eq!(
             to_string(&node),
             "# above\na = 'x' # → after\n\n[b]\n#...\n"
+        );
+    }
+
+    #[test]
+    fn keeps_comments_written_outside_the_members() {
+        let node = parse(
+            r#"// header
+{
+    "a": 1
+    // dangling
+}
+// footer"#,
+        )
+        .unwrap();
+        assert_eq!(to_string(&node), "# header\na = 1\n# dangling\n# footer\n");
+    }
+
+    #[test]
+    fn a_comment_above_an_implied_table_waits_for_the_first_header() {
+        let node = parse(
+            r#"{
+    // all the deps
+    "vendorDependencies": {
+        "x": { "version": "v1" }
+    }
+}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            to_string(&node),
+            "# all the deps\n[vendorDependencies.x]\nversion = 'v1'\n"
         );
     }
 

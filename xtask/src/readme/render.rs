@@ -1,5 +1,7 @@
 //! Turns one example's JSON into the three collapsible blocks the README shows.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result, bail};
 use jsonc_parser::ParseOptions;
 use serde_json::Value as Json;
@@ -48,6 +50,7 @@ pub fn group(json_source: &str, fence: &str, labels: Labels) -> Result<String> {
 
     verify(json_source, &yaml_text, &toml_text)
         .context("the generated YAML and TOML do not round-trip to the source example")?;
+    check_comments(&body, &yaml_text, &toml_text)?;
 
     Ok([
         block(labels.json, fence, json_source.trim_end(), true),
@@ -75,8 +78,63 @@ fn split_schema(mut node: Node) -> (Node, Option<String>) {
     let Value::String(url) = props[at].1.value.clone() else {
         return (node, None);
     };
-    props.remove(at);
+    let removed = props.remove(at).1;
+    // The key turns into a directive comment, so anything written about it moves to the top of
+    // the document rather than leaving with the key.
+    let mut carried = removed.leading;
+    carried.extend(removed.trailing);
+    carried.extend(removed.inner);
+    carried.extend(std::mem::take(&mut node.leading));
+    node.leading = carried;
     (node, Some(url))
+}
+
+/// Every comment the source carried has to survive into both generated formats.
+///
+/// The round-trip check compares data, and a dropped comment changes no data — so without this a
+/// note could vanish from a tab while the build stayed green, which is exactly the drift this
+/// command exists to prevent. A comment a format has no syntax for (inside a TOML inline table,
+/// say) fails here instead of disappearing; the fix is to move it in the example.
+fn check_comments(body: &Node, yaml_text: &str, toml_text: &str) -> Result<()> {
+    let mut comments = Vec::new();
+    collect_comments(body, &mut comments);
+
+    let mut wanted: BTreeMap<&String, usize> = BTreeMap::new();
+    for comment in &comments {
+        *wanted.entry(comment).or_default() += 1;
+    }
+
+    for (comment, count) in wanted {
+        let needle = format!("#{comment}");
+        for (format, rendered) in [("YAML", yaml_text), ("TOML", toml_text)] {
+            if rendered.matches(&needle).count() < count {
+                bail!(
+                    "the comment `//{comment}` has no place in the generated {format}; \
+                     move it in the example, above the property it describes"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_comments(node: &Node, into: &mut Vec<String>) {
+    into.extend(node.leading.iter().cloned());
+    into.extend(node.trailing.iter().cloned());
+    into.extend(node.inner.iter().cloned());
+    match &node.value {
+        Value::Object(props) => {
+            for (_, child) in props {
+                collect_comments(child, into);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                collect_comments(child, into);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Parses the generated text back with the same crates `vendorfiles_core` reads configs with,
@@ -177,6 +235,45 @@ mod tests {
     fn the_source_fence_tag_is_preserved() {
         let out = group("{ \"a\": 1 // n\n}", "jsonc", NAMES).unwrap();
         assert!(out.contains("```jsonc\n"), "{out}");
+    }
+
+    #[test]
+    fn a_comment_no_format_can_place_fails_instead_of_vanishing() {
+        // TOML has no syntax for a comment inside an inline table, and an object inside an array
+        // has to be one. Better a build failure naming the comment than a tab that quietly
+        // loses it.
+        let source = r#"{
+    "files": [
+        {
+            "a": "b" // note
+        }
+    ]
+}"#;
+        let error = format!("{:#}", group(source, "jsonc", NAMES).unwrap_err());
+        assert!(
+            error.contains("has no place in the generated TOML"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_comment_on_the_schema_key_moves_to_the_top() {
+        let source = r#"{
+    // editors pick this up
+    "$schema": "https://example.com/s.json",
+    "a": 1
+}"#;
+        let out = group(source, "jsonc", NAMES).unwrap();
+        assert!(
+            out.contains("```yml\n# yaml-language-server: $schema=https://example.com/s.json\n# editors pick this up\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "```toml\n#:schema https://example.com/s.json\n\n# editors pick this up\n"
+            ),
+            "{out}"
+        );
     }
 
     #[test]
