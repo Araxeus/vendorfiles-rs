@@ -98,16 +98,12 @@ fn split_schema(mut node: Node) -> (Node, Option<String>) {
 fn check_comments(body: &Node, yaml_text: &str, toml_text: &str) -> Result<()> {
     let mut comments = Vec::new();
     collect_comments(body, &mut comments);
+    let wanted = tally(comments);
 
-    let mut wanted: BTreeMap<&String, usize> = BTreeMap::new();
-    for comment in &comments {
-        *wanted.entry(comment).or_default() += 1;
-    }
-
-    for (comment, count) in wanted {
-        let needle = format!("#{comment}");
-        for (format, rendered) in [("YAML", yaml_text), ("TOML", toml_text)] {
-            if rendered.matches(&needle).count() < count {
+    for (format, rendered) in [("YAML", yaml_text), ("TOML", toml_text)] {
+        let written = tally(comments_in(rendered));
+        for (comment, count) in &wanted {
+            if written.get(comment).copied().unwrap_or_default() < *count {
                 bail!(
                     "the comment `//{comment}` has no place in the generated {format}; \
                      move it in the example, above the property it describes"
@@ -116,6 +112,47 @@ fn check_comments(body: &Node, yaml_text: &str, toml_text: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn tally(comments: Vec<String>) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for comment in comments {
+        *counts.entry(comment).or_default() += 1;
+    }
+    counts
+}
+
+/// The comment text of every comment in an emitted document, one entry per comment.
+///
+/// Searching the text for `#{comment}` instead would be fooled by one comment being a prefix of
+/// another — `# a` is a substring of `# above a`, so a dropped `// a` would look present. Both
+/// formats run a comment to the end of its line, start one only at the beginning of a line or
+/// after a space, and quote strings the same two ways, so skipping quoted spans is enough to
+/// read the real ones back exactly.
+fn comments_in(rendered: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in rendered.lines() {
+        let mut quote: Option<char> = None;
+        let mut previous = ' ';
+        let mut chars = line.char_indices();
+        while let Some((at, ch)) = chars.next() {
+            match (quote, ch) {
+                (None, '\'' | '"') => quote = Some(ch),
+                // An escape inside a basic string cannot end it.
+                (Some('"'), '\\') => {
+                    chars.next();
+                }
+                (Some(open), ch) if ch == open => quote = None,
+                (None, '#') if previous.is_whitespace() => {
+                    found.push(line[at + 1..].to_owned());
+                    break;
+                }
+                _ => {}
+            }
+            previous = ch;
+        }
+    }
+    found
 }
 
 fn collect_comments(node: &Node, into: &mut Vec<String>) {
@@ -184,7 +221,8 @@ fn normalize(value: Json) -> Json {
 
 #[cfg(test)]
 mod tests {
-    use super::{FILES, NAMES, group, verify};
+    use super::super::jsonc;
+    use super::{FILES, NAMES, check_comments, group, verify};
 
     #[test]
     fn renders_three_details_with_json_open() {
@@ -274,6 +312,36 @@ mod tests {
             ),
             "{out}"
         );
+    }
+
+    #[test]
+    fn a_comment_that_is_a_prefix_of_another_is_still_missed_when_dropped() {
+        let body = jsonc::parse(
+            r#"{
+    // above a
+    "x": 1, // a
+    "y": 2
+}"#,
+        )
+        .unwrap();
+        // A rendering that kept the long comment and lost the short one. `# a` is a substring of
+        // `# above a`, so a plain text search would call the lost one present.
+        let dropped = "# above a
+x: 1
+y: 2
+";
+        let error = format!("{:#}", check_comments(&body, dropped, dropped).unwrap_err());
+        assert!(error.contains("`// a`"), "{error}");
+    }
+
+    #[test]
+    fn a_hash_inside_a_value_is_not_mistaken_for_a_comment() {
+        let body = jsonc::parse(r#"{ "a": "https://example.com/x#y" }"#).unwrap();
+        let yaml = "a: https://example.com/x#y
+";
+        let toml = "a = 'https://example.com/x#y'
+";
+        assert!(check_comments(&body, yaml, toml).is_ok());
     }
 
     #[test]
