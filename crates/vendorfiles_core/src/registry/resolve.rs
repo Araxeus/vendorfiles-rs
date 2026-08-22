@@ -287,7 +287,8 @@ fn extraction(
         ));
     }
     // Every path is read under the directory the archive was unpacked into, so the same rule the
-    // outputs answer to applies going in: nothing may point out of it.
+    // outputs answer to applies going in: a `..` there would move a file from outside that
+    // directory into the dependency's folder.
     for input in &inputs {
         member_path(name, input)?;
     }
@@ -321,19 +322,34 @@ fn extraction(
 
 /// The relative path a listed member is written to, which is the member's own.
 ///
-/// The trust check [`output_name`] makes, without the flattening: every segment has to be a plain
-/// name, so nothing absolute, climbing or drive-qualified reaches `join_normalized` - which
-/// resolves `..` against the folder it joins onto, and would let one escape.
+/// The trust check [`output_name`] makes, without the flattening. Spelling is normalised the way
+/// the rest of the tool reads archive members - `./bin/tool`, `/bin/tool` and `bin//tool` all mean
+/// `bin/tool`, none of which changes where anything lands. What is refused is what could reach
+/// outside the directory the path belongs in: a `..` segment, which `join_normalized` resolves
+/// against that directory rather than ignoring, and a drive letter, which it cannot meaningfully
+/// join onto anything.
+///
+/// Note the scope. This says where a file goes *within* the dependency's folder; which folder that
+/// is remains the config's business, and an absolute `vendorFolder` there still puts the whole
+/// dependency wherever you like.
 fn member_path(name: &str, member: &str) -> Result<String> {
-    let segments: Vec<&str> = member.split(['/', '\\']).collect();
-    let plain = |segment: &&str| {
-        !segment.is_empty() && *segment != "." && *segment != ".." && !segment.contains(':')
+    let refuse = || VendorError::RegistryInvalidEntry {
+        name: name.to_owned(),
+        reason: format!("'{member}' is not a plain relative path"),
     };
-    if !segments.iter().all(plain) {
-        return Err(VendorError::RegistryInvalidEntry {
-            name: name.to_owned(),
-            reason: format!("'{member}' is not a plain relative path"),
-        });
+
+    let mut segments = Vec::new();
+    for segment in member.split(['/', '\\']) {
+        match segment {
+            // A leading, doubled or trailing separator, or a `.`: nothing to add.
+            "" | "." => {}
+            ".." => return Err(refuse()),
+            _ if segment.contains(':') => return Err(refuse()),
+            _ => segments.push(segment),
+        }
+    }
+    if segments.is_empty() {
+        return Err(refuse());
     }
     Ok(segments.join("/"))
 }
@@ -1086,23 +1102,46 @@ programs:
 
     #[test]
     fn a_listed_member_that_would_leave_the_vendor_folder_is_refused() {
-        // `join_normalized` resolves `..` against the folder, so a climbing segment escapes it.
+        // `join_normalized` resolves `..` against the folder rather than ignoring it, so a
+        // climbing segment escapes; a drive letter it cannot join onto anything at all.
         for bad in [
             "../outside",
             "conpty/../../outside",
-            "/etc/passwd",
             "C:/Windows/System32/evil.dll",
-            "conpty//OpenConsole.exe",
-            "conpty/",
+            "",
+            ".",
+            "/",
         ] {
-            assert!(member_path("x", bad).is_err(), "{bad} must be refused");
+            assert!(member_path("x", bad).is_err(), "{bad:?} must be refused");
         }
-        // A plain relative path is kept whole, separators normalised to the archive's own.
-        assert_eq!(member_path("x", "herdr.exe").unwrap(), "herdr.exe");
-        assert_eq!(
-            member_path("x", "conpty\\x64\\OpenConsole.exe").unwrap(),
-            "conpty/x64/OpenConsole.exe"
-        );
+        // Everything else is normalised rather than refused, because none of it changes where the
+        // file lands - the same spellings the members gate already treats as equivalent.
+        for (written, meant) in [
+            ("herdr.exe", "herdr.exe"),
+            ("conpty/x64/OpenConsole.exe", "conpty/x64/OpenConsole.exe"),
+            ("conpty\\x64\\OpenConsole.exe", "conpty/x64/OpenConsole.exe"),
+            ("./bin/tool", "bin/tool"),
+            ("/bin/tool", "bin/tool"),
+            ("bin//tool", "bin/tool"),
+            ("conpty/", "conpty"),
+        ] {
+            assert_eq!(member_path("x", written).unwrap(), meant, "{written:?}");
+        }
+    }
+
+    #[test]
+    fn where_a_dependency_lands_is_still_the_config_s_business() {
+        // The registry names files within the dependency's folder and nothing more. Which folder
+        // that is - `vendorFolder`, relative or absolute - is chosen by the config, which is why
+        // there is no such key here and why these rules cannot stop anyone installing anywhere.
+        let document = program(HERDR);
+        let entry = for_host("herdr", &document.programs["herdr"], "windows-x86_64").unwrap();
+        for (_, output) in extracted(&entry) {
+            assert!(
+                !std::path::Path::new(&output).has_root(),
+                "{output} should be relative to whatever folder the config picks"
+            );
+        }
     }
 
     #[test]
