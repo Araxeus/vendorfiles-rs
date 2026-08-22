@@ -9,7 +9,8 @@ use semver::Version;
 
 use crate::sh;
 
-/// Runs the release flow: clean check, version prompt, manifest update, format, commit, tag.
+/// Runs the release flow: clean check, version prompt, manifest and README update, format,
+/// commit, tag.
 pub fn run() -> Result<()> {
     let root = sh::workspace_root()?;
 
@@ -49,6 +50,15 @@ pub fn run() -> Result<()> {
     std::fs::write(&manifest_path, document.to_string())
         .with_context(|| format!("writing {}", manifest_path.display()))?;
     println!("Updated Cargo.toml to version {new_version}");
+
+    let readme_path = root.join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .with_context(|| format!("reading {}", readme_path.display()))?;
+    let rendered = crate::readme::regenerate(&set_readme_version(&readme, &new_version)?)
+        .context("regenerating the README's derived format tabs")?;
+    std::fs::write(&readme_path, rendered)
+        .with_context(|| format!("writing {}", readme_path.display()))?;
+    println!("Updated README.md to version v{new_version}");
 
     // Refresh Cargo.lock so the commit is self-consistent.
     sh::run(
@@ -144,6 +154,71 @@ fn replace_keeping_decor(slot: &mut toml_edit::Item, value: &str) {
     }
 }
 
+/// The `repository` of the self-vendoring example in the README's "Keeping vendor updated"
+/// section, which is how that example is found.
+const README_EXAMPLE: &str = "https://github.com/Araxeus/vendorfiles-rs";
+
+/// Retags the self-vendoring example in the README to `v{version}`.
+///
+/// Only the JSON is touched. The YAML and TOML tabs beside it are derived from it, so
+/// [`crate::readme::regenerate`] brings them along and there is one rendering rule rather than
+/// three. The block is found by its `repository` rather than by the version being replaced, so a
+/// README that has drifted is repaired instead of skipped.
+fn set_readme_version(markdown: &str, version: &Version) -> Result<String> {
+    let mut lines: Vec<String> = markdown.split('\n').map(str::to_owned).collect();
+    let mut patched = 0_usize;
+
+    let mut at = 0;
+    while at < lines.len() {
+        let Some(fence) = lines[at]
+            .trim_start()
+            .strip_prefix("```")
+            .map(str::trim)
+            .filter(|info| matches!(*info, "json" | "jsonc"))
+        else {
+            at += 1;
+            continue;
+        };
+        let Some(close) = lines[at + 1..]
+            .iter()
+            .position(|line| line.trim() == "```")
+            .map(|offset| at + 1 + offset)
+        else {
+            bail!(
+                "the `{fence}` block at README.md line {} is never closed",
+                at + 1
+            );
+        };
+
+        let body = &lines[at + 1..close];
+        let slot = body
+            .iter()
+            .any(|line| line.contains(README_EXAMPLE))
+            .then(|| {
+                body.iter()
+                    .position(|line| line.trim_start().starts_with("\"version\":"))
+            })
+            .flatten();
+        if let Some(offset) = slot {
+            let line = &lines[at + 1 + offset];
+            let indent = &line[..line.len() - line.trim_start().len()];
+            let comma = if line.trim_end().ends_with(',') {
+                ","
+            } else {
+                ""
+            };
+            lines[at + 1 + offset] = format!("{indent}\"version\": \"v{version}\"{comma}");
+            patched += 1;
+        }
+        at = close + 1;
+    }
+
+    if patched == 0 {
+        bail!("no JSON example in README.md declares `{README_EXAMPLE}` with a `version`");
+    }
+    Ok(lines.join("\n"))
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
@@ -162,7 +237,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, bump, current_version, set_version};
+    use super::{Level, bump, current_version, set_readme_version, set_version};
     use semver::Version;
 
     const MANIFEST: &str = "\
@@ -216,5 +291,76 @@ anyhow = \"1.0\"
             .parse()
             .unwrap();
         assert!(set_version(&mut document, &Version::parse("1.0.1").unwrap()).is_err());
+    }
+
+    const README: &str = "\
+## Keeping vendor updated
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    \"vendorDependencies\": {
+        \"vendorfiles-rs\": {
+            \"version\": \"v1.4.2\",
+            \"repository\": \"https://github.com/Araxeus/vendorfiles-rs\"
+        }
+    }
+}
+```
+
+</details>
+<!-- /formats -->
+";
+
+    #[test]
+    fn the_readme_example_is_retagged_in_place() {
+        let out = set_readme_version(README, &Version::parse("1.5.0").unwrap()).unwrap();
+        assert!(
+            out.contains("            \"version\": \"v1.5.0\","),
+            "{out}"
+        );
+        assert!(out.contains("## Keeping vendor updated"), "{out}");
+    }
+
+    #[test]
+    fn an_example_that_is_not_the_tool_is_left_alone() {
+        let source = README.replace("Araxeus/vendorfiles-rs", "mdbassit/Coloris");
+        let error = format!(
+            "{:#}",
+            set_readme_version(&source, &Version::parse("1.5.0").unwrap()).unwrap_err()
+        );
+        assert!(error.contains("no JSON example"), "{error}");
+    }
+
+    #[test]
+    fn an_unclosed_block_points_at_its_opening_fence() {
+        let source = README.replace("\n```\n\n</details>", "\n\n</details>");
+        let error = format!(
+            "{:#}",
+            set_readme_version(&source, &Version::parse("1.5.0").unwrap()).unwrap_err()
+        );
+        assert!(
+            error.contains("`json` block at README.md line 7"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_committed_readme_tracks_the_workspace_version() {
+        let root = crate::sh::workspace_root().unwrap();
+        let manifest: toml_edit::DocumentMut = std::fs::read_to_string(root.join("Cargo.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let version = current_version(&manifest).unwrap();
+        let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
+        assert_eq!(
+            set_readme_version(&readme, &version).unwrap(),
+            readme,
+            "the README's vendorfiles-rs example is not on v{version}; run `cargo xtask release`"
+        );
     }
 }
