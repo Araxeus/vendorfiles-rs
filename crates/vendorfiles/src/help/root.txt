@@ -13,4 +13,5 @@ Commands:
   install|add [options] <url/name> [version]  Install a dependency
   uninstall|remove [names...]                 Uninstall dependencies
   login|auth [token]                          Login to GitHub
+  completions <shell>                         Print a shell completion script
   help [command]                              display help for command

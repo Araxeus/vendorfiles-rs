@@ -19,6 +19,12 @@ use vendorfiles_core::ui;
 /// `login` runs without a config file: authenticating is not a project-scoped action, and the
 /// reference's blanket `preAction` hook made `vendor login` fail outside a project.
 pub async fn dispatch(cli: Cli) -> Result<()> {
+    // Before the config is looked for: a completion script has nothing to do with a project, and
+    // asking for one outside a project should not fail.
+    if let Command::Completions { shell } = &cli.command {
+        return completions(shell);
+    }
+
     if let Command::Login { token } = &cli.command {
         return match token {
             Some(token) => auth::login_with_token(token).await.map_err(Into::into),
@@ -112,6 +118,9 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
 
         // Handled before the workspace is loaded.
         Command::Login { .. } => unreachable!("login is dispatched without a workspace"),
+        Command::Completions { .. } => {
+            unreachable!("completions are dispatched without a workspace")
+        }
     }
 
     Ok(())
@@ -258,6 +267,93 @@ fn report_entry(session: &Session, name: &str, entry: &RawDependency) -> Result<
     vendorfiles_core::progress::print_out(&rendered);
     ui::info(format!("files would be written to {}", folder.display()));
     ui::info("nothing was downloaded or written");
+    Ok(())
+}
+
+/// The shells `vendor completions` can write a script for.
+const SHELLS: [(&str, clap_complete::Shell); 5] = [
+    ("bash", clap_complete::Shell::Bash),
+    ("elvish", clap_complete::Shell::Elvish),
+    ("fish", clap_complete::Shell::Fish),
+    ("powershell", clap_complete::Shell::PowerShell),
+    ("zsh", clap_complete::Shell::Zsh),
+];
+
+/// The command the completion scripts describe.
+///
+/// Not the parser: `Cli` turns clap's help and version handling off, because `help::intercept`
+/// answers `-h`, `-v` and `help [command]` from captured text before parsing, so Commander's
+/// wording and exit codes survive. Generating from the parser alone would therefore promise less
+/// than the binary accepts, so those three go back on here. Nothing parses this command; only its
+/// shape is read.
+fn completion_command() -> clap::Command {
+    use clap::{Arg, ArgAction, Command as ClapCommand, CommandFactory};
+
+    // Wording taken from the served help text, so what a shell shows is what `vendor --help`
+    // prints.
+    let help_flag = || {
+        Arg::new("help")
+            .short('h')
+            .long("help")
+            .help("display help for command")
+            .action(ArgAction::Help)
+    };
+
+    let mut command = Cli::command()
+        .version(vendorfiles_core::VERSION)
+        .arg(help_flag())
+        .arg(
+            Arg::new("version")
+                .short('v')
+                .long("version")
+                .help("output the current version")
+                .action(ArgAction::Version),
+        );
+
+    // Every subcommand takes `-h` as well, and every one of them disables clap's own. `help` is
+    // appended afterwards deliberately: `vendor help -h` is a usage error, so it must not gain one.
+    let topics: Vec<String> = command
+        .get_subcommands()
+        .map(|sub| sub.get_name().to_owned())
+        .collect();
+    for topic in &topics {
+        command = command.mut_subcommand(topic, |sub| sub.arg(help_flag()));
+    }
+
+    command.subcommand(
+        ClapCommand::new("help")
+            .about("display help for command")
+            // `help help` is not a topic, so the names collected above are exactly the list.
+            .arg(
+                Arg::new("command")
+                    .value_name("command")
+                    .value_parser(topics),
+            ),
+    )
+}
+
+/// Writes a completion script for `shell` to stdout.
+///
+/// Generated from the parser itself, so it stays in step with the flags rather than being a second
+/// description of them that has to be maintained.
+fn completions(shell: &str) -> Result<()> {
+    let wanted = shell.to_ascii_lowercase();
+    let Some((_, generator)) = SHELLS.iter().find(|(name, _)| *name == wanted) else {
+        let accepted = SHELLS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!("unknown shell '{shell}'. Expected one of {accepted}");
+    };
+
+    let mut command = completion_command();
+    clap_complete::generate(
+        *generator,
+        &mut command,
+        "vendor",
+        &mut std::io::stdout().lock(),
+    );
     Ok(())
 }
 

@@ -1,0 +1,15 @@
+Usage: vendor completions <shell>
+
+Print a completion script for a shell to stdout.
+
+Arguments:
+  shell       bash, elvish, fish, powershell or zsh
+
+Options:
+  -h, --help  display help for command
+
+Examples:
+    vendor completions bash > /etc/bash_completion.d/vendor
+    vendor completions zsh > "${fpath[1]}/_vendor"
+    vendor completions fish > ~/.config/fish/completions/vendor.fish
+    vendor completions powershell >> $PROFILE
