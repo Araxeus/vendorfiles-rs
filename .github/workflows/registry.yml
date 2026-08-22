@@ -32,8 +32,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Resolves every entry for every host it claims, then checks the asset it names is in the
-      # release GitHub actually publishes. Also downloads one asset per entry — this runner's own
-      # platform where the entry covers it — and checks the `member` really is inside it. Reading
+      # release GitHub actually publishes. Also downloads one asset per entry - this runner's own
+      # platform where the entry covers it - and checks the `member` really is inside it. Reading
       # inside every asset for every platform would be gigabytes, so one platform per entry it is.
       - name: Verify against live releases
         env:

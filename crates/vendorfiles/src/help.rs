@@ -1,7 +1,7 @@
 //! Commander-compatible help and version routing.
 //!
-//! Help must be answered before validation — `vendor install -h` prints help rather than
-//! complaining about the missing `<url/name>` — so it is resolved by scanning argv up front.
+//! Help must be answered before validation - `vendor install -h` prints help rather than
+//! complaining about the missing `<url/name>` - so it is resolved by scanning argv up front.
 
 use crate::cli::{first_operand, locate_command};
 use crate::spec;
@@ -13,7 +13,7 @@ pub enum Intercept {
     Print(&'static str),
     /// Print the version to stdout and exit 0.
     Version,
-    /// Print the root help to stderr and exit 1 — no command, or `help <unknown>`.
+    /// Print the root help to stderr and exit 1 - no command, or `help <unknown>`.
     UsageError,
     /// Nothing to intercept; hand over to the parser.
     Parse,

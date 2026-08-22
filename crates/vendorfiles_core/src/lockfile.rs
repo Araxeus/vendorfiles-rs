@@ -1,4 +1,4 @@
-//! `vendor-lock.json` — the record of what was actually written into a dependency folder.
+//! `vendor-lock.json` - the record of what was actually written into a dependency folder.
 //!
 //! Field order (`repository`, `version`, `files`) and key order inside `files` are part of the
 //! on-disk format, so every map here is an [`IndexMap`].
@@ -46,7 +46,7 @@ fn replace_version_in_target(target: &FileTarget, version: &str) -> FileTarget {
 
 /// Projects a config `files` array into the lockfile's `files` map.
 ///
-/// Later entries overwrite earlier ones by key while keeping the earlier key's position —
+/// Later entries overwrite earlier ones by key while keeping the earlier key's position -
 /// the semantics of repeated `Object.assign` in the reference.
 #[must_use]
 pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFiles {

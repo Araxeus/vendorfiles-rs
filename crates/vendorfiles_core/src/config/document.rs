@@ -1,7 +1,7 @@
 //! The editable config document.
 //!
-//! Write-back must round-trip keys the tool does not model — `package.json` is a config file
-//! too — so the whole document is kept, not a projection of it. The mutation surface is
+//! Write-back must round-trip keys the tool does not model - `package.json` is a config file
+//! too - so the whole document is kept, not a projection of it. The mutation surface is
 //! deliberately three operations wide, which is what keeps the two backing representations
 //! (structural value for JSON/YAML, `toml_edit` for TOML) honest.
 

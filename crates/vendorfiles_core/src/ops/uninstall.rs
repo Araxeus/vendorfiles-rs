@@ -1,4 +1,4 @@
-//! `uninstall` — remove a dependency's files, its lock entry, and its config entry.
+//! `uninstall` - remove a dependency's files, its lock entry, and its config entry.
 
 use crate::error::{Result, VendorError};
 use crate::fsx::delete_file_and_empty_folders;
@@ -10,7 +10,7 @@ use crate::ops::Session;
 impl Session {
     /// Removes a dependency entirely.
     ///
-    /// Files are deleted on a best-effort basis — a file the user already removed must not
+    /// Files are deleted on a best-effort basis - a file the user already removed must not
     /// stop the config entry from going away.
     ///
     /// # Errors

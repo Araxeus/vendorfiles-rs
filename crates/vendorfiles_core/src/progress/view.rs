@@ -43,7 +43,7 @@ const BAR_MAX: usize = 28;
 /// The widest the summary bar grows, for the same reason.
 const SUMMARY_BAR: usize = 24;
 
-/// A row that is only waiting gets a static mark, not a spinner — eight spinners for work that
+/// A row that is only waiting gets a static mark, not a spinner - eight spinners for work that
 /// is not moving reads as far busier than the run actually is.
 const IDLE_MARK: &str = "·";
 
@@ -55,7 +55,7 @@ const REGION_WIDTH: u16 = 84;
 
 /// How tall the region is for a given number of worker rows.
 ///
-/// A run with no rows to show — `outdated`, or a project already up to date — has no bytes to
+/// A run with no rows to show - `outdated`, or a project already up to date - has no bytes to
 /// report either, so it loses the rule and the footer and sits in three lines.
 #[must_use]
 pub const fn height(rows: usize) -> u16 {
@@ -340,7 +340,7 @@ fn human(bytes: u64) -> String {
     format!("{value:.1} {unit}")
 }
 
-/// `1.2/2.0 MiB` — both figures in the larger one's unit, so they can be compared at a glance.
+/// `1.2/2.0 MiB` - both figures in the larger one's unit, so they can be compared at a glance.
 fn transferred(done: u64, expected: u64) -> String {
     let (divisor, unit) = unit_for(expected.max(done));
     if unit == "B" {
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn a_vacated_row_stays_blank_instead_of_the_rows_below_moving_up() {
         // The renderer must not compact. If the middle dependency finishes, the one under it
-        // has to stay where it is — that sliding is what made the display look like it was
+        // has to stay where it is - that sliding is what made the display look like it was
         // jumping around.
         let mut state = with(vec![Stage::Waiting, Stage::Waiting, Stage::Waiting], 3);
         assert_eq!(state.selection(), [Some(0), Some(1), Some(2)]);

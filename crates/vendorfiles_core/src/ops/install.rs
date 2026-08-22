@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::archive;
 use crate::error::{Result, VendorError};
-use crate::fsx::{self, delete_file_and_empty_folders, join_normalized, stream_to_file};
+use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
     VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
@@ -308,7 +308,7 @@ async fn remove_previously_installed(
     lockfile_path: &Path,
 ) -> Result<()> {
     for file in files_from_lockfile(lockfile_path, name).await {
-        let path = join_normalized(folder, &[file.as_str()]);
+        let path = anchor(folder, file.as_str());
         if !path.exists() {
             continue;
         }
@@ -398,7 +398,7 @@ async fn download_repo_file(
             source: Box::new(source),
         })?;
 
-    let save_path = join_normalized(folder, &[output.as_str()]);
+    let save_path = anchor(folder, output.as_str());
     let transfer = progress.transfer(response.content_length());
     stream_to_file(response, &save_path, true, Some(&transfer)).await?;
     drop(transfer);
@@ -429,7 +429,7 @@ async fn download_release_file(
         let FileTarget::Rename(output) = &spec.output else {
             unreachable!("extraction_pairs returns None only for Rename");
         };
-        let save_path = join_normalized(folder, &[replace_version(output, version).as_str()]);
+        let save_path = anchor(folder, replace_version(output, version).as_str());
         let transfer = progress.transfer(total);
         stream_to_file(response, &save_path, true, Some(&transfer)).await?;
         drop(transfer);
@@ -456,7 +456,7 @@ async fn download_release_file(
     let mut saved = Vec::with_capacity(pairs.len());
     for (from, to) in pairs {
         let source = join_normalized(&extracted, &[replace_version(&from, version).as_str()]);
-        let destination = join_normalized(folder, &[replace_version(&to, version).as_str()]);
+        let destination = anchor(folder, replace_version(&to, version).as_str());
         move_extracted(&source, &destination).await?;
         saved.push(destination);
     }

@@ -2,7 +2,7 @@
 //!
 //! Nothing here knows about a terminal. The renderer reads a snapshot of this and draws it; the
 //! rest of the crate only ever mutates it. Keeping the two apart is what makes the display
-//! testable — a frame is a function of a state, and both halves can be checked on their own.
+//! testable - a frame is a function of a state, and both halves can be checked on their own.
 
 use std::borrow::Cow;
 use std::time::Instant;
@@ -76,7 +76,7 @@ pub enum Stage {
     /// Settled, showing what happened to it.
     ///
     /// It keeps its row rather than leaving, so a completed dependency is reported in place
-    /// instead of being pushed above the region — which moved the region down the screen once
+    /// instead of being pushed above the region - which moved the region down the screen once
     /// per dependency.
     Done {
         /// How it ended, which decides the mark and the colour.
@@ -103,7 +103,7 @@ impl Stage {
     /// How badly this dependency needs one of the limited rows, lowest first.
     ///
     /// `None` means it has nothing to show. Committing outranks downloading because it is the
-    /// head of the ordered commit loop — the one thing everything else is waiting for — and
+    /// head of the ordered commit loop - the one thing everything else is waiting for - and
     /// downloading outranks waiting so that a backlog of finished downloads can never hide the
     /// transfers that are actually moving.
     #[must_use]
@@ -154,7 +154,7 @@ pub struct RunState {
     /// Which dependency is shown on each worker row, `None` for an empty one.
     ///
     /// A dependency keeps the row it was given until it has nothing left to show. Re-deriving
-    /// the list every frame instead — even sorted into config order — slides every row up
+    /// the list every frame instead - even sorted into config order - slides every row up
     /// whenever one of them finishes, which on a large config is continuous motion.
     pub slots: Vec<Option<DepId>>,
     /// Bytes received across every dependency, for the footer.
@@ -203,14 +203,14 @@ impl RunState {
     ///
     /// A dependency **keeps its row** until it has nothing left to show; a row that frees up is
     /// refilled in place. That is the whole point: rows are a set of places, not a list that
-    /// closes up when one of its members leaves. Re-deriving the list every frame — even sorted
-    /// into config order — moves every row below whichever one finished, and with a large config
+    /// closes up when one of its members leaves. Re-deriving the list every frame - even sorted
+    /// into config order - moves every row below whichever one finished, and with a large config
     /// finishing something every few hundred milliseconds, the display never stops moving.
     ///
     /// Empty rows are filled by [`Stage::priority`], then config order, so:
     ///
     /// * the first rows to fill do so in config order, and read like the file;
-    /// * a committing dependency — the one everything else is queued behind — always has a row;
+    /// * a committing dependency - the one everything else is queued behind - always has a row;
     /// * a backlog of finished downloads can never hide a transfer that is still moving, because
     ///   an active dependency will evict a merely waiting one when nothing is free.
     pub fn assign(&mut self) {
@@ -272,7 +272,7 @@ impl RunState {
 
     /// The row whose occupant needs it least, and how much it needs it.
     ///
-    /// Ties go to the dependency earliest in the config, which — because commits are ordered — is
+    /// Ties go to the dependency earliest in the config, which - because commits are ordered - is
     /// the one that finished longest ago. That keeps the most recent results on screen.
     fn worst_row(&self) -> Option<(usize, u8)> {
         self.slots

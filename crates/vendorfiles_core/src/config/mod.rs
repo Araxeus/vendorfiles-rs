@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::error::{Result, VendorError};
-use crate::fsx::{join_normalized, normalize, real_path};
+use crate::fsx::{anchor, join_normalized, normalize, real_path};
 use crate::model::{DefaultOptions, RawDependency, VendorConfig};
 use crate::template::replace_vendor_folder;
 
@@ -221,22 +221,6 @@ fn is_falsy(value: &serde_json::Value) -> bool {
     }
 }
 
-/// Anchors a configured folder.
-///
-/// A relative folder hangs off the config file's directory, so a checked-in project keeps
-/// working wherever it is cloned. An absolute one names a destination outside the project and
-/// is taken at its word.
-fn anchor_folder(base: &Path, folder: &str) -> PathBuf {
-    let path = Path::new(folder);
-    // `has_root` rather than `is_absolute` so a leading separator counts on Windows too;
-    // `C:relative`, which has no root, stays relative on both.
-    if path.has_root() {
-        normalize(path)
-    } else {
-        join_normalized(base, &[folder])
-    }
-}
-
 /// The folder a dependency's files land in.
 ///
 /// A dependency's own `vendorFolder` (with `{vendorFolder}` expanded) is used verbatim;
@@ -250,8 +234,8 @@ pub fn dependency_folder(
 ) -> PathBuf {
     let base = config_path.parent().unwrap_or_else(|| Path::new("."));
     vendor_folder.map_or_else(
-        || join_normalized(&anchor_folder(base, &config.vendor_folder), &[name]),
-        |folder| anchor_folder(base, &replace_vendor_folder(folder, &config.vendor_folder)),
+        || join_normalized(&anchor(base, &config.vendor_folder), &[name]),
+        |folder| anchor(base, &replace_vendor_folder(folder, &config.vendor_folder)),
     )
 }
 

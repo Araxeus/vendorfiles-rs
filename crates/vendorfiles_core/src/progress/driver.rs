@@ -32,7 +32,7 @@ const TICK: Duration = Duration::from_millis(80);
 /// Set once the terminal has been given back, to keep any later frame from taking it again.
 ///
 /// `Terminal::draw` hides the cursor on every frame, so a frame drawn after [`show_cursor`] would
-/// undo it — and on the interrupt path the process exits immediately afterwards, with no further
+/// undo it - and on the interrupt path the process exits immediately afterwards, with no further
 /// frame to put things right. `Stop` alone cannot prevent that: it queues behind every pending
 /// `Print`. Only [`draw`] checks this, so teardown still gets its held lines out.
 static STOPPING: AtomicBool = AtomicBool::new(false);
@@ -40,7 +40,7 @@ static STOPPING: AtomicBool = AtomicBool::new(false);
 /// Held for the moment a frame is written, and for the moment the cursor is given back.
 ///
 /// The flag on its own is a check, not a guarantee: [`draw`] can read it, wait on a state lock
-/// that a worker thread is holding, and only then write its frame — hiding the cursor after
+/// that a worker thread is holding, and only then write its frame - hiding the cursor after
 /// [`show_cursor`] has shown it. This makes the two mutually exclusive, so the decision to skip a
 /// frame and the frame itself cannot be split apart. It also gives the flag its ordering, which is
 /// why `Relaxed` is enough for it.
@@ -202,7 +202,7 @@ fn reopen(terminal: &mut Term, rows: usize) -> Option<Term> {
 /// Erases the region and puts the cursor back at its first row.
 ///
 /// `Terminal::clear` erases the viewport but leaves the cursor at the *bottom* of it. Anything
-/// written next therefore starts below a band of rows that have just been blanked — which is
+/// written next therefore starts below a band of rows that have just been blanked - which is
 /// where the gap above the region on resize, and the gap below it after teardown, both came from.
 fn wipe(terminal: &mut Term) {
     // The viewport's own position on screen, which is what the cursor has to go back to.
@@ -253,7 +253,7 @@ fn close(terminal: &mut Term) {
 /// [`close`] has to put it back.
 pub fn show_cursor() {
     // Under the lock and before the write: from here on the cursor belongs to the caller, and no
-    // frame — including one already decided on — may hide it again.
+    // frame - including one already decided on - may hide it again.
     let _painting = painting();
     STOPPING.store(true, Ordering::Relaxed);
     let mut out = io::stdout();

@@ -1,7 +1,7 @@
 //! The registry file's wire format.
 //!
 //! Both structs refuse unknown fields. A registry that grows a key this build does not understand
-//! is then a loud error rather than something silently ignored — which matters because the file is
+//! is then a loud error rather than something silently ignored - which matters because the file is
 //! remote data that decides what gets downloaded. The cost is that adding a field means bumping
 //! [`SUPPORTED_VERSION`], and that is the right way round for a trust boundary.
 //!
@@ -53,10 +53,10 @@ pub struct Program {
     pub asset: Option<String>,
     /// The path inside that asset, shared by every target.
     ///
-    /// Omitted when the asset *is* the executable — plenty of projects publish a bare binary
+    /// Omitted when the asset *is* the executable - plenty of projects publish a bare binary
     /// rather than an archive.
     #[serde(default)]
-    pub member: Option<String>,
+    pub member: Option<Member>,
     /// The name to save it under, when the basename is not what you want to type.
     ///
     /// `ox-macos` and `shfmt_v3.13.1_linux_amd64` are assets; `ox` and `shfmt` are commands.
@@ -67,6 +67,43 @@ pub struct Program {
     pub targets: IndexMap<String, Target>,
 }
 
+/// What to take out of an asset: one path, the several a program needs together, or those
+/// several under names of your choosing.
+///
+/// One path is the ordinary case, and its basename is the file that lands. The other two are for
+/// an archive whose executable cannot run alone - `herdr.exe` loads the `conpty/` directory
+/// shipped beside it. A list writes every path out as it stands, directories and all; a map does
+/// the same but says where each one goes, which is how `x64/programz.exe` becomes `program.exe`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Member {
+    /// `member: "fd-v{version}-{target}/fd{exe}"`.
+    One(String),
+    /// `member: [herdr.exe, conpty/conpty.dll, …]`.
+    Many(Vec<String>),
+    /// `member: { x64/programz.exe: program.exe, data.bin: data.bin }`.
+    Mapped(IndexMap<String, String>),
+}
+
+impl Member {
+    /// The paths inside the asset it names, in order, whichever form was written.
+    #[must_use]
+    pub fn inputs(&self) -> Vec<&String> {
+        match self {
+            Self::One(path) => vec![path],
+            Self::Many(paths) => paths.iter().collect(),
+            Self::Mapped(paths) => paths.keys().collect(),
+        }
+    }
+
+    /// Whether it names the one file that *is* the program, which is what decides how the output
+    /// is named: alone it lands under its basename, and `as` may rename it.
+    #[must_use]
+    pub const fn is_single(&self) -> bool {
+        matches!(self, Self::One(_))
+    }
+}
+
 /// What one host gets.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -75,6 +112,9 @@ pub enum Target {
     Triple(String),
     /// A spelled-out asset, for projects whose names follow no pattern.
     Explicit(Explicit),
+    /// Several of them, for a release that splits what one host needs across more than one asset
+    /// - an archive holding the program, say, beside a loose file it reads.
+    Several(Vec<Explicit>),
 }
 
 /// One host's asset, named outright.
@@ -85,7 +125,7 @@ pub struct Explicit {
     pub asset: String,
     /// The path to the executable inside it, or omitted when the asset is the executable.
     #[serde(default)]
-    pub member: Option<String>,
+    pub member: Option<Member>,
     /// The name to save it under; defaults to the basename of whichever of the two is used.
     #[serde(rename = "as", default)]
     pub output: Option<String>,
@@ -93,7 +133,7 @@ pub struct Explicit {
 
 #[cfg(test)]
 mod tests {
-    use super::{Document, SUPPORTED_VERSION, Target};
+    use super::{Document, Member, SUPPORTED_VERSION, Target};
 
     const COMPACT: &str = r#"
 version: 1
@@ -141,7 +181,104 @@ programs:
         let Target::Explicit(explicit) = &document.programs["fzf"].targets["windows-x86_64"] else {
             panic!("expected the explicit form");
         };
-        assert_eq!(explicit.member.as_deref(), Some("fzf.exe"));
+        assert_eq!(
+            explicit.member.as_ref().map(Member::inputs),
+            Some(vec![&"fzf.exe".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_member_list_parses() {
+        // The form that lets one target take a whole layout out of an archive.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  herdr:
+    repository: https://github.com/herdrdev/herdr
+    targets:
+      windows-x86_64:
+        asset: "{release}/herdr-windows-x86_64.zip"
+        member:
+          - herdr.exe
+          - conpty/x64/OpenConsole.exe
+"#,
+        )
+        .expect("valid");
+        let Target::Explicit(explicit) = &document.programs["herdr"].targets["windows-x86_64"]
+        else {
+            panic!("expected the explicit form");
+        };
+        let member = explicit.member.as_ref().expect("a member");
+        assert!(
+            !member.is_single(),
+            "a sequence must not collapse to one path"
+        );
+        assert_eq!(member.inputs(), ["herdr.exe", "conpty/x64/OpenConsole.exe"]);
+    }
+
+    #[test]
+    fn a_member_map_parses() {
+        // The form that renames as it extracts, for a file buried in a subdirectory.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        asset: "{release}/programz-win.zip"
+        member:
+          x64/programz.exe: program.exe
+          data.bin: data.bin
+"#,
+        )
+        .expect("valid");
+        let Target::Explicit(explicit) = &document.programs["programz"].targets["windows-x86_64"]
+        else {
+            panic!("expected the explicit form");
+        };
+        let member = explicit.member.as_ref().expect("a member");
+        assert!(!member.is_single(), "a map must not collapse to one path");
+        assert_eq!(member.inputs(), ["x64/programz.exe", "data.bin"]);
+    }
+
+    #[test]
+    fn a_host_can_name_several_assets() {
+        // A release that splits what one host needs: an archive, and a loose file beside it.
+        let document = parse(
+            r#"
+version: 1
+programs:
+  split:
+    repository: https://github.com/example/split
+    targets:
+      windows-x86_64:
+        - asset: "{release}/split-win.zip"
+          member:
+            x64/splitz.exe: split.exe
+        - asset: "{release}/split-extra.dll"
+      linux-x86_64:
+        asset: "{release}/split-linux"
+        as: split
+"#,
+        )
+        .expect("valid");
+        let targets = &document.programs["split"].targets;
+        let Target::Several(several) = &targets["windows-x86_64"] else {
+            panic!(
+                "expected several assets, found {:?}",
+                targets["windows-x86_64"]
+            );
+        };
+        assert_eq!(several.len(), 2);
+        assert_eq!(several[1].asset, "{release}/split-extra.dll");
+        // The forms mix freely: the other host still names one asset outright.
+        assert!(
+            matches!(targets["linux-x86_64"], Target::Explicit(_)),
+            "a lone map must not be read as a list"
+        );
     }
 
     #[test]
@@ -225,8 +362,8 @@ programs:
             .err()
             .expect("the probe field must be rejected")
             .to_string();
-        // serde words the list three ways depending on its length — "expected one of `a`, `b`",
-        // "expected `a` or `b`", "expected `a`" — so take every backticked name after "expected"
+        // serde words the list three ways depending on its length - "expected one of `a`, `b`",
+        // "expected `a` or `b`", "expected `a`" - so take every backticked name after "expected"
         // rather than matching one phrasing.
         let (_, listed) = error
             .split_once("expected ")
@@ -358,6 +495,40 @@ programs:
     asset: "{release}/untracked-{target}{ext}"
     targets:
       linux-x86_64: x86_64-unknown-linux-gnu
+"#,
+        ),
+        (
+            "a shared member naming every file the executable needs beside it",
+            r#"
+version: 1
+programs:
+  layout:
+    repository: https://github.com/example/layout
+    asset: "{release}/layout-{target}{ext}"
+    member:
+      - "layout{exe}"
+      - support/data.bin
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a host naming several assets, renaming out of one of them",
+            r#"
+version: 1
+programs:
+  programz:
+    repository: https://github.com/example/programz
+    targets:
+      windows-x86_64:
+        - asset: "{release}/programz-win.zip"
+          member:
+            x64/programz.exe: program.exe
+            data.bin: data.bin
+        - asset: "{release}/programz-extra.dll"
+      linux-x86_64:
+        asset: "{release}/programz-linux"
+        as: programz
 "#,
         ),
     ];
@@ -585,6 +756,118 @@ programs:
 version: 2
 programs: {}
 ",
+        ),
+        (
+            "a member list beside an `as` with no single file to rename",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    asset: "{release}/renamed{ext}"
+    as: renamed
+    member:
+      - "renamed{exe}"
+      - support/data.bin
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a target whose member list is paired with an `as`",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    targets:
+      windows-x86_64:
+        asset: "{release}/renamed.zip"
+        as: renamed.exe
+        member:
+          - renamed.exe
+          - support/data.bin
+"#,
+        ),
+        (
+            "a member list with nothing in it",
+            r#"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    asset: "{release}/empty{ext}"
+    member: []
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a member list naming the same file twice",
+            r#"
+version: 1
+programs:
+  twice:
+    repository: https://github.com/example/twice
+    asset: "{release}/twice{ext}"
+    member:
+      - "twice{exe}"
+      - "twice{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+"#,
+        ),
+        (
+            "a member map beside an `as` with no single file to rename",
+            r#"
+version: 1
+programs:
+  renamed:
+    repository: https://github.com/example/renamed
+    targets:
+      linux-x86_64:
+        asset: "{release}/renamed.tar.gz"
+        as: renamed
+        member:
+          bin/renamedz: renamed
+"#,
+        ),
+        (
+            "a member map with nothing in it",
+            r#"
+version: 1
+programs:
+  empty:
+    repository: https://github.com/example/empty
+    targets:
+      linux-x86_64:
+        asset: "{release}/empty.tar.gz"
+        member: {}
+"#,
+        ),
+        (
+            "a host naming no asset at all",
+            r"
+version: 1
+programs:
+  nothing:
+    repository: https://github.com/example/nothing
+    targets:
+      linux-x86_64: []
+",
+        ),
+        (
+            "a host naming the same asset twice",
+            r#"
+version: 1
+programs:
+  twice:
+    repository: https://github.com/example/twice
+    targets:
+      linux-x86_64:
+        - asset: "{release}/twice.tar.gz"
+        - asset: "{release}/twice.tar.gz"
+"#,
         ),
     ];
 

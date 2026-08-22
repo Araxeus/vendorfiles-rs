@@ -26,6 +26,17 @@
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
 # member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, crx or xpi.
 #
+# A `member` may also name more than one file, for a program whose executable cannot run alone.
+# The forms name their outputs differently, because they mean different things. One member is the
+# executable, so it lands under its basename - `fd-v10.3.0-x86_64-pc-windows-msvc/fd.exe` becomes
+# `fd.exe` - and `as` may rename it. A *list* is a layout, so every path is written out as it
+# stands, directories included. A *map* is that layout with each destination spelled out, which is
+# how `x64/programz.exe` arrives as `program.exe`. Naming more than one file leaves `as` nothing
+# single to rename, so it is refused beside either.
+#
+# A host may name *several assets* instead of one, as a list of `asset`/`member` blocks, for a
+# release that splits what one host needs across an archive and a loose file beside it.
+#
 # `releaseRegex` narrows which tags count, for repositories that publish several trains of
 # releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`
 # to track it by commit; it takes no `targets`, being the same everywhere.
@@ -229,6 +240,34 @@ programs:
         as: "ox"
       linux-x86_64:
         asset: "{release}/ox"
+
+  # Bare binaries everywhere but Windows, where the release is a zip and `herdr.exe` loads the
+  # `conpty/` directory shipped beside it - so that target lists every file it needs rather than
+  # one. The two `OpenConsole.exe` builds share a basename, which only the list form can keep
+  # apart. THIRD-PARTY-NOTICES/ is left out: licence text, not something the program reads.
+  herdr:
+    repository: https://github.com/herdrdev/herdr
+    targets:
+      windows-x86_64:
+        asset: "{release}/herdr-windows-x86_64.zip"
+        member:
+          - herdr.exe
+          - conpty/conpty.dll
+          - conpty/herdr-conpty.json
+          - conpty/x64/OpenConsole.exe
+          - conpty/arm64/OpenConsole.exe
+      macos-x86_64:
+        asset: "{release}/herdr-macos-x86_64"
+        as: herdr
+      macos-aarch64:
+        asset: "{release}/herdr-macos-aarch64"
+        as: herdr
+      linux-x86_64:
+        asset: "{release}/herdr-linux-x86_64"
+        as: herdr
+      linux-aarch64:
+        asset: "{release}/herdr-linux-aarch64"
+        as: herdr
 
   # Windows only by nature: it forwards notifications from WSL to the Windows host.
   wsl-notify-send:

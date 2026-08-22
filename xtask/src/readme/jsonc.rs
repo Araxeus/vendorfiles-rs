@@ -57,7 +57,7 @@ struct Entry {
 
 /// One pass over a container's children, attaching each comment to the value it belongs to.
 ///
-/// Returns the container's members and the comments left over — those sit inside a container
+/// Returns the container's members and the comments left over - those sit inside a container
 /// with no members of its own, which is how `{ //... }` is written.
 fn collect(children: &[CstNode]) -> Result<(Vec<Entry>, Vec<String>)> {
     let mut out: Vec<Entry> = Vec::new();

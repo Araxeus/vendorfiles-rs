@@ -1,7 +1,7 @@
 //! Filesystem helpers with Node-compatible path semantics.
 //!
 //! Paths appear verbatim in the tool's output (`INFO: Saved <path>`), so joining and
-//! normalisation must match Node's `path.join` / `fs.realpath` rather than Rust's defaults —
+//! normalisation must match Node's `path.join` / `fs.realpath` rather than Rust's defaults -
 //! in particular Rust's `canonicalize` returns `\\?\C:\…` on Windows, which Node never prints.
 
 use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
@@ -14,7 +14,7 @@ use crate::progress::Transfer;
 
 /// Lexically normalises a path: drops `.`, resolves `..`, and unifies separators.
 ///
-/// Purely textual, like Node's `path.normalize` — the filesystem is never consulted.
+/// Purely textual, like Node's `path.normalize` - the filesystem is never consulted.
 #[must_use]
 pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -66,6 +66,25 @@ pub fn join_normalized(base: &Path, parts: &[&str]) -> PathBuf {
         joined.push_str(part);
     }
     normalize(Path::new(&joined))
+}
+
+/// Where a declared path lands, given the folder it belongs to.
+///
+/// A relative path hangs off `folder`, which is the ordinary case and keeps a checked-in project
+/// working wherever it is cloned. An absolute one names a destination of its own and is taken at
+/// its word: `vendorFolder` has always struck that bargain, and a single file gets it too, so one
+/// binary can be dropped somewhere on `PATH` without moving the rest of the dependency.
+///
+/// The one rule for *where things go*, so placing a file and deleting it later cannot disagree.
+#[must_use]
+pub fn anchor(folder: &Path, path: &str) -> PathBuf {
+    // `has_root` rather than `is_absolute` so a leading separator counts on Windows too;
+    // `C:relative`, which has no root, stays relative on both.
+    if Path::new(path).has_root() {
+        normalize(Path::new(path))
+    } else {
+        join_normalized(folder, &[path])
+    }
 }
 
 /// Whether `text` begins with a plain drive root such as `C:\`.
@@ -120,8 +139,8 @@ pub fn is_running_executable(path: &Path) -> bool {
 
 /// Replaces the running binary with the file at `staged`, consuming it.
 ///
-/// A running executable cannot simply be overwritten — on Windows its image is locked for the
-/// lifetime of the process — so the swap is left to `self-replace`, which moves the old image
+/// A running executable cannot simply be overwritten - on Windows its image is locked for the
+/// lifetime of the process - so the swap is left to `self-replace`, which moves the old image
 /// aside and has the operating system delete it once this process exits.
 ///
 /// # Errors
@@ -171,14 +190,14 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
 /// Deletes `relative_path` under `root`, then prunes the directories it leaves empty.
 ///
 /// Stops at `root` and at the first non-empty directory. Fails if the file is not there,
-/// matching the reference — callers decide whether that matters.
+/// matching the reference - callers decide whether that matters.
 ///
 /// # Errors
 ///
 /// Returns [`VendorError::ReadFile`] if `root` cannot be resolved or the file is not there.
 pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> Result<()> {
     let root = real_path(root)?;
-    let filepath = join_normalized(&root, &[relative_path]);
+    let filepath = anchor(&root, relative_path);
     tokio::fs::remove_file(&filepath)
         .await
         .map_err(|source| VendorError::ReadFile {
@@ -208,8 +227,8 @@ pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> 
 /// Streams an HTTP response body to `save_path`, creating parent directories.
 ///
 /// `report_failures` mirrors the reference's `log` flag, which decided both whether to announce
-/// the file and whether a write error was fatal. Announcing is now the caller's job — it
-/// batches the lines so `sync` can keep them in dependency order — but the error behaviour is
+/// the file and whether a write error was fatal. Announcing is now the caller's job - it
+/// batches the lines so `sync` can keep them in dependency order - but the error behaviour is
 /// preserved: a silent write failure is swallowed so the caller reports the follow-on error
 /// (a temp archive that fails to save shows up as "cannot be extracted").
 ///
@@ -282,7 +301,7 @@ async fn write_bytes(
     }
     file.flush().await?;
 
-    // The transport already enforces `Content-Length` — a body that stops early surfaces as
+    // The transport already enforces `Content-Length` - a body that stops early surfaces as
     // "error decoding response body", which the tests below pin down. This is the second line of
     // defence, and it states the invariant in the code rather than leaving it to a dependency:
     // what gets saved is the whole asset. It compares against the length reqwest reports *after*
@@ -301,7 +320,8 @@ async fn write_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_running_executable, join_normalized, normalize, simplify, staged_beside, stream_to_file,
+        anchor, is_running_executable, join_normalized, normalize, simplify, staged_beside,
+        stream_to_file,
     };
     use std::path::{Path, PathBuf};
 
@@ -381,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_body_that_stops_short_is_refused() {
-        // The failure this guards against: a bare binary — `yt-dlp.exe`, `ox.exe` — saved
+        // The failure this guards against: a bare binary - `yt-dlp.exe`, `ox.exe` - saved
         // half-downloaded and reported as a success.
         let dir = tempfile::tempdir().unwrap();
         let save_path = dir.path().join("yt-dlp.exe");
@@ -427,7 +447,7 @@ mod tests {
     async fn an_encoded_body_is_not_mistaken_for_a_short_one() {
         // `reqwest` decompresses transparently. If it reported the *compressed* length while
         // handing over decompressed bytes, comparing the two counts would reject every encoded
-        // download — so this pins which length the completeness check is comparing against.
+        // download - so this pins which length the completeness check is comparing against.
         use std::io::Write;
 
         let plain = vec![b'a'; 4096];
@@ -490,6 +510,49 @@ mod tests {
         assert_eq!(normalize(Path::new("../a")), PathBuf::from("..").join("a"));
         #[cfg(unix)]
         assert_eq!(normalize(Path::new("/a/../../b")), PathBuf::from("/b"));
+    }
+
+    #[test]
+    fn a_relative_destination_hangs_off_the_folder() {
+        let folder = PathBuf::from("proj").join("vendor").join("dep");
+        assert_eq!(anchor(&folder, "tool.exe"), folder.join("tool.exe"));
+        assert_eq!(
+            anchor(&folder, "bin/tool.exe"),
+            folder.join("bin").join("tool.exe")
+        );
+        // `..` still climbs, as it does for any relative output the config declares.
+        assert_eq!(
+            anchor(&folder, "../licenses/L"),
+            PathBuf::from("proj")
+                .join("vendor")
+                .join("licenses")
+                .join("L")
+        );
+    }
+
+    #[test]
+    fn an_absolute_destination_is_taken_at_its_word() {
+        // What `vendorFolder` has always done, now for a single file too: one binary can land on
+        // `PATH` without the rest of the dependency moving with it.
+        let folder = PathBuf::from("proj").join("vendor").join("dep");
+
+        assert_eq!(
+            anchor(&folder, "/opt/tools/tool"),
+            normalize(Path::new("/opt/tools/tool"))
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            anchor(&folder, r"C:\tools\tool.exe"),
+            PathBuf::from(r"C:\tools\tool.exe")
+        );
+
+        // `C:relative` has no root on either platform, so it takes the relative branch rather
+        // than being mistaken for a destination of its own. What `normalize` then makes of a
+        // drive-prefixed segment mid-path is its own affair, and not what this rule decides.
+        assert_eq!(
+            anchor(&folder, "C:relative"),
+            join_normalized(&folder, &["C:relative"])
+        );
     }
 
     #[test]

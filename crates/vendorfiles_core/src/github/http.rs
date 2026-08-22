@@ -1,8 +1,8 @@
 //! The HTTP client used for streaming downloads and the token check.
 //!
 //! `reqwest` is built with `rustls-no-provider`, so the process has to name a crypto provider
-//! before a client can be created. Doing that here — rather than pulling in reqwest's `rustls`
-//! feature — keeps `ring` as the only crypto backend in the tree; that feature would add
+//! before a client can be created. Doing that here - rather than pulling in reqwest's `rustls`
+//! feature - keeps `ring` as the only crypto backend in the tree; that feature would add
 //! aws-lc-rs alongside the `ring` build octocrab already uses.
 
 use std::sync::Once;

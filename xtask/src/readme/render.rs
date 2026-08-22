@@ -91,7 +91,7 @@ fn split_schema(mut node: Node) -> (Node, Option<String>) {
 
 /// Every comment the source carried has to survive into both generated formats.
 ///
-/// The round-trip check compares data, and a dropped comment changes no data — so without this a
+/// The round-trip check compares data, and a dropped comment changes no data - so without this a
 /// note could vanish from a tab while the build stayed green, which is exactly the drift this
 /// command exists to prevent. A comment a format has no syntax for (inside a TOML inline table,
 /// say) fails here instead of disappearing; the fix is to move it in the example.
@@ -125,7 +125,7 @@ fn tally(comments: Vec<String>) -> BTreeMap<String, usize> {
 /// The comment text of every comment in an emitted document, one entry per comment.
 ///
 /// Searching the text for `#{comment}` instead would be fooled by one comment being a prefix of
-/// another — `# a` is a substring of `# above a`, so a dropped `// a` would look present. Both
+/// another - `# a` is a substring of `# above a`, so a dropped `// a` would look present. Both
 /// formats run a comment to the end of its line, start one only at the beginning of a line or
 /// after a space, and quote strings the same two ways, so skipping quoted spans is enough to
 /// read the real ones back exactly.
@@ -204,7 +204,7 @@ fn without_schema(value: Json) -> Json {
 }
 
 /// An empty map, an empty sequence and null all compare equal. A container whose only content is
-/// a comment has no other form in YAML — it reads back as null.
+/// a comment has no other form in YAML - it reads back as null.
 fn normalize(value: Json) -> Json {
     match value {
         Json::Object(map) if map.is_empty() => Json::Null,

@@ -20,8 +20,8 @@ pub fn workspace_root() -> Result<PathBuf> {
 
 /// Runs a command under a spinner, so a slow step (`cargo check`) never looks like a hang.
 ///
-/// The child's output is captured rather than inherited — otherwise it would fight the spinner
-/// for the same lines — and is replayed only when the command fails.
+/// The child's output is captured rather than inherited - otherwise it would fight the spinner
+/// for the same lines - and is replayed only when the command fails.
 pub fn run(root: &Path, label: &str, program: &str, args: &[&str]) -> Result<()> {
     let spinner = Spinner::start(label);
 

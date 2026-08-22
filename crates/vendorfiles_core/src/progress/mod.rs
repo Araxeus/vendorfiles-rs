@@ -19,7 +19,7 @@
 //! machine-readable output. That is not a preference: crossterm's cursor query is hard-wired to
 //! stdout, so an inline viewport anchored on stderr fails outright and leaks its query into the
 //! data stream. When stdout is redirected there is no display, and the reporter falls back to the
-//! plain `INFO:`/`SUCCESS:` lines — buffered per dependency and flushed as it settles — so piped
+//! plain `INFO:`/`SUCCESS:` lines - buffered per dependency and flushed as it settles - so piped
 //! output keeps the bytes and the ordering it has always had.
 
 pub mod ansi;
@@ -82,11 +82,11 @@ pub fn print_err(text: &str) {
 /// Puts the terminal back the way it was found, as far as is possible in a hurry.
 ///
 /// A signal runs no destructor: not [`Reporter::end`], not `Drop`, not the panic hook. Without
-/// this, interrupting a sync leaves the cursor hidden — [`driver`] hides it on every frame — and
+/// this, interrupting a sync leaves the cursor hidden - [`driver`] hides it on every frame - and
 /// the shell that follows has no visible caret for the rest of the session.
 ///
 /// The cursor comes first and the region second, because only the second one can be given up:
-/// whatever cuts this short — a second Ctrl-C, a caller's deadline — has already had the cursor
+/// whatever cuts this short - a second Ctrl-C, a caller's deadline - has already had the cursor
 /// back. Showing it is what stops the render thread from drawing, so nothing can hide it again;
 /// until drawing could be stopped this had to be the other way round, and the wait was the risk.
 pub fn restore_terminal() {
@@ -102,7 +102,7 @@ pub fn restore_terminal() {
 
 /// Writes raw bytes to stdout, for output that is not line-shaped.
 ///
-/// Only the `--pr` body, which never animates — it is the whole output of the command.
+/// Only the `--pr` body, which never animates - it is the whole output of the command.
 pub fn print_raw(bytes: &[u8]) {
     debug_assert!(
         ACTIVE.lock().map_or(true, |active| active.is_none()),
@@ -124,7 +124,7 @@ pub struct Reporter {
     ///
     /// Emitting them as they happen would push the region down the screen once per dependency.
     /// They are reported in place instead, on the dependency's own row, and printed together
-    /// when the region comes down — so the scrollback still ends up with the whole run.
+    /// when the region comes down - so the scrollback still ends up with the whole run.
     results: Arc<Mutex<Vec<String>>>,
 }
 
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn an_animated_run_reports_in_place_and_keeps_the_lines_for_the_end() {
         // The region must not be pushed down the screen once per dependency, so outcome lines
-        // are held rather than printed as they happen — and the dependency reports on its own
+        // are held rather than printed as they happen - and the dependency reports on its own
         // row instead.
         // No `begin` here on purpose: there is no terminal in a test run, so opening the
         // display would fail and correctly fall back to the plain path.
@@ -707,7 +707,7 @@ mod tests {
 
     #[test]
     fn restoring_the_terminal_stops_an_active_display() {
-        // A display cannot be started here — it needs a terminal that answers a cursor query —
+        // A display cannot be started here - it needs a terminal that answers a cursor query -
         // so the render thread is stood in for by a channel of its own.
         let _guard = ACTIVE_GUARD.lock().expect("active guard");
         let (sender, inbox) = std::sync::mpsc::channel();

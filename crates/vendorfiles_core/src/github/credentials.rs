@@ -1,14 +1,14 @@
 //! The platform's native credential store.
 //!
-//! Rather than the `keyring` facade — which compiles every backend's support code on every
-//! target, and on Linux links libdbus — the store crates are pulled in per platform through
+//! Rather than the `keyring` facade - which compiles every backend's support code on every
+//! target, and on Linux links libdbus - the store crates are pulled in per platform through
 //! `[target.'cfg(…)'.dependencies]`: the Credential Manager on Windows, the login Keychain on
 //! macOS, and on Linux the Secret Service with a keyutils fallback. On a target with no store
 //! compiled in, [`entry`] yields `None` and token resolution falls back to `GITHUB_TOKEN`.
 //!
 //! Entries are built from a store handle this module owns rather than through
 //! `keyring_core::set_default_store`, so there is no process-global to initialise in the right
-//! order — the store is opened lazily, once, on first use.
+//! order - the store is opened lazily, once, on first use.
 
 use std::sync::{Arc, OnceLock};
 
@@ -33,7 +33,7 @@ fn native() -> keyring_core::Result<Arc<CredentialStore>> {
 
 /// Linux has two candidates, tried in order of how long they keep a secret.
 ///
-/// The Secret Service persists to disk, so a token stored there survives a reboot — but it needs
+/// The Secret Service persists to disk, so a token stored there survives a reboot - but it needs
 /// a daemon (`gnome-keyring`, `KWallet`, `KeePassXC`) that a headless box, a minimal container or WSL
 /// may not have. keyutils always works but lives in kernel memory, so it comes second and
 /// [`transience_warning`] tells the user what they got.
@@ -77,7 +77,7 @@ pub fn transience_warning() -> Option<&'static str> {
             "this system's credential store does not persist, \
              so the token will be gone when this command exits",
         ),
-        // `UntilDelete` — the desktop keychains — needs no caveat. And since
+        // `UntilDelete` - the desktop keychains - needs no caveat. And since
         // `CredentialPersistence` is `#[non_exhaustive]`, an unknown variant is not a reason
         // to invent one either.
         _ => None,
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn secrets_round_trip_through_the_platform_store() {
         // Writing is the half that only shows up when a user runs `vendor login`, so exercise
-        // it here — under a name of its own, never the real credential.
+        // it here - under a name of its own, never the real credential.
         let handle = entry("vendorfiles-cli-test", "round-trip").expect("a store");
         match handle.set_password("ghp_roundtrip_0123456789") {
             Ok(()) => {}
@@ -183,7 +183,7 @@ mod tests {
             );
             assert_eq!(transience_warning(), None);
         } else {
-            // No daemon here, so the session-scoped store is the honest answer — and it has to
+            // No daemon here, so the session-scoped store is the honest answer - and it has to
             // say so.
             assert!(
                 transience_warning().is_some_and(|w| w.contains("reboot")),

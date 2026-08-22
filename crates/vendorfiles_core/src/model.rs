@@ -48,11 +48,11 @@ impl Default for VendorConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum FileTarget {
-    /// `"LICENSE": "COPYING"` — save the input under a different name.
+    /// `"LICENSE": "COPYING"` - save the input under a different name.
     Rename(String),
-    /// `"archive.zip": ["a", "b"]` — extract these entries, keeping their names.
+    /// `"archive.zip": ["a", "b"]` - extract these entries, keeping their names.
     ExtractList(Vec<String>),
-    /// `"archive.zip": { "a": "b" }` — extract these entries under new names.
+    /// `"archive.zip": { "a": "b" }` - extract these entries under new names.
     ExtractMap(IndexMap<String, String>),
 }
 
@@ -76,9 +76,9 @@ impl FileTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum FileEntry {
-    /// `"dist/coloris.min.js"` — save under its basename.
+    /// `"dist/coloris.min.js"` - save under its basename.
     Simple(String),
-    /// `{ "dist/coloris.min.js": "coloris.js" }` — one or more explicit input→output pairs.
+    /// `{ "dist/coloris.min.js": "coloris.js" }` - one or more explicit input→output pairs.
     Mapped(IndexMap<String, FileTarget>),
 }
 
@@ -181,7 +181,7 @@ pub struct DefaultOptions {
 /// A dependency exactly as written in the config file.
 ///
 /// Every field is optional because the reference tool only validates on `sync`; other code
-/// paths tolerate — and sometimes rely on — missing keys.
+/// paths tolerate - and sometimes rely on - missing keys.
 ///
 /// Field order is the order a newly written dependency appears in the config file, and is
 /// chosen to match the reference project's own examples (`version`, `repository`, `files`).

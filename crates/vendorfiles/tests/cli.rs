@@ -52,7 +52,7 @@ fn fixture(name: &str) -> String {
 /// The reference help, plus the two places our help deliberately differs from it.
 ///
 /// The fixtures stay exactly as captured from `vendorfiles@1.4.2`, so both facts stay checkable:
-/// what the reference printed, and how we depart from it. Both departures are the same decision —
+/// what the reference printed, and how we depart from it. Both departures are the same decision -
 /// `-p` means `--plain` everywhere, so `--pr` gave up its short form.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
@@ -245,7 +245,7 @@ fn completions_help_is_routed_like_every_other_command() {
     )
     .expect("the served help text")
     .replace("\r\n", "\n");
-    // No reference fixture to diff against — the reference has no such command — so this checks
+    // No reference fixture to diff against - the reference has no such command - so this checks
     // the binary serves the text we ship, through both routes.
     for args in [vec!["completions", "--help"], vec!["help", "completions"]] {
         let out = vendor(dir.path(), &args);
@@ -255,7 +255,7 @@ fn completions_help_is_routed_like_every_other_command() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Argument errors — Commander's wording, and always exit 1
+// Argument errors - Commander's wording, and always exit 1
 // ---------------------------------------------------------------------------------------
 
 #[test]
@@ -477,7 +477,7 @@ fn sync_reports_up_to_date_without_touching_the_network() {
 
 #[test]
 fn plain_is_accepted_on_either_side_of_the_subcommand() {
-    // The output is already plain here — a test harness has no terminal — so what this pins is
+    // The output is already plain here - a test harness has no terminal - so what this pins is
     // that the flag parses in both positions and changes nothing else.
     let expected = "\u{1b}[36mINFO: Coloris is up to date\u{1b}[0m\n";
     for args in [
@@ -512,7 +512,7 @@ fn described_neighbour(repository: &str) -> tempfile::TempDir {
     ))
 }
 
-/// A repository nothing will be fetched from — every test here stops at `--dry-run`, which is
+/// A repository nothing will be fetched from - every test here stops at `--dry-run`, which is
 /// what keeps the warning decision checkable without a request.
 const NEIGHBOURED: &str = "https://github.com/vendorfiles-rs-tests/not-a-real-repository";
 
@@ -537,7 +537,7 @@ fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
 #[test]
 fn describing_it_with_files_still_borrows_the_version() {
     // `--files` describes the files, but the neighbour is still the base of the new entry, so its
-    // version comes along — and that is the half that can skip the config write entirely.
+    // version comes along - and that is the half that can skip the config write entirely.
     let dir = described_neighbour(NEIGHBOURED);
 
     let out = vendor(
@@ -677,7 +677,7 @@ fn a_dry_run_resolves_an_alias_to_its_canonical_name() {
 
 #[test]
 fn a_dry_run_of_an_unknown_name_never_reaches_the_network() {
-    // Not in the registry and not a URL, so the only way on is a GitHub search — which must not
+    // Not in the registry and not a URL, so the only way on is a GitHub search - which must not
     // be attempted before `--files` is even satisfied.
     let dir = project(r#"{"vendorDependencies":{}}"#);
     let out = vendor_with_registry(
@@ -693,7 +693,7 @@ fn a_missing_file_makes_sync_consider_the_dependency_stale() {
     let dir = up_to_date_project();
     std::fs::remove_file(dir.path().join("vendor/Coloris/COLORIS_LICENSE")).unwrap();
     let out = vendor(dir.path(), &["sync"]);
-    // Stale means it tries to download, which fails offline or without credentials — either
+    // Stale means it tries to download, which fails offline or without credentials - either
     // way it must *not* claim to be up to date.
     assert!(
         !stdout(&out).contains("is up to date"),

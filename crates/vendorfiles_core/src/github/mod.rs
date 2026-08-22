@@ -47,7 +47,7 @@ type ReleaseSlot = Arc<OnceCell<Arc<Release>>>;
 /// Releases are cached for the process lifetime so two dependencies tracking the same
 /// repository cost one request, as in the reference. The cache stores a
 /// [`OnceCell`] per key rather than a value, so concurrent lookups of the same release
-/// collapse into a single request instead of racing — which matters because the anonymous
+/// collapse into a single request instead of racing - which matters because the anonymous
 /// rate limit is 60 requests an hour.
 pub struct GitHubClient {
     api: Octocrab,

@@ -13,7 +13,7 @@ impl Session {
     /// Resolves the version to install.
     ///
     /// With `hashVersionFile` this is the tracked file's latest commit SHA; otherwise it is
-    /// the latest release tag. A repository with no usable release yields an empty string —
+    /// the latest release tag. A repository with no usable release yields an empty string -
     /// except under `outdated`, where the reference treats it as fatal.
     pub(crate) async fn resolve_new_version(
         &self,
@@ -46,8 +46,8 @@ impl Session {
 
     /// Whether the dependency folder is out of step with the config.
     ///
-    /// Any inconsistency — missing lockfile, version drift, a file that vanished, a changed
-    /// `files` declaration — means "yes". Every failure path is also "yes", matching the
+    /// Any inconsistency - missing lockfile, version drift, a file that vanished, a changed
+    /// `files` declaration - means "yes". Every failure path is also "yes", matching the
     /// reference's blanket `catch`.
     pub(crate) async fn needs_update(
         &self,
@@ -102,10 +102,7 @@ impl Session {
                 dependency.version.as_deref().unwrap_or_default(),
             );
             for file in flat_files(&lock_files) {
-                files.insert(
-                    crate::fsx::join_normalized(&folder, &[file.as_str()]),
-                    name.clone(),
-                );
+                files.insert(crate::fsx::anchor(&folder, file.as_str()), name.clone());
             }
         }
         files
