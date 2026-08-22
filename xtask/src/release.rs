@@ -170,17 +170,24 @@ fn set_readme_version(markdown: &str, version: &Version) -> Result<String> {
 
     let mut at = 0;
     while at < lines.len() {
-        let info = lines[at].trim_start().strip_prefix("```").map(str::trim);
-        if !matches!(info, Some("json" | "jsonc")) {
+        let Some(fence) = lines[at]
+            .trim_start()
+            .strip_prefix("```")
+            .map(str::trim)
+            .filter(|info| matches!(*info, "json" | "jsonc"))
+        else {
             at += 1;
             continue;
-        }
+        };
         let Some(close) = lines[at + 1..]
             .iter()
             .position(|line| line.trim() == "```")
             .map(|offset| at + 1 + offset)
         else {
-            break;
+            bail!(
+                "the `{fence}` block at README.md line {} is never closed",
+                at + 1
+            );
         };
 
         let body = &lines[at + 1..close];
@@ -326,6 +333,19 @@ anyhow = \"1.0\"
             set_readme_version(&source, &Version::parse("1.5.0").unwrap()).unwrap_err()
         );
         assert!(error.contains("no JSON example"), "{error}");
+    }
+
+    #[test]
+    fn an_unclosed_block_points_at_its_opening_fence() {
+        let source = README.replace("\n```\n\n</details>", "\n\n</details>");
+        let error = format!(
+            "{:#}",
+            set_readme_version(&source, &Version::parse("1.5.0").unwrap()).unwrap_err()
+        );
+        assert!(
+            error.contains("`json` block at README.md line 7"),
+            "{error}"
+        );
     }
 
     #[test]
