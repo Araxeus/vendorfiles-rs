@@ -130,14 +130,15 @@ fn value_text(node: &Node, column: usize) -> String {
     }
 
     let mut out = String::from("[\n");
-    for comment in &node.inner {
-        let _ = writeln!(out, "  #{comment}");
-    }
     for item in items {
         for comment in &item.leading {
             let _ = writeln!(out, "  #{comment}");
         }
         let _ = writeln!(out, "  {},{}", inline(&item.value), trailing(item));
+    }
+    // Written after the last element, where the source had them, as the YAML emitter does.
+    for comment in &node.inner {
+        let _ = writeln!(out, "  #{comment}");
     }
     out.push(']');
     out
@@ -171,17 +172,35 @@ fn trailing(node: &Node) -> String {
 }
 
 /// Literal strings, which need no escaping, unless the content cannot survive them.
+///
+/// A basic string has to escape every control character, not just the three with familiar names:
+/// TOML forbids a raw one outright, and leaving it in produces a document no parser will read.
 fn string(text: &str) -> String {
-    if text.contains('\'') || text.chars().any(char::is_control) {
-        let escaped = text
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t");
-        return format!("\"{escaped}\"");
+    if !text.contains('\'') && !text.chars().any(char::is_control) {
+        return format!("'{text}'");
     }
-    format!("'{text}'")
+
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            // Every control character TOML has no name for. All of them are below U+00FF, so
+            // the four-digit form always fits.
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn key(text: &str) -> String {
@@ -280,6 +299,31 @@ mod tests {
             to_string(&node),
             "# all the deps\n[vendorDependencies.x]\nversion = 'v1'\n"
         );
+    }
+
+    #[test]
+    fn every_control_character_is_escaped_rather_than_written_raw() {
+        // A raw control character makes a basic string invalid TOML, and `\b` and `\u0001` are
+        // reachable from a JSON example: `"C:\tools\bin"` decodes to a tab and a backspace.
+        let node = parse(r#"{ "a": "x\by", "b": "y\u0001z", "c": "p\fq" }"#).unwrap();
+        assert_eq!(
+            to_string(&node),
+            "a = \"x\\by\"\nb = \"y\\u0001z\"\nc = \"p\\fq\"\n"
+        );
+    }
+
+    #[test]
+    fn a_dangling_array_comment_goes_after_the_last_element() {
+        let node = parse(
+            r#"{
+    "files": [
+        "a"
+        // dangling
+    ]
+}"#,
+        )
+        .unwrap();
+        assert_eq!(to_string(&node), "files = [\n  'a',\n  # dangling\n]\n");
     }
 
     #[test]

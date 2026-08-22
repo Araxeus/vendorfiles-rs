@@ -225,6 +225,14 @@ mod tests {
     use super::{FILES, NAMES, check_comments, comments_in, group, verify};
 
     #[test]
+    fn a_control_character_round_trips_through_both_formats() {
+        // Before the TOML escaper covered them, this failed the round-trip check with a parse
+        // error rather than rendering: the backspace went into the basic string raw.
+        let out = group(r#"{ "a": "x\by" }"#, "json", NAMES).unwrap();
+        assert!(out.contains("a = \"x\\by\""), "{out}");
+    }
+
+    #[test]
     fn a_doubled_quote_inside_a_string_does_not_expose_its_hash() {
         // YAML escapes a quote inside a single-quoted string by doubling it. Toggling on each
         // quote closes and reopens the string with no character in between, so every character
