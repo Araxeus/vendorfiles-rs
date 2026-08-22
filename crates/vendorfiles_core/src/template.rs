@@ -112,7 +112,7 @@ pub fn is_release_path(path: &str) -> bool {
     path.starts_with("{release}/")
 }
 
-/// The final component of a path, with the platform's separator rules — matching Node's
+/// The final component of a path, with the platform's separator rules - matching Node's
 /// `path.basename`, which the reference uses to derive default output names.
 #[must_use]
 pub fn basename(path: &str) -> String {

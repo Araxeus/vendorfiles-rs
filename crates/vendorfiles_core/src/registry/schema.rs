@@ -1,7 +1,7 @@
 //! The registry file's wire format.
 //!
 //! Both structs refuse unknown fields. A registry that grows a key this build does not understand
-//! is then a loud error rather than something silently ignored — which matters because the file is
+//! is then a loud error rather than something silently ignored - which matters because the file is
 //! remote data that decides what gets downloaded. The cost is that adding a field means bumping
 //! [`SUPPORTED_VERSION`], and that is the right way round for a trust boundary.
 //!
@@ -53,7 +53,7 @@ pub struct Program {
     pub asset: Option<String>,
     /// The path inside that asset, shared by every target.
     ///
-    /// Omitted when the asset *is* the executable — plenty of projects publish a bare binary
+    /// Omitted when the asset *is* the executable - plenty of projects publish a bare binary
     /// rather than an archive.
     #[serde(default)]
     pub member: Option<Member>,
@@ -71,7 +71,7 @@ pub struct Program {
 /// several under names of your choosing.
 ///
 /// One path is the ordinary case, and its basename is the file that lands. The other two are for
-/// an archive whose executable cannot run alone — `herdr.exe` loads the `conpty/` directory
+/// an archive whose executable cannot run alone - `herdr.exe` loads the `conpty/` directory
 /// shipped beside it. A list writes every path out as it stands, directories and all; a map does
 /// the same but says where each one goes, which is how `x64/programz.exe` becomes `program.exe`.
 #[derive(Debug, Clone, Deserialize)]
@@ -113,7 +113,7 @@ pub enum Target {
     /// A spelled-out asset, for projects whose names follow no pattern.
     Explicit(Explicit),
     /// Several of them, for a release that splits what one host needs across more than one asset
-    /// — an archive holding the program, say, beside a loose file it reads.
+    /// - an archive holding the program, say, beside a loose file it reads.
     Several(Vec<Explicit>),
 }
 
@@ -362,8 +362,8 @@ programs:
             .err()
             .expect("the probe field must be rejected")
             .to_string();
-        // serde words the list three ways depending on its length — "expected one of `a`, `b`",
-        // "expected `a` or `b`", "expected `a`" — so take every backticked name after "expected"
+        // serde words the list three ways depending on its length - "expected one of `a`, `b`",
+        // "expected `a` or `b`", "expected `a`" - so take every backticked name after "expected"
         // rather than matching one phrasing.
         let (_, listed) = error
             .split_once("expected ")

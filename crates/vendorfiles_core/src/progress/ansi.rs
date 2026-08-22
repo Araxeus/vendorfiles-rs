@@ -1,6 +1,6 @@
 //! Turns our own coloured strings into ratatui text.
 //!
-//! Lines printed above the region — `INFO:`, `SUCCESS:`, the `outdated` listing — are built with
+//! Lines printed above the region - `INFO:`, `SUCCESS:`, the `outdated` listing - are built with
 //! the escape sequences in [`crate::ui`], because a piped run has to emit those bytes exactly.
 //! Rather than build every line twice, the animated path parses them back.
 //!

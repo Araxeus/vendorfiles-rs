@@ -1,4 +1,4 @@
-//! `cargo xtask readme` — regenerates the YAML and TOML tab of every marked config example.
+//! `cargo xtask readme` - regenerates the YAML and TOML tab of every marked config example.
 //!
 //! The README is the source of truth: each example is written once, in JSON, inside a
 //! `<!-- formats -->` region, and the other two renderings are derived from it. GitHub strips

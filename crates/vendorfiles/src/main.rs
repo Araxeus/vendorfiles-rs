@@ -1,4 +1,4 @@
-//! `vendor` — the command-line entry point.
+//! `vendor` - the command-line entry point.
 //!
 //! This binary owns the terminal contract: Commander-identical help text, Commander-identical
 //! parse errors, and exit code 1 for every failure (`clap` would use 2).
@@ -28,7 +28,7 @@ const INTERRUPTED: u8 = 130;
 /// How long an interrupted run may spend tidying up before it ends regardless.
 ///
 /// Restoration takes about a tick, so this only ever fires when the terminal has stopped
-/// accepting output — and that is exactly when it matters: listening for the signal took the
+/// accepting output - and that is exactly when it matters: listening for the signal took the
 /// operating system's own handling away, so a wait that never finishes would leave Ctrl-C doing
 /// nothing at all for the rest of the run. Long enough not to cut a healthy teardown short.
 const GRACE: Duration = Duration::from_millis(500);
@@ -36,7 +36,7 @@ const GRACE: Duration = Duration::from_millis(500);
 /// Gives the terminal back when the user interrupts a run.
 ///
 /// A signal runs no destructor, so without this an interrupted `sync` leaves the cursor hidden
-/// for the rest of the session — the display hides it on every frame. Listening rather than
+/// for the rest of the session - the display hides it on every frame. Listening rather than
 /// masking: the process still stops, it just stops tidily.
 fn restore_terminal_on_interrupt() {
     tokio::spawn(async {
@@ -46,8 +46,8 @@ fn restore_terminal_on_interrupt() {
         // Listening for the signal replaced the operating system's own handling for the rest of
         // the process, which makes this the only thing left that can stop the run: it has to
         // stop it whatever the terminal does. So the tidy-up is given a thread of its own and
-        // three ways to be over — it finishes, the user says again that they are done with it,
-        // or it runs out of time — and none of them is a wait on the terminal answering.
+        // three ways to be over - it finishes, the user says again that they are done with it,
+        // or it runs out of time - and none of them is a wait on the terminal answering.
         let restoring = tokio::task::spawn_blocking(vendorfiles_core::progress::restore_terminal);
         tokio::select! {
             _ = restoring => {}

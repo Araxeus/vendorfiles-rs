@@ -2,7 +2,7 @@
 //!
 //! `toml_edit::ser::to_document` is what `config/document.rs` uses, but only ever for a single
 //! dependency that is then inserted as a table. Handed a whole config it renders one inline
-//! line — `vendorDependencies = { fzf = { … } }` — so documentation is emitted directly instead.
+//! line - `vendorDependencies = { fzf = { … } }` - so documentation is emitted directly instead.
 
 use std::fmt::Write as _;
 

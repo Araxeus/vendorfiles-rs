@@ -1,7 +1,7 @@
 //! Filesystem helpers with Node-compatible path semantics.
 //!
 //! Paths appear verbatim in the tool's output (`INFO: Saved <path>`), so joining and
-//! normalisation must match Node's `path.join` / `fs.realpath` rather than Rust's defaults —
+//! normalisation must match Node's `path.join` / `fs.realpath` rather than Rust's defaults -
 //! in particular Rust's `canonicalize` returns `\\?\C:\…` on Windows, which Node never prints.
 
 use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
@@ -14,7 +14,7 @@ use crate::progress::Transfer;
 
 /// Lexically normalises a path: drops `.`, resolves `..`, and unifies separators.
 ///
-/// Purely textual, like Node's `path.normalize` — the filesystem is never consulted.
+/// Purely textual, like Node's `path.normalize` - the filesystem is never consulted.
 #[must_use]
 pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -120,8 +120,8 @@ pub fn is_running_executable(path: &Path) -> bool {
 
 /// Replaces the running binary with the file at `staged`, consuming it.
 ///
-/// A running executable cannot simply be overwritten — on Windows its image is locked for the
-/// lifetime of the process — so the swap is left to `self-replace`, which moves the old image
+/// A running executable cannot simply be overwritten - on Windows its image is locked for the
+/// lifetime of the process - so the swap is left to `self-replace`, which moves the old image
 /// aside and has the operating system delete it once this process exits.
 ///
 /// # Errors
@@ -171,7 +171,7 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
 /// Deletes `relative_path` under `root`, then prunes the directories it leaves empty.
 ///
 /// Stops at `root` and at the first non-empty directory. Fails if the file is not there,
-/// matching the reference — callers decide whether that matters.
+/// matching the reference - callers decide whether that matters.
 ///
 /// # Errors
 ///
@@ -208,8 +208,8 @@ pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> 
 /// Streams an HTTP response body to `save_path`, creating parent directories.
 ///
 /// `report_failures` mirrors the reference's `log` flag, which decided both whether to announce
-/// the file and whether a write error was fatal. Announcing is now the caller's job — it
-/// batches the lines so `sync` can keep them in dependency order — but the error behaviour is
+/// the file and whether a write error was fatal. Announcing is now the caller's job - it
+/// batches the lines so `sync` can keep them in dependency order - but the error behaviour is
 /// preserved: a silent write failure is swallowed so the caller reports the follow-on error
 /// (a temp archive that fails to save shows up as "cannot be extracted").
 ///
@@ -282,7 +282,7 @@ async fn write_bytes(
     }
     file.flush().await?;
 
-    // The transport already enforces `Content-Length` — a body that stops early surfaces as
+    // The transport already enforces `Content-Length` - a body that stops early surfaces as
     // "error decoding response body", which the tests below pin down. This is the second line of
     // defence, and it states the invariant in the code rather than leaving it to a dependency:
     // what gets saved is the whole asset. It compares against the length reqwest reports *after*
@@ -381,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_body_that_stops_short_is_refused() {
-        // The failure this guards against: a bare binary — `yt-dlp.exe`, `ox.exe` — saved
+        // The failure this guards against: a bare binary - `yt-dlp.exe`, `ox.exe` - saved
         // half-downloaded and reported as a success.
         let dir = tempfile::tempdir().unwrap();
         let save_path = dir.path().join("yt-dlp.exe");
@@ -427,7 +427,7 @@ mod tests {
     async fn an_encoded_body_is_not_mistaken_for_a_short_one() {
         // `reqwest` decompresses transparently. If it reported the *compressed* length while
         // handing over decompressed bytes, comparing the two counts would reject every encoded
-        // download — so this pins which length the completeness check is comparing against.
+        // download - so this pins which length the completeness check is comparing against.
         use std::io::Write;
 
         let plain = vec![b'a'; 4096];

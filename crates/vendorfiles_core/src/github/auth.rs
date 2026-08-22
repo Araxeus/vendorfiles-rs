@@ -10,7 +10,7 @@ use crate::error::{Result, VendorError};
 use crate::github::credentials;
 use crate::ui;
 
-/// Keyring service name — shared with the reference implementation.
+/// Keyring service name - shared with the reference implementation.
 const KEYRING_SERVICE: &str = "vendorfiles-cli";
 /// Keyring entry name.
 ///
@@ -64,7 +64,7 @@ pub fn is_plausible_token(value: &str) -> bool {
 /// Reads the token from the OS keyring, if one is stored and usable.
 ///
 /// Falls back to the reference tool's entry so a machine that only ever used the TypeScript
-/// CLI still works — unless the stored value is that tool's ciphertext, which cannot be a
+/// CLI still works - unless the stored value is that tool's ciphertext, which cannot be a
 /// token and is treated as "not logged in" rather than sent upstream to fail with a 401.
 ///
 /// On Linux that fallback only reaches the reference's token when a Secret Service daemon is
@@ -94,8 +94,8 @@ pub fn resolve_token() -> Option<Token> {
 
 /// [`resolve_token`] without stalling the async runtime.
 ///
-/// Reading the OS credential store is a blocking IPC call — on Linux it can even prompt the
-/// user to unlock the keyring — so it belongs on the blocking pool.
+/// Reading the OS credential store is a blocking IPC call - on Linux it can even prompt the
+/// user to unlock the keyring - so it belongs on the blocking pool.
 pub async fn resolve_token_async() -> Option<Token> {
     tokio::task::spawn_blocking(resolve_token)
         .await
@@ -105,7 +105,7 @@ pub async fn resolve_token_async() -> Option<Token> {
 /// Stores a token in the OS keyring, warning (but not failing) if that is not possible.
 ///
 /// A keyring that refuses the write is not fatal: the token still authenticates this run. A
-/// store that accepts the write but will not keep it earns a warning of its own — see
+/// store that accepts the write but will not keep it earns a warning of its own - see
 /// [`credentials::transience_warning`].
 pub fn save_token(token: &Token) {
     let stored = credentials::entry(KEYRING_SERVICE, KEYRING_USER)

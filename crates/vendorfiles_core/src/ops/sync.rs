@@ -1,4 +1,4 @@
-//! `sync`, `update` and `outdated` — all three are one traversal with different flags.
+//! `sync`, `update` and `outdated` - all three are one traversal with different flags.
 
 use std::collections::VecDeque;
 use std::sync::Arc;

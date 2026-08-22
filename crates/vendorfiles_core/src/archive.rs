@@ -166,7 +166,7 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
 /// disk space of everything else in it, whatever the payload decompresses to.
 ///
 /// Directory entries are left out. A member is something installation *moves into place*, and
-/// [`crate::ops`] copies it when a rename cannot cross filesystems — which fails on a directory.
+/// [`crate::ops`] copies it when a rename cannot cross filesystems - which fails on a directory.
 /// Listing `tool/bin/` would let a `member` of `tool/bin` look present when installing it could
 /// not work.
 ///
@@ -198,8 +198,8 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
             } else {
                 // A lone compressed file, which extraction writes out under this one name. None of
                 // the payload is needed to say that, but read it through anyway, as the xz branch
-                // does: a stream that stops decoding — or whose checksum does not match, which
-                // only shows up at the very end — should be an error here rather than a surprise
+                // does: a stream that stops decoding - or whose checksum does not match, which
+                // only shows up at the very end - should be an error here rather than a surprise
                 // at install time.
                 std::io::copy(&mut decoder, &mut std::io::sink())?;
                 Ok(vec![lone_file_name(archive, ".gz")])
@@ -214,7 +214,7 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
 /// `lzma-rs` decodes into a writer rather than offering a reader, which is why [`unxz`] decodes to
 /// a temporary file. Listing cannot afford that: it exists to avoid paying for an archive's
 /// contents. So a thread pushes the decompressed stream down a pipe and the tar reader pulls it
-/// out here — the bytes pass through memory a pipe buffer at a time and are never kept.
+/// out here - the bytes pass through memory a pipe buffer at a time and are never kept.
 fn xz_names(archive: &Path, file: File) -> Result<Vec<String>> {
     let (mut reader, writer) = std::io::pipe()?;
     let decoding = std::thread::spawn(move || -> Result<()> {
@@ -231,8 +231,8 @@ fn xz_names(archive: &Path, file: File) -> Result<Vec<String>> {
 
     if !is_tar(&head) {
         // A lone compressed file: its name comes from the archive's own, so none of the payload is
-        // needed. Drain it anyway — a stream that does not decode should be an error here rather
-        // than a surprise at install time — which costs time but still no disk.
+        // needed. Drain it anyway - a stream that does not decode should be an error here rather
+        // than a surprise at install time - which costs time but still no disk.
         std::io::copy(&mut reader, &mut std::io::sink())?;
         finish_decoding(decoding)?;
         return Ok(vec![lone_file_name(archive, ".xz")]);
@@ -570,8 +570,8 @@ mod tests {
 
     #[test]
     fn a_tar_xz_far_larger_than_a_pipe_buffer_is_listed_without_stalling() {
-        // The payload passes from the decoding thread to the tar reader a pipe buffer at a time —
-        // tens of kilobytes — so a payload thousands of times that size proves the two really do
+        // The payload passes from the decoding thread to the tar reader a pipe buffer at a time -
+        // tens of kilobytes - so a payload thousands of times that size proves the two really do
         // hand off rather than one waiting for the other to finish.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("big.tar.xz");
@@ -615,7 +615,7 @@ mod tests {
     #[test]
     fn a_tar_xz_padded_past_its_end_marker_still_lists() {
         // What GNU tar really ships: zero blocks after the end-of-archive marker. A tar reader
-        // stops at the marker and never reads them, so the decoder feeding it is still mid-write —
+        // stops at the marker and never reads them, so the decoder feeding it is still mid-write -
         // and a listing that walked away at that point would report a broken pipe on a sound
         // archive. Every padding here is larger than a pipe buffer.
         let dir = tempfile::tempdir().unwrap();
@@ -678,8 +678,8 @@ mod tests {
 
     #[test]
     fn directory_entries_are_left_out_of_the_listing() {
-        // A `member` naming a directory cannot install — the move falls back to a file copy when
-        // rename cannot cross filesystems — so listing one would let a wrong `member` look right.
+        // A `member` naming a directory cannot install - the move falls back to a file copy when
+        // rename cannot cross filesystems - so listing one would let a wrong `member` look right.
         let dir = tempfile::tempdir().unwrap();
 
         let zipped = dir.path().join("with-dirs.zip");
@@ -724,7 +724,7 @@ mod tests {
     #[test]
     fn lone_compressed_files_are_listed_under_the_name_they_extract_to() {
         // The registry lets a `member` name a `.gz` or `.xz` that is not a tar, in which case
-        // extraction writes exactly one file — so listing has to report that one name, not fail.
+        // extraction writes exactly one file - so listing has to report that one name, not fail.
         let dir = tempfile::tempdir().unwrap();
 
         let gzipped = dir.path().join("yamlfmt.gz");

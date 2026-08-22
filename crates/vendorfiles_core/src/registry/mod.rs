@@ -5,7 +5,7 @@
 //! request against it is how a program becomes installable by name.
 //!
 //! Only `install` ever reads it. The file is fetched from `raw.githubusercontent.com` rather than
-//! the GitHub API — no anonymous rate limit — and cached, so the usual case makes no request at
+//! the GitHub API - no anonymous rate limit - and cached, so the usual case makes no request at
 //! all. See [`cache`] for the freshness rules and [`schema`] for the trust boundary.
 
 pub mod cache;
@@ -84,8 +84,8 @@ impl Registry {
 /// # Errors
 ///
 /// Returns an error when the registry cannot be obtained at all, or when it covers `name` but not
-/// this platform. Callers treat the former as a miss — being offline should not stop
-/// `vendor add owner/repo` from working — so the message is theirs to report.
+/// this platform. Callers treat the former as a miss - being offline should not stop
+/// `vendor add owner/repo` from working - so the message is theirs to report.
 pub async fn lookup(name: &str, refresh: bool) -> Result<Option<Entry>> {
     let registry = Registry::parse(&fetch(refresh).await?)?;
     registry.entry(name)
@@ -219,7 +219,7 @@ async fn get(url: &str, etag: Option<&str>) -> Result<Fetched> {
     })
 }
 
-/// Writes the registry and its `ETag`, ignoring failures — a cache that cannot be written only
+/// Writes the registry and its `ETag`, ignoring failures - a cache that cannot be written only
 /// costs the next run a request.
 ///
 /// The registry lands via a sibling file and a rename. Writing in place truncates first, so a
@@ -292,7 +292,7 @@ programs:
     #[tokio::test]
     async fn storing_the_cache_leaves_no_half_written_file() {
         // Written via a sibling and renamed, so an interrupted write cannot leave a corrupt copy
-        // wearing a fresh timestamp — which nothing would re-fetch for a day.
+        // wearing a fresh timestamp - which nothing would re-fetch for a day.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("registry.yml");
         let tag = dir.path().join("registry.etag");
@@ -523,7 +523,7 @@ programs:
                         checked += 1;
                     } else {
                         problems.push(format!(
-                            "{canonical} for {host}: '{wanted}' is not in {} — published: {}",
+                            "{canonical} for {host}: '{wanted}' is not in {} - published: {}",
                             release.tag_name,
                             published.join(", ")
                         ));
@@ -549,8 +549,8 @@ programs:
 
     /// The host whose assets hold archive members, preferring the platform running the test.
     ///
-    /// A host whose target is a bare binary has nothing to look inside — the asset *is* the file,
-    /// already checked by name — so keep looking rather than giving up on the entry, which may mix
+    /// A host whose target is a bare binary has nothing to look inside - the asset *is* the file,
+    /// already checked by name - so keep looking rather than giving up on the entry, which may mix
     /// bare binaries and archives across platforms. Returns the host and, for each of its assets
     /// that is an archive, the members the entry claims are inside it.
     fn member_bearing_host(
@@ -588,7 +588,7 @@ programs:
 
     /// One platform per entry, checked all the way into the archive.
     ///
-    /// Verifying every host would mean downloading every asset for every platform — gigabytes. One
+    /// Verifying every host would mean downloading every asset for every platform - gigabytes. One
     /// is enough to catch the mistake that actually happens: a `member` path that does not match
     /// how the archive is laid out. Both `microsoft/edit` and `sinelaw/fresh` nest their binary on
     /// one platform and not another, and each was found by hand.
@@ -677,8 +677,8 @@ programs:
                     }
                 };
 
-                // Resolved the way installation resolves it — `join_normalized` under the directory
-                // the archive was unpacked into — rather than compared as raw spellings. That is what
+                // Resolved the way installation resolves it - `join_normalized` under the directory
+                // the archive was unpacked into - rather than compared as raw spellings. That is what
                 // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
                 // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
                 // is enough: both sides go through the same one.
@@ -693,7 +693,7 @@ programs:
                         checked += 1;
                     } else {
                         problems.push(format!(
-                        "{canonical} for {host}: '{expected}' is not in {asset_name} — holds: {}",
+                        "{canonical} for {host}: '{expected}' is not in {asset_name} - holds: {}",
                         held.join(", ")
                     ));
                     }

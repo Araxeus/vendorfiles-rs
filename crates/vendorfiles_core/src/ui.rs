@@ -1,7 +1,7 @@
 //! Terminal output.
 //!
-//! The reference implementation writes raw SGR escapes unconditionally — no tty probing, no
-//! `NO_COLOR` handling — so this module does the same. Anything smarter would silently break
+//! The reference implementation writes raw SGR escapes unconditionally - no tty probing, no
+//! `NO_COLOR` handling - so this module does the same. Anything smarter would silently break
 //! parity the moment output is piped, which is exactly how the tool is used in CI.
 
 use std::fmt::Display;

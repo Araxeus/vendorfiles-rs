@@ -1,4 +1,4 @@
-//! `cargo xtask ci` — every gate `.github/workflows/check.yml` applies, in one command.
+//! `cargo xtask ci` - every gate `.github/workflows/check.yml` applies, in one command.
 //!
 //! The lint groups are spelled out here even though `[workspace.lints]` already sets them, so
 //! this stays the same gate as the workflow whichever of the two is read.

@@ -10,9 +10,9 @@
 pub enum Arity {
     /// A boolean flag.
     None,
-    /// `[value]` — takes the next token unless it looks like an option.
+    /// `[value]` - takes the next token unless it looks like an option.
     Optional,
-    /// `<value...>` — takes every following token until one looks like an option.
+    /// `<value...>` - takes every following token until one looks like an option.
     Many,
 }
 
@@ -109,7 +109,7 @@ const CONFIG_OPTION: OptionSpec = OptionSpec {
     short: Some('c'),
     long: "--config",
     // Its value is required, so it always consumes the next token; `Optional` is what the
-    // scanner needs — it consumes one when present, and a missing one is clap's to reject.
+    // scanner needs - it consumes one when present, and a missing one is clap's to reject.
     arity: Arity::Optional,
     display: "-c, --config <file/folder path>",
 };

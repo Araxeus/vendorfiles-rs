@@ -20,7 +20,7 @@ pub use sync::SyncOptions;
 ///
 /// This is the top of the ownership tree. The workspace is owned outright and only ever
 /// touched through `&mut self`, which is what serialises config writes. The client sits behind
-/// an [`Arc`] so download work can be handed to independent tasks — the one place the tool
+/// an [`Arc`] so download work can be handed to independent tasks - the one place the tool
 /// needs shared ownership rather than a borrow.
 #[derive(Debug)]
 pub struct Session {

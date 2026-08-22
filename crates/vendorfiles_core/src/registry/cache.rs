@@ -2,7 +2,7 @@
 //!
 //! `install` is the only command that reads the registry, and most installs happen within a day of
 //! each other, so the common case should cost nothing: a cached copy younger than [`TTL`] is used
-//! without touching the network at all. Past that, the fetch is conditional — the file carries an
+//! without touching the network at all. Past that, the fetch is conditional - the file carries an
 //! `ETag`, so an unchanged registry costs one 304 rather than a download.
 
 use std::path::PathBuf;

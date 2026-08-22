@@ -2,7 +2,7 @@
 //!
 //! `cargo run --example display [dependencies]`
 //!
-//! The display is the one part of the tool that cannot be judged from a unit test alone — a frame
+//! The display is the one part of the tool that cannot be judged from a unit test alone - a frame
 //! can be asserted, but not whether the region tears, re-anchors, or leaves the cursor behind. So
 //! this runs a plausible sync without touching the network: many dependencies, eight downloading
 //! at a time, an ordered commit pass that makes the rest wait, and log lines printed above.
