@@ -1,8 +1,8 @@
 # vendorfiles-rs <!-- omit from toc -->
 
 [![crates.io Version](https://img.shields.io/crates/v/vendorfiles)](https://crates.io/crates/vendorfiles)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Araxeus/vendorfiles/blob/main/LICENSE)
-[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Araxeus/vendorfiles)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Araxeus/vendorfiles-rs/blob/main/LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Araxeus/vendorfiles-rs)
 
 A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
 GitHub repositories and keep them up to date. Think of it like a package manager, but for
@@ -44,8 +44,10 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 
 ## Installation
 
-**From a release:** download the archive for your platform from the
-[releases page](https://github.com/Araxeus/vendorfiles/releases) and put `vendor` on your
+**From [GitHub Releases](https://github.com/Araxeus/vendorfiles-rs/releases):**
+
+download the archive for your platform from the
+[release](https://github.com/Araxeus/vendorfiles-rs/releases/latest) and put `vendor`/`vendor.exe` on your
 `PATH`.
 That installs a binary named `vendor`. No system libraries are needed on any platform.
 
@@ -975,11 +977,24 @@ is - stopping tracking should not remove the tool you are running.
 ## Authentication
 
 Anonymous requests to the GitHub API are limited to 60 per hour, so `vendor` warns when it is
-running without credentials. Tokens are resolved in this order:
+running without credentials.
+
+Tokens are resolved in this order:
 
 1. `GITHUB_TOKEN` environment variable
-2. the platform's credential store
+2. the token `vendor login` stored in the platform's credential store
 3. anonymous
+
+`vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
+through GitHub's OAuth device flow:
+
+```text
+$ vendor login
+First, copy your one-time code: ABCD-1234
+Then press [Enter] to continue in your web browser
+Opening your web browser...
+SUCCESS: Logged in successfully
+```
 
 Native stores are compiled in per platform - there is no cross-platform facade, and no system
 library to install:
@@ -996,17 +1011,6 @@ On Linux the Secret Service is tried first, so a token persists wherever a keyri
 running - gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
 usually have none, and there the kernel keyutils store takes over: it always works, but it
 holds secrets in kernel memory.
-
-`vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
-through GitHub's OAuth device flow:
-
-```text
-$ vendor login
-First, copy your one-time code: ABCD-1234
-Then press [Enter] to continue in your web browser
-Opening your web browser...
-SUCCESS: Logged in successfully
-```
 
 `login` asks the store it used how long it keeps things, so when you land on the keyutils
 fallback it tells you rather than letting the next boot look mysteriously anonymous:
@@ -1054,7 +1058,7 @@ can validate and autocomplete it:
 
 ```jsonc
 {
-    "$schema": "https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json",
+    "$schema": "https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/refs/heads/main/vendorfiles.schema.json",
     "vendorDependencies": {
         //...
     }
@@ -1067,7 +1071,7 @@ can validate and autocomplete it:
 <summary>YAML</summary>
 
 ```yml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/refs/heads/main/vendorfiles.schema.json
 vendorDependencies:
   #...
 ```
@@ -1078,7 +1082,7 @@ vendorDependencies:
 <summary>TOML</summary>
 
 ```toml
-#:schema https://raw.githubusercontent.com/Araxeus/vendorfiles/refs/heads/main/vendorfiles.schema.json
+#:schema https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/refs/heads/main/vendorfiles.schema.json
 
 [vendorDependencies]
 #...
