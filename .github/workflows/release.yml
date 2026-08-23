@@ -20,23 +20,56 @@ jobs:
         include:
           - os: macos-latest
             name: macos
+            target: aarch64-apple-darwin
             extension: tar.gz
+          # Statically linked against musl rather than the runner's glibc. A gnu build on
+          # ubuntu-latest records the runner's glibc as a minimum - `GLIBC_2.39` as of 24.04 -
+          # and refuses to start on anything older, which is most long-lived server
+          # distributions (Rocky 9 ships 2.34). A static binary has no such floor.
           - os: ubuntu-latest
             name: linux
+            target: x86_64-unknown-linux-musl
             extension: tar.gz
           - os: windows-latest
             name: windows
+            target: x86_64-pc-windows-msvc
             extension: zip
 
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # `zstd-sys` and `ring` compile C, so the target needs its own C compiler. Without one
+      # cc-rs may fall back to the host `gcc` and link glibc objects into a supposedly static
+      # binary; `CC_x86_64_unknown_linux_musl` below makes the choice explicit.
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build --release --locked --package vendorfiles
+        run: cargo build --release --locked --package vendorfiles --target ${{ matrix.target }}
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      # The failure this guards against is silent: a dynamically linked binary is built, tarred
+      # and published exactly like a static one, and only fails on the user's machine.
+      - name: Check the Linux binary is static
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          binary=target/${{ matrix.target }}/release/vendor
+          file "$binary"
+          if readelf --dynamic "$binary" | grep -q NEEDED; then
+            echo "::error::$binary links a shared library, so it carries a glibc floor"
+            readelf --dynamic "$binary" | grep NEEDED
+            exit 1
+          fi
 
       - name: Get filename
         id: filename
@@ -45,12 +78,12 @@ jobs:
 
       - name: Tar (Unix)
         if: matrix.os != 'windows-latest'
-        run: tar czf ${{ steps.filename.outputs.FILENAME }} -C target/release vendor
+        run: tar czf ${{ steps.filename.outputs.FILENAME }} -C target/${{ matrix.target }}/release vendor
 
       - name: Zip (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: Compress-Archive -Path target/release/vendor.exe ${{ steps.filename.outputs.FILENAME }} -Force
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/vendor.exe ${{ steps.filename.outputs.FILENAME }} -Force
 
       - name: Release
         uses: softprops/action-gh-release@v3
