@@ -32,6 +32,42 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  # The Linux release binary is statically linked against musl so it runs on distributions
+  # older than the runner's glibc (see release.yml). Nothing else builds that target, so
+  # without this leg a break in it - a C dependency that will not cross-compile, a link error -
+  # would first surface during a release.
+  musl:
+    name: Static Linux build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-musl
+
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --package vendorfiles --target x86_64-unknown-linux-musl
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Check the binary is static
+        run: |
+          binary=target/x86_64-unknown-linux-musl/release/vendor
+          file "$binary"
+          if readelf --dynamic "$binary" | grep -q NEEDED; then
+            echo "::error::$binary links a shared library, so it carries a glibc floor"
+            readelf --dynamic "$binary" | grep NEEDED
+            exit 1
+          fi
+
   lint:
     name: Format and lints
     runs-on: ubuntu-latest

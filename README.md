@@ -49,7 +49,9 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 download the archive for your platform from the
 [release](https://github.com/Araxeus/vendorfiles-rs/releases/latest) and put `vendor`/`vendor.exe` on your
 `PATH`.
-That installs a binary named `vendor`. No system libraries are needed on any platform.
+That installs a binary named `vendor`. No system libraries are needed on any platform - the
+Linux archive is statically linked against musl, so it runs on any distribution regardless of
+its glibc version.
 
 **From [Cargo](https://crates.io/crates/vendorfiles):**
 
