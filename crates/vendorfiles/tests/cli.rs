@@ -14,6 +14,7 @@ fn vendor(dir: &Path, args: &[&str]) -> Output {
         .current_dir(dir)
         // Keep the environment from redirecting config discovery or granting credentials.
         .env_remove("VENDOR_CONFIG")
+        .env_remove("DEFAULT_VENDOR_CONFIG")
         .env_remove("INIT_CWD")
         .env_remove("PWD")
         .env("GITHUB_TOKEN", "")
@@ -373,10 +374,94 @@ fn the_vendor_config_env_var_is_honoured() {
         .arg("sync")
         .current_dir(elsewhere.path())
         .env("VENDOR_CONFIG", dir.path())
+        .env_remove("DEFAULT_VENDOR_CONFIG")
         .output()
         .expect("running the vendor binary");
     assert_eq!(stderr(&out), "");
     assert_eq!(code(&out), 0);
+}
+
+/// Runs the binary in `dir` with `DEFAULT_VENDOR_CONFIG` pointing at `fallback`.
+fn vendor_with_default_config(dir: &Path, fallback: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vendor"))
+        .args(args)
+        .current_dir(dir)
+        .env_remove("VENDOR_CONFIG")
+        .env_remove("INIT_CWD")
+        .env_remove("PWD")
+        .env("GITHUB_TOKEN", "")
+        .env("DEFAULT_VENDOR_CONFIG", fallback)
+        .output()
+        .expect("running the vendor binary")
+}
+
+#[test]
+fn the_default_vendor_config_env_var_is_used_when_no_config_is_found() {
+    let fallback = project(r#"{"vendorDependencies":{}}"#);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let out = vendor_with_default_config(elsewhere.path(), fallback.path(), &["sync"]);
+    assert_eq!(stderr(&out), "");
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn the_default_vendor_config_env_var_accepts_a_config_file() {
+    let fallback = project(r#"{"vendorDependencies":{}}"#);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let file = fallback.path().join("vendor.json");
+    let out = vendor_with_default_config(elsewhere.path(), &file, &["sync"]);
+    assert_eq!(stderr(&out), "");
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn the_default_vendor_config_env_var_is_ignored_when_a_config_is_found() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    // Reaching for this one instead would fail loudly.
+    let fallback = project(r#"{"vendorConfig": "nope"}"#);
+    let out = vendor_with_default_config(dir.path(), fallback.path(), &["sync"]);
+    assert_eq!(stderr(&out), "");
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn an_explicit_config_option_never_falls_back_to_the_default() {
+    let fallback = project(r#"{"vendorDependencies":{}}"#);
+    let empty = tempfile::tempdir().unwrap();
+    let location = empty.path().display().to_string();
+    let out = vendor_with_default_config(empty.path(), fallback.path(), &["sync", "-c", &location]);
+    assert!(
+        stderr(&out).contains("No configuration file found in the current directory."),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(code(&out), 1);
+}
+
+#[test]
+fn a_default_vendor_config_pointing_nowhere_is_reported() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let missing = elsewhere.path().join("no-such-folder");
+    let out = vendor_with_default_config(elsewhere.path(), &missing, &["sync"]);
+    assert!(
+        stderr(&out).contains(&format!("Could not read {}", missing.display())),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(code(&out), 1);
+}
+
+#[test]
+fn a_default_vendor_config_folder_without_a_config_reports_the_usual_error() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    let out = vendor_with_default_config(elsewhere.path(), empty.path(), &["sync"]);
+    assert!(
+        stderr(&out).contains("No configuration file found in the current directory."),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(code(&out), 1);
 }
 
 #[test]
@@ -624,6 +709,7 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(dir)
         .env_remove("VENDOR_CONFIG")
+        .env_remove("DEFAULT_VENDOR_CONFIG")
         .env_remove("INIT_CWD")
         .env_remove("PWD")
         .env("GITHUB_TOKEN", "")
