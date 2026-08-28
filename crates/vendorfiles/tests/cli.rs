@@ -41,6 +41,30 @@ fn project(config: &str) -> tempfile::TempDir {
     dir
 }
 
+/// The config path in `dir` as the binary resolves it, with the trailing newline it prints.
+///
+/// The search canonicalises the folder it starts from before joining a config name onto it, and
+/// a temporary directory is rarely its own canonical self: on macOS `/var` is a symlink to
+/// `/private/var`, and on Windows `TEMP` can be an 8.3 short name (`RUNNER~1`). Comparing against
+/// the raw `tempdir()` path passes on Linux and fails on both of the others while the binary is
+/// right, so the same resolution is done here.
+fn resolved_config(dir: &Path) -> String {
+    let folder = std::fs::canonicalize(dir).expect("canonicalising the project folder");
+    let text = folder.to_string_lossy().into_owned();
+    // `canonicalize` hands back a `\\?\` path on Windows, which `fsx::simplify` strips off a
+    // plain drive path before anything is printed.
+    let simplified = text
+        .strip_prefix(r"\\?\")
+        .filter(|rest| {
+            let mut chars = rest.chars();
+            matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+                && chars.next() == Some(':')
+                && chars.next() == Some('\\')
+        })
+        .unwrap_or(&text);
+    format!("{}\n", Path::new(simplified).join("vendor.json").display())
+}
+
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/help")
@@ -583,7 +607,7 @@ const LISTABLE: &str = r#"{
 #[test]
 fn config_prints_the_resolved_path_and_nothing_else() {
     let dir = project(LISTABLE);
-    let expected = format!("{}\n", dir.path().join("vendor.json").display());
+    let expected = resolved_config(dir.path());
     for args in [vec!["config"], vec!["cfg"]] {
         let out = vendor(dir.path(), &args);
         assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
@@ -597,7 +621,7 @@ fn config_names_the_file_the_config_option_points_at() {
     let dir = project(LISTABLE);
     let elsewhere = tempfile::tempdir().unwrap();
     let folder = dir.path().to_string_lossy().into_owned();
-    let expected = format!("{}\n", dir.path().join("vendor.json").display());
+    let expected = resolved_config(dir.path());
 
     for args in [
         vec!["-c", &folder, "config"],
@@ -615,10 +639,7 @@ fn config_answers_for_a_config_that_does_not_parse() {
     let dir = project("{ not json at all");
 
     let out = vendor(dir.path(), &["config"]);
-    assert_eq!(
-        stdout(&out),
-        format!("{}\n", dir.path().join("vendor.json").display())
-    );
+    assert_eq!(stdout(&out), resolved_config(dir.path()));
     assert_eq!(code(&out), 0);
 
     // `list` reads the file, so the same project still reports the parse failure.
