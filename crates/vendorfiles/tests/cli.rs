@@ -53,10 +53,11 @@ fn fixture(name: &str) -> String {
 /// The reference help, plus every place our help deliberately differs from it.
 ///
 /// The fixtures stay exactly as captured from `vendorfiles@1.4.2`, so both facts stay checkable:
-/// what the reference printed, and how we depart from it. Two decisions account for the deltas,
-/// both recorded in `docs/DESIGN.md` §6 - `-p` means `--plain` everywhere, so `--pr` gave up its
-/// short form; and `install` takes any number of sources, with the version moved out of its
-/// second operand into `source@version`.
+/// what the reference printed, and how we depart from it. Three decisions account for the deltas,
+/// all recorded in `docs/DESIGN.md` §6 - `-p` means `--plain` everywhere, so `--pr` gave up its
+/// short form; `install` takes any number of sources, with the version moved out of its second
+/// operand into `source@version`; and `list` and `config` are commands the reference never had,
+/// so the root help gains two lines with nothing to compare against.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
@@ -76,6 +77,21 @@ fn expected_help(name: &str) -> String {
             .replace(
                 "  help [command]                              display help for command",
                 "  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
+            )
+            // `list` and `config` have no counterpart in the reference at all.
+            .replace(
+                "  login|auth [token]",
+                &format!(
+                    "{}\n{}\n  login|auth [token]",
+                    format_args!(
+                        "{:<46}{}",
+                        "  list|ls", "List dependencies in the config file"
+                    ),
+                    format_args!(
+                        "{:<46}{}",
+                        "  config|cfg [command]", "Show or edit the config file"
+                    )
+                ),
             )
             .replace(
                 "  -v, --version",
@@ -241,7 +257,7 @@ fn the_script_covers_the_help_and_version_surface() {
         r#"opts="-c -p -h -v --config --plain --help --version"#,
         // `help` is a command, and the arm that recognises it offers the topics.
         "vendor,help)",
-        r#"opts="-c -p --config --plain sync update outdated install uninstall login completions"#,
+        r#"opts="-c -p --config --plain sync update outdated install uninstall list config login completions"#,
         // Each real subcommand takes `-h` too; `help` itself must not, `vendor help -h` fails.
         r#"opts="-f -h -c -p --force --help --config --plain"#,
     ] {
@@ -540,6 +556,323 @@ fn an_empty_dependency_map_is_a_silent_success() {
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// `config` and `list`, which the reference has no counterpart for
+// ---------------------------------------------------------------------------------------
+
+/// A config with two fully described entries and one that has nothing but files - the shapes
+/// the table has to render, including the columns that can be missing.
+const LISTABLE: &str = r#"{
+  "vendorDependencies": {
+    "React": {
+      "version": "v18.2.0",
+      "repository": "https://github.com/facebook/react",
+      "files": ["README.md"]
+    },
+    "youtube-music": {
+      "version": "v3.3.1",
+      "repository": "https://github.com/th-ch/youtube-music",
+      "files": ["LICENSE"]
+    },
+    "bare": { "files": ["x"] }
+  }
+}"#;
+
+#[test]
+fn config_prints_the_resolved_path_and_nothing_else() {
+    let dir = project(LISTABLE);
+    let expected = format!("{}\n", dir.path().join("vendor.json").display());
+    for args in [vec!["config"], vec!["cfg"]] {
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
+        assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+    }
+}
+
+#[test]
+fn config_names_the_file_the_config_option_points_at() {
+    let dir = project(LISTABLE);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let expected = format!("{}\n", dir.path().join("vendor.json").display());
+
+    for args in [
+        vec!["-c", &folder, "config"],
+        vec!["config", "--config", &folder],
+    ] {
+        let out = vendor(elsewhere.path(), &args);
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+    }
+}
+
+/// The path is what you ask for when the file no longer loads, so it must not need parsing.
+#[test]
+fn config_answers_for_a_config_that_does_not_parse() {
+    let dir = project("{ not json at all");
+
+    let out = vendor(dir.path(), &["config"]);
+    assert_eq!(
+        stdout(&out),
+        format!("{}\n", dir.path().join("vendor.json").display())
+    );
+    assert_eq!(code(&out), 0);
+
+    // `list` reads the file, so the same project still reports the parse failure.
+    let out = vendor(dir.path(), &["list"]);
+    assert!(stderr(&out).contains("Failed to parse"), "{}", stderr(&out));
+    assert_eq!(code(&out), 1);
+}
+
+#[test]
+fn a_missing_config_is_reported_by_config_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = vendor(dir.path(), &["config"]);
+    assert_eq!(stdout(&out), "");
+    assert!(stderr(&out).contains("No configuration file found"));
+    assert_eq!(code(&out), 1);
+}
+
+#[test]
+fn list_prints_a_column_per_field_in_config_order() {
+    let dir = project(LISTABLE);
+    let expected = "\u{1b}[36mNAME           VERSION  REPOSITORY\u{1b}[0m
+React          v18.2.0  https://github.com/facebook/react
+youtube-music  v3.3.1   https://github.com/th-ch/youtube-music
+bare           -        -
+";
+
+    // Every spelling is the same command.
+    for args in [
+        vec!["list"],
+        vec!["ls"],
+        vec!["config", "list"],
+        vec!["cfg", "ls"],
+    ] {
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
+        assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+    }
+}
+
+#[test]
+fn listing_an_empty_config_says_so_rather_than_printing_a_bare_header() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor(dir.path(), &["list"]);
+    assert!(
+        stdout(&out).contains("no dependencies in"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("NAME"));
+    assert_eq!(code(&out), 0);
+}
+
+/// `-h` anywhere under `config` reaches the one page that documents all three forms, and so does
+/// `vendor help config`.
+#[test]
+fn config_help_is_reachable_from_every_form() {
+    let dir = project(LISTABLE);
+    let expected = stdout(&vendor(dir.path(), &["config", "-h"]));
+
+    assert!(
+        expected.starts_with("Usage: vendor config|cfg [options] [command]"),
+        "{expected}"
+    );
+    assert!(expected.contains("  edit [editor]  Open the config file in an editor"));
+    assert!(expected.contains("  list|ls        List the dependencies in the config file"));
+
+    for args in [
+        vec!["config", "--help"],
+        vec!["config", "edit", "-h"],
+        vec!["config", "list", "--help"],
+        vec!["cfg", "-h"],
+        vec!["cfg", "ls", "--help"],
+        vec!["help", "config"],
+        vec!["help", "cfg"],
+    ] {
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
+    }
+}
+
+#[test]
+fn list_help_is_reachable_from_every_form() {
+    let dir = project(LISTABLE);
+    let expected = stdout(&vendor(dir.path(), &["list", "-h"]));
+    assert!(
+        expected.starts_with("Usage: vendor list|ls [options]"),
+        "{expected}"
+    );
+    for args in [vec!["ls", "-h"], vec!["help", "list"], vec!["help", "ls"]] {
+        assert_eq!(
+            stdout(&vendor(dir.path(), &args)),
+            expected,
+            "stdout for `vendor {args:?}`"
+        );
+    }
+}
+
+#[test]
+fn a_config_subcommand_that_does_not_exist_is_worded_like_any_unknown_command() {
+    let dir = project(LISTABLE);
+    for (args, message) in [
+        (
+            vec!["config", "frobnicate"],
+            "error: unknown command 'frobnicate'\n",
+        ),
+        (
+            vec!["config", "edit", "one", "two"],
+            "error: too many arguments for 'config'. Expected 2 arguments but got 3.\n",
+        ),
+        (
+            vec!["list", "extra"],
+            "error: too many arguments for 'list'. Expected 0 arguments but got 1.\n",
+        ),
+    ] {
+        let out = vendor(dir.path(), &args);
+        assert_eq!(stderr(&out), message, "stderr for `vendor {args:?}`");
+        assert_eq!(code(&out), 1, "exit code for `vendor {args:?}`");
+    }
+}
+
+/// An editor named on the command line is what was asked for, so it is run against the resolved
+/// path and its failures are reported rather than routed around.
+#[test]
+fn config_edit_runs_the_editor_it_is_given() {
+    let dir = project(LISTABLE);
+    let stamp = dir.path().join("opened.txt");
+    let editor = fake_editor(dir.path(), "editor", &stamp);
+
+    let out = vendor(dir.path(), &["config", "edit", &editor]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        opened_path(&stamp).ends_with("vendor.json"),
+        "editor was passed {:?}",
+        opened_path(&stamp)
+    );
+}
+
+#[test]
+fn an_editor_that_was_asked_for_by_name_never_falls_through() {
+    let dir = project(LISTABLE);
+    let stamp = dir.path().join("opened.txt");
+    let fallback = fake_editor(dir.path(), "fallback", &stamp);
+
+    // Cannot be started at all.
+    let out = vendor_with_editor(
+        dir.path(),
+        &fallback,
+        &["config", "edit", "no-editor-a1b2c3"],
+    );
+    assert_eq!(code(&out), 1);
+    assert!(
+        stderr(&out).contains("could not run the editor given (no-editor-a1b2c3)"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stamp.exists(), "$EDITOR ran anyway");
+
+    // Started, and reported failure.
+    let refuses = failing_editor(dir.path());
+    let out = vendor_with_editor(dir.path(), &fallback, &["config", "edit", &refuses]);
+    assert_eq!(code(&out), 1);
+    assert!(
+        stderr(&out).contains("could not run the editor given"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stamp.exists(), "$EDITOR ran anyway");
+}
+
+/// `$EDITOR` describes the session rather than this command, so a value that will not start is a
+/// warning on the way to the last candidate - but one that runs and refuses has had the file.
+#[test]
+fn edit_with_no_editor_named_uses_the_environment() {
+    let dir = project(LISTABLE);
+    let stamp = dir.path().join("opened.txt");
+    let editor = fake_editor(dir.path(), "editor", &stamp);
+
+    let out = vendor_with_editor(dir.path(), &editor, &["config", "edit"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(opened_path(&stamp).ends_with("vendor.json"));
+
+    let refuses = failing_editor(dir.path());
+    let out = vendor_with_editor(dir.path(), &refuses, &["config", "edit"]);
+    assert_eq!(code(&out), 1);
+    assert!(stderr(&out).contains("$EDITOR"), "{}", stderr(&out));
+}
+
+/// Runs the binary with `EDITOR` set, which [`vendor`] deliberately does not do.
+fn vendor_with_editor(dir: &Path, editor: &str, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vendor"))
+        .args(args)
+        .current_dir(dir)
+        .env_remove("VENDOR_CONFIG")
+        .env_remove("DEFAULT_VENDOR_CONFIG")
+        .env_remove("INIT_CWD")
+        .env_remove("PWD")
+        .env("GITHUB_TOKEN", "")
+        .env("EDITOR", editor)
+        .output()
+        .expect("running the vendor binary")
+}
+
+/// The path a fake editor recorded, without the quoting `cmd` adds.
+fn opened_path(stamp: &Path) -> String {
+    std::fs::read_to_string(stamp)
+        .expect("the editor recorded its argument")
+        .trim()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// Writes a script that records the path it was handed, and returns the command that runs it.
+///
+/// A real editor would block on a terminal, so the test supplies one that does not: it is the
+/// launch and the argument that are under test, not what an editor does with them.
+fn fake_editor(dir: &Path, name: &str, stamp: &Path) -> String {
+    script(
+        dir,
+        name,
+        &if cfg!(windows) {
+            format!("@echo %1> \"{}\"\r\n", stamp.display())
+        } else {
+            format!("#!/bin/sh\nprintf '%s' \"$1\" > \"{}\"\n", stamp.display())
+        },
+    )
+}
+
+/// An editor that starts and then reports failure - `vim` closed with `:cq`.
+fn failing_editor(dir: &Path) -> String {
+    script(
+        dir,
+        "refuses",
+        if cfg!(windows) {
+            "@exit /b 3\r\n"
+        } else {
+            "#!/bin/sh\nexit 3\n"
+        },
+    )
+}
+
+fn script(dir: &Path, name: &str, body: &str) -> String {
+    let path = dir.join(format!(
+        "{name}{}",
+        if cfg!(windows) { ".bat" } else { ".sh" }
+    ));
+    std::fs::write(&path, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path.to_string_lossy().into_owned()
 }
 
 // ---------------------------------------------------------------------------------------

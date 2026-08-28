@@ -91,16 +91,7 @@ impl Workspace {
     /// [`VendorError::ParseConfig`] when the file is malformed, or one of the `Invalid*Key`
     /// variants when a modelled key has the wrong type.
     pub async fn load(config_location: Option<&str>) -> Result<Self> {
-        let explicit = config_location.is_some_and(|location| !location.is_empty());
-        let start = resolve_start_path(config_location);
-        let folder = real_path(&start)?;
-        let found = match find_config_file(&folder).await {
-            found @ Some(_) => found,
-            // An explicit `-c` names one config; silently using another would defeat it.
-            None if explicit => None,
-            None => default_config_file().await?,
-        };
-        let (path, text) = found.ok_or(VendorError::NoConfigFile)?;
+        let (path, text) = discover(config_location).await?;
 
         let format = ConfigFormat::from_path(&path);
         let canonical = format.parse(&text, &path)?;
@@ -130,11 +121,42 @@ impl Workspace {
         })
     }
 
+    /// The config file the search resolves to, without parsing it.
+    ///
+    /// `vendor config` and `vendor config edit` answer with a path whether or not the file
+    /// parses - a config that no longer loads is exactly when the path is worth asking for.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::NoConfigFile`] when no config file is found, or
+    /// [`VendorError::ReadFile`] when the start path (or a set `DEFAULT_VENDOR_CONFIG`) does not
+    /// exist.
+    pub async fn locate(config_location: Option<&str>) -> Result<PathBuf> {
+        discover(config_location).await.map(|(path, _)| path)
+    }
+
     /// The folder a dependency's files are written to.
     #[must_use]
     pub fn dependency_folder(&self, vendor_folder: Option<&str>, name: &str) -> PathBuf {
         dependency_folder(&self.config, &self.file.settings.path, vendor_folder, name)
     }
+}
+
+/// Runs the config search, returning the file that wins it and the text it holds.
+///
+/// The one place the search order lives: the start path, then the search itself, then
+/// `DEFAULT_VENDOR_CONFIG` as a last resort.
+async fn discover(config_location: Option<&str>) -> Result<(PathBuf, String)> {
+    let explicit = config_location.is_some_and(|location| !location.is_empty());
+    let start = resolve_start_path(config_location);
+    let folder = real_path(&start)?;
+    let found = match find_config_file(&folder).await {
+        found @ Some(_) => found,
+        // An explicit `-c` names one config; silently using another would defeat it.
+        None if explicit => None,
+        None => default_config_file().await?,
+    };
+    found.ok_or(VendorError::NoConfigFile)
 }
 
 /// Resolves the folder (or file) the config search starts from.
