@@ -60,6 +60,12 @@ pub enum VendorError {
     #[error("No package names provided")]
     NoPackageNames,
 
+    #[error("{0} describes one dependency, so it cannot be used with more than one source")]
+    SingleSourceOption(&'static str),
+
+    #[error("'{version}' looks like a version, not a source. Did you mean '{suggestion}'?")]
+    VersionAsSource { version: String, suggestion: String },
+
     // ---- version resolution --------------------------------------------------------
     #[error("files[0] is invalid for hashVersionFile, must be a string or an object - got {0}")]
     InvalidHashVersionFileTarget(&'static str),

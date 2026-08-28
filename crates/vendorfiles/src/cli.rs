@@ -71,13 +71,15 @@ pub enum Command {
     #[command(alias = "o", disable_help_flag = true)]
     Outdated,
 
-    /// Install a dependency.
+    /// Install dependencies.
     #[command(aliases = ["add", "i", "a"], disable_help_flag = true)]
     Install {
-        #[arg(value_name = "url/name")]
-        source: String,
-        #[arg(value_name = "version")]
-        version: Option<String>,
+        /// One or more sources, each optionally pinning a version as `source@version`.
+        ///
+        /// The reference took the version as a second operand; splitting it off the source is
+        /// what lets every operand be a source. `crate::source` does that splitting.
+        #[arg(value_name = "url/name", num_args = 1.., required = true)]
+        sources: Vec<String>,
         #[arg(short = 'n', long = "name", num_args = 0..=1, value_name = "name")]
         name: Option<Option<String>>,
         #[arg(short = 'f', long = "files", num_args = 1.., value_name = "files")]
@@ -163,6 +165,9 @@ pub fn commander_message(error: &clap::Error, args: &[String]) -> String {
         error.get(kind).map(|value| {
             value
                 .to_string()
+                // `<url/name>...` is how clap renders a variadic positional; Commander reports
+                // the name alone, so the repetition marker comes off before the brackets do.
+                .trim_end_matches("...")
                 .trim_matches(|c| matches!(c, '<' | '>' | '[' | ']'))
                 .to_owned()
         })
@@ -199,6 +204,7 @@ pub fn commander_message(error: &clap::Error, args: &[String]) -> String {
                     .lines()
                     .next()
                     .unwrap_or(&names)
+                    .trim_end_matches("...")
                     .trim_matches(|c| matches!(c, '<' | '>' | '[' | ']'));
                 format!("missing required argument '{first}'")
             })

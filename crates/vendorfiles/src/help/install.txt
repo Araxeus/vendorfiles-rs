@@ -1,14 +1,13 @@
-Usage: vendor install|add [options] <url/name> [version]
+Usage: vendor install|add [options] <url/name...>
 
-Install a dependency. origin can be a GitHub repo URL or owner/repo format or
-name of repo to search for.
+Install dependencies. Each source can be a GitHub repo URL or owner/repo format
+or name of repo to search for, and may pin a version as source@version.
 A name in the program registry needs no files; otherwise provide them with -f or
 --files <files...>
 
 Arguments:
   url/name                GitHub repo URL or owner/repo format or name of repo
-                          to search for
-  version                 Version to install
+                          to search for, optionally as source@version
 
 Options:
   -n, --name [name]       Name to write in dependencies
@@ -19,6 +18,7 @@ Options:
 
 Examples:
     vendor install React -n MyReact -f README.md
-    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE
+    vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
+    vendor add rg fd
     vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
 

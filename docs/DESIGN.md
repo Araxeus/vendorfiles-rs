@@ -53,6 +53,7 @@ vendorfiles-rs/
 │           ├── main.rs       # exit codes, ERROR: prefix
 │           ├── cli.rs        # clap derive + Commander error wording
 │           ├── run.rs        # command dispatch
+│           ├── source.rs     # splitting an `install` operand into source and version
 │           ├── spec.rs       # the command grammar, for help routing and operand counting
 │           ├── help.rs       # help/version interception
 │           └── help/*.txt    # help text captured from vendorfiles@1.4.2
@@ -503,3 +504,17 @@ code and the complete resulting file tree (including binary payloads). Covered:
 13. **Credential storage is a native store per platform** (§3.5). On Linux without a keyring
    daemon the token lands in keyutils rather than the Secret Service, where neither tool sees
    the other's token, and `login` warns that it will not survive a reboot.
+14. **`install` takes any number of sources**, so `vendor add rg fd` adds both, and the version
+   moved out of the reference's second operand into `source@version`. The `@` separates only
+   when it falls after the last `/`, which leaves a userinfo URL intact;
+   `crates/vendorfiles/src/source.rs` owns that splitting and nothing else. Sources are installed
+   in turn and the first failure stops the run, like the `update <names>` and `uninstall <names>`
+   loops - an install writes the config as it goes, so what did happen stays recorded. Two
+   argument checks run before any of it, so a mistake never lands half a run: `-n`/`--name` and
+   `-f`/`--files` each describe one entry, so passing either alongside more than one source is
+   rejected rather than guessed at, and a version-shaped operand after the first is named as the
+   reference's old syntax (`did you mean 'owner/repo@v1.0.0'?`) rather than searched for. A lone
+   one is left to the search: there is nothing in front of it to suggest attaching it to.
+   `install`'s two help screens therefore depart from the captured reference as well; the
+   fixtures keep the reference text and the test applies the delta, exactly as for `--plain`
+   in §9.

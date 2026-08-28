@@ -10,6 +10,7 @@ mod cli;
 mod help;
 mod known;
 mod run;
+mod source;
 mod spec;
 
 use std::process::ExitCode;

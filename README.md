@@ -805,7 +805,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor sync` | Download everything the config declares. `-f`/`--force` re-downloads even when the lockfile agrees. |
 | `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
 | `vendor outdated` | List dependencies with a newer version available. |
-| `vendor install <url/name> [version]` | Add a dependency. Accepts a full URL, `owner/repo`, or a name to search for. `-n`/`--name` sets the config key; `-f`/`--files` lists the files. `--dry-run` prints the entry it would add and changes nothing. |
+| `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
 | `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
@@ -819,7 +819,8 @@ vendor update
 vendor bump React
 vendor outdated
 vendor install React -n MyReact -f README.md
-vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE
+vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
+vendor add rg fd
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
 vendor remove React youtube-music
 vendor login
@@ -835,6 +836,8 @@ release assets are called:
 ```bash
 vendor add fd          # or fdfind, or fd-find
 vendor add rg          # keys the entry `ripgrep`, its canonical name
+vendor add rg fd       # both at once
+vendor add fd@v10.2.0  # pin a version
 ```
 
 That writes an ordinary entry - nothing registry-specific, so it keeps working whatever happens to
@@ -1102,9 +1105,9 @@ vendorDependencies:
 CLI help text, argument errors, exit codes, log wording, ANSI colours, lockfile bytes and
 config write-back formatting are all matched deliberately - the help fixtures in
 [`crates/vendorfiles/tests/fixtures/help`](./crates/vendorfiles/tests/fixtures/help) are captured
-from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite. The only departures are the
-two lines `-p`/`--plain` adds and takes away: the fixtures keep the reference text, and the test
-applies that delta explicitly.
+from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite. Two deliberate departures:
+the lines `-p`/`--plain` adds and takes away, and `install` taking many sources, with the version
+moved into `source@version`. The fixtures keep the reference text; the test applies each delta.
 
 The main difference:
 Version lookups run concurrently, and dependencies download
