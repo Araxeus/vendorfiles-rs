@@ -50,11 +50,13 @@ fn fixture(name: &str) -> String {
         .replace("\r\n", "\n")
 }
 
-/// The reference help, plus the two places our help deliberately differs from it.
+/// The reference help, plus every place our help deliberately differs from it.
 ///
 /// The fixtures stay exactly as captured from `vendorfiles@1.4.2`, so both facts stay checkable:
-/// what the reference printed, and how we depart from it. Both departures are the same decision -
-/// `-p` means `--plain` everywhere, so `--pr` gave up its short form.
+/// what the reference printed, and how we depart from it. Two decisions account for the deltas,
+/// both recorded in `docs/DESIGN.md` §6 - `-p` means `--plain` everywhere, so `--pr` gave up its
+/// short form; and `install` takes any number of sources, with the version moved out of its
+/// second operand into `source@version`.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
@@ -63,6 +65,13 @@ fn expected_help(name: &str) -> String {
             .replace(
                 "  -c, --config [file/folder path]",
                 "  -c, --config <file/folder path>",
+            )
+            .replace(
+                "  install|add [options] <url/name> [version]  Install a dependency",
+                &format!(
+                    "{:<46}{}",
+                    "  install|add [options] <url/name...>", "Install dependencies"
+                ),
             )
             .replace(
                 "  help [command]                              display help for command",
@@ -80,8 +89,27 @@ fn expected_help(name: &str) -> String {
             ),
         "update" => reference.replace("  -p|--pr     ", &format!("{:<14}", "  --pr")),
         // `--refresh` is ours, and the summary mentions the registry the reference has no idea
-        // about.
+        // about. `install` also takes any number of sources now, each carrying its own version
+        // as `source@version`, so the usage line, the summary, the argument list and one example
+        // all depart from the reference.
         "install" => reference
+            .replace(
+                "Usage: vendor install|add [options] <url/name> [version]",
+                "Usage: vendor install|add [options] <url/name...>",
+            )
+            .replace(
+                "Install a dependency. origin can be a GitHub repo URL or owner/repo format or
+name of repo to search for.",
+                "Install dependencies. Each source can be a GitHub repo URL or owner/repo format
+or name of repo to search for, and may pin a version as source@version.",
+            )
+            .replace(
+                "  url/name                GitHub repo URL or owner/repo format or name of repo
+                          to search for
+  version                 Version to install",
+                "  url/name                GitHub repo URL or owner/repo format or name of repo
+                          to search for, optionally as source@version",
+            )
             .replace(
                 "  -h, --help              display help for command",
                 &format!(
@@ -98,6 +126,11 @@ fn expected_help(name: &str) -> String {
                 "Files have to be provided with -f or --files <files...>",
                 "A name in the program registry needs no files; otherwise provide them with -f or
 --files <files...>",
+            )
+            .replace(
+                "    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE",
+                "    vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
+    vendor add rg fd",
             ),
         _ => reference,
     }
@@ -696,6 +729,17 @@ programs:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
+  ripgrep:
+    aliases: [rg]
+    repository: https://github.com/BurntSushi/ripgrep
+    asset: "{release}/ripgrep-{version}-{target}{ext}"
+    member: "ripgrep-{version}-{target}/rg{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
 "#,
     )
     .expect("writing the registry");
@@ -772,6 +816,121 @@ fn a_dry_run_of_an_unknown_name_never_reaches_the_network() {
     );
     assert_ne!(code(&out), 0);
     assert!(!dir.path().join("vendor").exists());
+}
+
+// ---------------------------------------------------------------------------------------
+// Several sources at once, and the version that moved into `source@version`
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_dry_run_reports_every_source_it_was_given() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "rg", "fd", "--dry-run"]);
+    let printed = stdout(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(printed.contains("\"ripgrep\": {"), "{printed}");
+    assert!(printed.contains("\"fd\": {"), "{printed}");
+    // Reported in the order they were named, one entry at a time.
+    assert!(
+        printed.find("ripgrep would be added as") < printed.find("fd would be added as"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_source_that_fails_stops_the_ones_after_it() {
+    // `definitely-not-a-program` needs a search, which cannot happen offline, so the run must
+    // fail there rather than carrying on to `fd`.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(
+        dir.path(),
+        &["add", "definitely-not-a-program", "fd", "--dry-run"],
+    );
+    assert_ne!(code(&out), 0);
+    assert!(
+        !stdout(&out).contains("fd would be added as"),
+        "the second source ran anyway: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn a_version_after_an_at_sign_pins_the_entry() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fd@v10.0.0", "--dry-run"]);
+    let printed = stdout(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(printed.contains(r#""version": "v10.0.0""#), "{printed}");
+    // The name comes from the source half, not from the whole operand.
+    assert!(printed.contains("\"fd\": {"), "{printed}");
+}
+
+#[test]
+fn options_that_describe_one_entry_are_rejected_for_several_sources() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    for (args, expected) in [
+        (
+            vec!["add", "rg", "fd", "-n", "Both"],
+            "-n or --name describes one dependency, so it cannot be used with more than one source",
+        ),
+        (
+            vec!["add", "rg", "fd", "--name", "Both"],
+            "-n or --name describes one dependency, so it cannot be used with more than one source",
+        ),
+        (
+            vec!["add", "rg", "fd", "-f", "LICENSE"],
+            "-f or --files describes one dependency, so it cannot be used with more than one \
+             source",
+        ),
+    ] {
+        let out = vendor_with_registry(dir.path(), &args);
+        assert_eq!(
+            stderr(&out),
+            format!("\u{1b}[31mERROR: {expected}\u{1b}[0m\n"),
+            "stderr for `vendor {args:?}`"
+        );
+        assert_eq!(code(&out), 1, "exit code for `vendor {args:?}`");
+    }
+}
+
+#[test]
+fn one_source_still_takes_those_options() {
+    // The rejection above is about ambiguity, not about the options themselves.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fd", "-n", "Mine", "--dry-run"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("\"Mine\": {"), "{}", stdout(&out));
+}
+
+#[test]
+fn the_reference_versions_second_operand_is_named_as_a_mistake() {
+    // `vendor add owner/repo v1.0.0` used to pin a version. Every operand is a source now, so
+    // without this it would quietly search GitHub for a repository called `v1.0.0`.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "Araxeus/vendorfiles", "v1.0.0"]);
+
+    assert_eq!(
+        stderr(&out),
+        "\u{1b}[31mERROR: 'v1.0.0' looks like a version, not a source. Did you mean \
+         'Araxeus/vendorfiles@v1.0.0'?\u{1b}[0m\n"
+    );
+    assert_eq!(code(&out), 1);
+}
+
+#[test]
+fn a_lone_version_shaped_source_is_left_to_the_search() {
+    // Nothing in front of it to attach it to, so there is no `source@version` to suggest - and
+    // a repository really could be named this.
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "v1.0.0", "--dry-run"]);
+    assert_ne!(code(&out), 0);
+    assert!(
+        !stderr(&out).contains("looks like a version"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]

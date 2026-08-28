@@ -11,6 +11,7 @@ use vendorfiles_core::{GitHubClient, InstallOptions, Session, SyncOptions, Works
 
 use crate::cli::{Cli, Command};
 use crate::known;
+use crate::source;
 use vendorfiles_core::registry;
 use vendorfiles_core::ui;
 
@@ -89,17 +90,15 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         }
 
         Command::Install {
-            source,
-            version,
+            sources,
             name,
             files,
             refresh,
             dry_run,
         } => {
-            install(
+            install_all(
                 &mut session,
-                &source,
-                version,
+                &sources,
                 name.flatten(),
                 files,
                 Preview { refresh, dry_run },
@@ -243,7 +242,21 @@ fn merge_install_entry(
 /// all happen locally, and stopping before the first request is what makes this answer "what will
 /// this put in my config" instantly - and what lets the tests cover the registry without a
 /// network. The version is left to the install, being the one part that has to ask GitHub.
-fn report_entry(session: &Session, name: &str, entry: &RawDependency) -> Result<()> {
+fn report_entry(
+    session: &Session,
+    name: &str,
+    entry: &RawDependency,
+    pinned: Option<&str>,
+) -> Result<()> {
+    // A `source@version` pin is what the entry would end up carrying, so the report says so
+    // rather than showing whatever the config had. Only here: giving the real install path an
+    // entry already at the requested version would make it look up to date and skip the work.
+    let pinned = pinned.map(|version| RawDependency {
+        version: Some(version.to_owned()),
+        ..entry.clone()
+    });
+    let entry = pinned.as_ref().unwrap_or(entry);
+
     let folder = session
         .workspace
         .dependency_folder(entry.vendor_folder.as_deref(), name);
@@ -430,13 +443,70 @@ async fn resolve_source(
     })
 }
 
-/// `vendor install <url/name> [version]`.
 /// How much of an install to actually perform.
+#[derive(Clone, Copy)]
 struct Preview {
     /// Re-check the registry rather than trusting the cached copy.
     refresh: bool,
     /// Resolve and report, but download nothing and write nothing.
     dry_run: bool,
+}
+
+/// `vendor install <url/name...>` - every operand in turn.
+///
+/// Sequential and fail-fast, like the `update <names>` and `uninstall <names>` loops: an install
+/// writes the config as it goes, so stopping at the first failure leaves a config that says
+/// exactly which sources got as far as being installed.
+///
+/// Both argument checks below run before the first install, so a mistake never lands
+/// half a run.
+async fn install_all(
+    session: &mut Session,
+    sources: &[String],
+    name: Option<String>,
+    files: Option<Vec<String>>,
+    preview: Preview,
+) -> Result<()> {
+    // `-n` names one entry and `-f` describes one entry's files. Spreading either across
+    // several sources would either collide or quietly give unrelated repositories the same file
+    // list, so neither is guessed at.
+    if sources.len() > 1 {
+        if name.is_some() {
+            bail!(VendorError::SingleSourceOption("-n or --name"));
+        }
+        if files.is_some() {
+            bail!(VendorError::SingleSourceOption("-f or --files"));
+        }
+    }
+
+    let operands: Vec<(&str, Option<&str>)> =
+        sources.iter().map(|arg| source::split(arg)).collect();
+
+    // The reference's second operand was a version. Every operand is a source now, so without
+    // this `vendor add owner/repo v1.0.0` would search GitHub for a repository named `v1.0.0`.
+    // Only after the first operand: a lone version-shaped source has nothing to be attached to,
+    // and a repository really could be named that.
+    for (index, (candidate, version)) in operands.iter().enumerate().skip(1) {
+        if version.is_none() && source::looks_like_bare_version(candidate) {
+            bail!(VendorError::VersionAsSource {
+                version: (*candidate).to_owned(),
+                suggestion: format!("{}@{candidate}", operands[index - 1].0),
+            });
+        }
+    }
+
+    for (source, version) in operands {
+        install(
+            session,
+            source,
+            version.map(str::to_owned),
+            name.clone(),
+            files.clone(),
+            preview,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn install(
@@ -539,7 +609,7 @@ async fn install(
     let dependency = entry.resolve(&name)?;
 
     if preview.dry_run {
-        return report_entry(session, &name, &entry);
+        return report_entry(session, &name, &entry, version.as_deref());
     }
 
     session

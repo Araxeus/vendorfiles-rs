@@ -10,7 +10,7 @@ Commands:
   sync|s [options]                            Sync config file
   update|upgrade [options] [names...]         Update outdated dependencies
   outdated|o                                  List outdated dependencies
-  install|add [options] <url/name> [version]  Install a dependency
+  install|add [options] <url/name...>         Install dependencies
   uninstall|remove [names...]                 Uninstall dependencies
   login|auth [token]                          Login to GitHub
   completions <shell>                         Print a shell completion script

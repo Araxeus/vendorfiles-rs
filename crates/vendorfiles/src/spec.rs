@@ -34,8 +34,8 @@ pub struct CommandSpec {
     /// Maximum positional operands, or `None` when variadic.
     pub max_operands: Option<usize>,
     pub options: &'static [OptionSpec],
-    /// Help text, byte-identical to the reference CLI's but for `--plain` and the short form it
-    /// took from `--pr`.
+    /// Help text, byte-identical to the reference CLI's but for the deliberate deviations:
+    /// `--plain` and the short form it took from `--pr`, and `install`'s multi-source surface.
     pub help: &'static str,
 }
 
@@ -167,7 +167,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "install",
         aliases: &["add", "i", "a"],
-        max_operands: Some(2),
+        // Every operand is a source, and there is no limit on how many can be installed at once.
+        max_operands: None,
         options: &[
             OptionSpec {
                 short: Some('n'),
