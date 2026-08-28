@@ -87,14 +87,20 @@ impl Workspace {
     /// # Errors
     ///
     /// Returns [`VendorError::NoConfigFile`] when no config file is found, [`VendorError::ReadFile`]
-    /// when the start path does not exist, [`VendorError::ParseConfig`] when the file is malformed,
-    /// or one of the `Invalid*Key` variants when a modelled key has the wrong type.
+    /// when the start path (or a set `DEFAULT_VENDOR_CONFIG`) does not exist,
+    /// [`VendorError::ParseConfig`] when the file is malformed, or one of the `Invalid*Key`
+    /// variants when a modelled key has the wrong type.
     pub async fn load(config_location: Option<&str>) -> Result<Self> {
+        let explicit = config_location.is_some_and(|location| !location.is_empty());
         let start = resolve_start_path(config_location);
         let folder = real_path(&start)?;
-        let (path, text) = find_config_file(&folder)
-            .await
-            .ok_or(VendorError::NoConfigFile)?;
+        let found = match find_config_file(&folder).await {
+            found @ Some(_) => found,
+            // An explicit `-c` names one config; silently using another would defeat it.
+            None if explicit => None,
+            None => default_config_file().await?,
+        };
+        let (path, text) = found.ok_or(VendorError::NoConfigFile)?;
 
         let format = ConfigFormat::from_path(&path);
         let canonical = format.parse(&text, &path)?;
@@ -135,6 +141,9 @@ impl Workspace {
 ///
 /// `-c` beats `VENDOR_CONFIG` beats `INIT_CWD` beats `PWD` beats the process cwd - and, as in
 /// the reference, an empty value falls through to the next candidate.
+///
+/// This picks where the search *starts*; `DEFAULT_VENDOR_CONFIG` is a separate, later step -
+/// see [`default_config_file`] - reached only once the search here has found nothing.
 fn resolve_start_path(config_location: Option<&str>) -> PathBuf {
     let from_env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
     config_location
@@ -147,6 +156,21 @@ fn resolve_start_path(config_location: Option<&str>) -> PathBuf {
             || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             PathBuf::from,
         )
+}
+
+/// Searches `DEFAULT_VENDOR_CONFIG` - the last resort once the usual search has come up empty.
+///
+/// Unset or empty means there is no fallback. A value that names nothing is a mistake worth
+/// hearing about, so it fails with [`VendorError::ReadFile`] rather than falling through.
+async fn default_config_file() -> Result<Option<(PathBuf, String)>> {
+    let Some(location) = std::env::var("DEFAULT_VENDOR_CONFIG")
+        .ok()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let folder = real_path(Path::new(&location))?;
+    Ok(find_config_file(&folder).await)
 }
 
 /// Finds the first config file at `folder_or_file`, returning its path and contents.

@@ -137,6 +137,10 @@ Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, 
 `vendor.json`, `package.json`. Only the current directory is searched - there is no upward
 walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
 
+If nothing is found, `DEFAULT_VENDOR_CONFIG` is tried last - set it to a folder or config file
+to give every directory a fallback config. Paths inside it stay relative to *it*, so its
+dependencies land next to it, not in the directory you ran from. An explicit `-c` skips this.
+
 Every example below is shown in all three formats, JSON open by default. See
 [`examples/`](./examples/).
 
@@ -780,7 +784,7 @@ Both root options are global, so they read naturally on either side of the subco
 `vendor -c ./conf.json sync` and `vendor sync -c ./conf.json` are the same command. `-c` requires
 its value - naming the option is only ever a request for a specific config - so it can never claim
 a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
-are set.
+are set. `DEFAULT_VENDOR_CONFIG` is tried when the search finds nothing, unless `-c` was given.
 
 Completions are generated from the parser itself, so they always match the flags this build
 accepts - including anything added since the last release:
