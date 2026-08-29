@@ -773,8 +773,10 @@ Commands:
   sync|s [options]                            Sync config file
   update|upgrade [options] [names...]         Update outdated dependencies
   outdated|o                                  List outdated dependencies
-  install|add [options] <url/name> [version]  Install a dependency
+  install|add [options] <url/name...>         Install dependencies
   uninstall|remove [names...]                 Uninstall dependencies
+  list|ls                                     List dependencies in the config file
+  config|cfg [command]                        Show or edit the config file
   login|auth [token]                          Login to GitHub
   completions <shell>                         Print a shell completion script
   help [command]                              display help for command
@@ -807,6 +809,9 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor outdated` | List dependencies with a newer version available. |
 | `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
+| `vendor list` | Print the config's dependencies as a `name` / `version` / `repository` table, in config order. Aliased `ls`, and also spelled `vendor config list`. |
+| `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |
+| `vendor config edit [editor]` | Open the config file. Naming an editor here runs that one and reports it if it fails; with no name, `$EDITOR` is tried and then whatever the OS associates with the file. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
 | `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
@@ -823,6 +828,10 @@ vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
 vendor add rg fd
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
 vendor remove React youtube-music
+vendor list
+vendor config
+vendor config edit
+vendor cfg edit "code --wait"
 vendor login
 ```
 

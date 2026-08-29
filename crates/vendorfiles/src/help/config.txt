@@ -1,0 +1,18 @@
+Usage: vendor config|cfg [options] [command]
+
+Print the resolved config file path
+
+Options:
+  -h, --help     display help for command
+
+Commands:
+  edit [editor]  Open the config file in an editor
+  list|ls        List the dependencies in the config file
+
+Examples:
+    vendor config
+    vendor config edit
+    vendor config edit nano
+    vendor config edit "code --wait"
+    vendor config list
+    vendor cfg ls

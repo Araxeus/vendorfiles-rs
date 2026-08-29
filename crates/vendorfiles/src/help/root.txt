@@ -12,6 +12,8 @@ Commands:
   outdated|o                                  List outdated dependencies
   install|add [options] <url/name...>         Install dependencies
   uninstall|remove [names...]                 Uninstall dependencies
+  list|ls                                     List dependencies in the config file
+  config|cfg [command]                        Show or edit the config file
   login|auth [token]                          Login to GitHub
   completions <shell>                         Print a shell completion script
   help [command]                              display help for command

@@ -99,6 +99,19 @@ pub enum Command {
     )]
     Uninstall { names: Vec<String> },
 
+    /// List the dependencies in the config file.
+    #[command(alias = "ls", disable_help_flag = true)]
+    List,
+
+    /// Print the resolved config file path, or act on the file.
+    #[command(alias = "cfg", disable_help_flag = true)]
+    Config {
+        /// Absent means "print the path": the bare command is the one every shell can compose
+        /// with, so it is what `config` does on its own rather than a help screen.
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
+    },
+
     /// Login to GitHub to increase rate limit.
     #[command(alias = "auth", disable_help_flag = true)]
     Login { token: Option<String> },
@@ -111,6 +124,21 @@ pub enum Command {
         #[arg(value_name = "shell")]
         shell: String,
     },
+}
+
+/// What `vendor config` was asked to do beyond naming the file.
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Open the config file in an editor.
+    #[command(disable_help_flag = true)]
+    Edit {
+        /// The editor command, which may carry its own arguments (`"code --wait"`).
+        editor: Option<String>,
+    },
+
+    /// List the dependencies in the config file.
+    #[command(alias = "ls", disable_help_flag = true)]
+    List,
 }
 
 /// Index of the first token that is not a root option or one of its values.

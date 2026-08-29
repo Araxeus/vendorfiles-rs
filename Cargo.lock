@@ -3745,6 +3745,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "indexmap",
+ "open",
  "serde_json",
  "tempfile",
  "tokio",

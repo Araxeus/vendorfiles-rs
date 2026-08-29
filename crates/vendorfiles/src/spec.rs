@@ -34,8 +34,10 @@ pub struct CommandSpec {
     /// Maximum positional operands, or `None` when variadic.
     pub max_operands: Option<usize>,
     pub options: &'static [OptionSpec],
-    /// Help text, byte-identical to the reference CLI's but for the deliberate deviations:
-    /// `--plain` and the short form it took from `--pr`, and `install`'s multi-source surface.
+    /// Help text. For a command the reference CLI has, it is byte-identical to the reference's
+    /// but for the deliberate deviations: `--plain` and the short form it took from `--pr`, and
+    /// `install`'s multi-source surface. `list` and `config` have no counterpart there, so
+    /// theirs is ours alone.
     pub help: &'static str,
 }
 
@@ -205,6 +207,21 @@ pub const COMMANDS: &[CommandSpec] = &[
         help: include_str!("help/uninstall.txt"),
     },
     CommandSpec {
+        name: "list",
+        aliases: &["ls"],
+        max_operands: Some(0),
+        options: &[],
+        help: include_str!("help/list.txt"),
+    },
+    CommandSpec {
+        name: "config",
+        aliases: &["cfg"],
+        // `edit [editor]` is the longest form, so two operands is the most `config` ever takes.
+        max_operands: Some(2),
+        options: &[],
+        help: include_str!("help/config.txt"),
+    },
+    CommandSpec {
         name: "login",
         aliases: &["auth"],
         max_operands: Some(1),
@@ -251,6 +268,8 @@ mod tests {
         assert_eq!(find("bump").unwrap().name, "update");
         assert_eq!(find("rm").unwrap().name, "uninstall");
         assert_eq!(find("auth").unwrap().name, "login");
+        assert_eq!(find("ls").unwrap().name, "list");
+        assert_eq!(find("cfg").unwrap().name, "config");
         assert!(find("nope").is_none());
     }
 
@@ -294,6 +313,23 @@ mod tests {
         assert!(is_option_like("--files"));
         assert!(!is_option_like("-"));
         assert!(!is_option_like("file"));
+    }
+
+    #[test]
+    fn the_root_help_lists_every_command_in_table_order() {
+        let mut searched_from = 0;
+        for command in super::COMMANDS {
+            // The name at the start of a help line, so `config` is not matched by `-c, --config`.
+            let needle = format!(
+                "
+  {}",
+                command.name
+            );
+            let found = super::ROOT_HELP[searched_from..]
+                .find(&needle)
+                .unwrap_or_else(|| panic!("`{}` is missing from the root help", command.name));
+            searched_from += found + needle.len();
+        }
     }
 
     #[test]

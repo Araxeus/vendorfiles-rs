@@ -1,0 +1,11 @@
+Usage: vendor list|ls [options]
+
+List the dependencies in the config file
+
+Options:
+  -h, --help  display help for command
+
+Examples:
+    vendor list
+    vendor config list
+    vendor ls
