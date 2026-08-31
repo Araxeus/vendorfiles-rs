@@ -35,7 +35,7 @@ jsonc-parser = { version = "0.33", default-features = false, features = ["cst", 
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
 # refers to nothing outside itself.
-jsonschema = { version = "0.50.0", default-features = false }
+jsonschema = { version = "0.52.0", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
