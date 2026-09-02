@@ -22,6 +22,7 @@ use crate::lockfile::{
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
 use crate::ops::{OpResult, Session};
 use crate::progress;
+use crate::remote_zip;
 use crate::template::{is_release_path, replace_version, strip_release_prefix};
 use crate::ui;
 
@@ -415,43 +416,50 @@ async fn download_release_file(
     progress: &progress::Dependency,
 ) -> Result<Vec<PathBuf>> {
     let asset = strip_release_prefix(&replace_version(&spec.input, version));
-    let response = github
-        .download_release_asset(
-            &dependency.repo,
-            &asset,
-            version,
-            dependency.release_regex.as_deref(),
-        )
-        .await?;
 
-    let total = response.content_length();
     let Some(pairs) = spec.output.extraction_pairs() else {
         let FileTarget::Rename(output) = &spec.output else {
             unreachable!("extraction_pairs returns None only for Rename");
         };
+        // The asset itself is the file, so all of it is wanted.
+        let response = fetch_asset(github, dependency, &asset, version).await?;
         let save_path = anchor(folder, replace_version(output, version).as_str());
-        let transfer = progress.transfer(total);
+        let transfer = progress.transfer(response.content_length());
         stream_to_file(response, &save_path, true, Some(&transfer)).await?;
         drop(transfer);
         return Ok(vec![save_path]);
     };
 
+    // Only the declared members come out. An asset that ships every platform's binary, or a
+    // manual nobody asked for, costs neither the disk to unpack it nor - for a tar stream - the
+    // CPU to decompress past the last file wanted.
+    let wanted: Vec<String> = pairs
+        .iter()
+        .map(|(from, _)| replace_version(from, version))
+        .collect();
+
     let temp = tempfile::Builder::new()
         .prefix("vendorfiles-")
         .tempdir()
         .map_err(VendorError::from)?;
-    let archive_path = temp.path().join(&asset);
-    let transfer = progress.transfer(total);
-    stream_to_file(response, &archive_path, false, Some(&transfer)).await?;
-    drop(transfer);
-
     let extracted = temp.path().join("extracted");
-    let extract_target = extracted.clone();
-    progress.status(format!("extracting {asset}"));
-    tokio::task::spawn_blocking(move || archive::extract(&archive_path, &extract_target))
-        .await
-        .map_err(|e| VendorError::Http(e.to_string()))?
-        .map_err(|_| VendorError::CannotExtract(asset.clone()))?;
+
+    if !read_remotely(
+        github, dependency, &asset, version, &wanted, &extracted, progress,
+    )
+    .await
+    {
+        download_and_extract(
+            github,
+            dependency,
+            &asset,
+            version,
+            &wanted,
+            temp.path(),
+            progress,
+        )
+        .await?;
+    }
 
     let mut saved = Vec::with_capacity(pairs.len());
     for (from, to) in pairs {
@@ -461,6 +469,116 @@ async fn download_release_file(
         saved.push(destination);
     }
     Ok(saved)
+}
+
+/// Starts a streaming download of one of a dependency's release assets.
+async fn fetch_asset(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    asset: &str,
+    version: &str,
+) -> Result<reqwest::Response> {
+    github
+        .download_release_asset(
+            &dependency.repo,
+            asset,
+            version,
+            dependency.release_regex.as_deref(),
+        )
+        .await
+}
+
+/// Pulls the wanted members straight out of the asset over HTTP range requests.
+///
+/// Answers whether it worked, and is never an error: all of this is an optimisation over
+/// downloading the asset, so every reason it cannot happen - a container that is not a ZIP,
+/// storage that will not serve ranges, an index that does not hold one of the members - simply
+/// hands the work back to [`download_and_extract`]. A user should never see a failure that only
+/// this route could produce.
+async fn read_remotely(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    asset: &str,
+    version: &str,
+    wanted: &[String],
+    extracted: &Path,
+    progress: &progress::Dependency,
+) -> bool {
+    // ZIP is the only container here whose index is at the end, which is the whole basis for
+    // reading one out of order. Checked by name so a tarball never costs even the one request it
+    // would take to find that out.
+    if !asset.to_ascii_lowercase().ends_with(".zip") {
+        return false;
+    }
+    // Under `WORTH_RANGING` the round trips cost more than the bytes they save, and the release
+    // JSON already knows how big the asset is - so a small one is ruled out without a request.
+    let Ok(Some(source)) = github
+        .asset_range_source(
+            &dependency.repo,
+            asset,
+            version,
+            dependency.release_regex.as_deref(),
+            remote_zip::WORTH_RANGING,
+        )
+        .await
+    else {
+        return false;
+    };
+
+    progress.status(format!("reading {} member(s) from {asset}", wanted.len()));
+    // The transfer is unmeasured: how much of the asset is about to be read is only known once
+    // the index has been, and by then most of the reading is done. The bytes are still counted
+    // as they land, which is what the display actually shows.
+    let transfer = progress.transfer(None);
+    let (arrivals, mut arrived) = tokio::sync::mpsc::unbounded_channel();
+    let source = github.range_source(source, Some(arrivals));
+
+    let destination = extracted.to_path_buf();
+    let wanted = wanted.to_vec();
+    let reading = tokio::task::spawn_blocking(move || {
+        remote_zip::extract_members(source, &destination, &wanted)
+    });
+    // Ends when the blocking task drops the source, and with it the sender.
+    let counting = async {
+        while let Some(bytes) = arrived.recv().await {
+            transfer.advance(bytes);
+        }
+    };
+    let (outcome, ()) = tokio::join!(reading, counting);
+    matches!(outcome, Ok(Ok(true)))
+}
+
+/// Downloads the whole asset into `temp` and extracts the wanted members from it.
+async fn download_and_extract(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    asset: &str,
+    version: &str,
+    wanted: &[String],
+    temp: &Path,
+    progress: &progress::Dependency,
+) -> Result<()> {
+    // Said again because the range route may have set its own status before handing the work
+    // back: what happens next is a download, and the line has to say so.
+    progress.status(format!("downloading {asset}"));
+    let response = fetch_asset(github, dependency, asset, version).await?;
+    // Saved under the asset's own name: a lone `.gz` or `.xz` extracts to its name minus the
+    // suffix, so a random temporary name would produce the wrong member.
+    let archive_path = temp.join(asset);
+    let transfer = progress.transfer(response.content_length());
+    stream_to_file(response, &archive_path, false, Some(&transfer)).await?;
+    drop(transfer);
+
+    let extract_target = temp.join("extracted");
+    let wanted = wanted.to_vec();
+    progress.status(format!("extracting {asset}"));
+    let name = asset.to_owned();
+    tokio::task::spawn_blocking(move || {
+        archive::extract_members(&archive_path, &extract_target, &wanted)
+    })
+    .await
+    .map_err(|e| VendorError::Http(e.to_string()))?
+    .map_err(|_| VendorError::CannotExtract(name))
 }
 
 /// Moves an extracted member into the dependency folder.

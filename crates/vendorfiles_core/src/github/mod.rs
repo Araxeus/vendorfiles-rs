@@ -16,12 +16,20 @@ use serde::Deserialize;
 
 use crate::error::{Result, VendorError};
 use crate::model::Repository;
+use crate::remote_zip::HttpRangeSource;
 use crate::ui;
 
 pub use auth::Token;
 pub use http::USER_AGENT;
 
 const API_ROOT: &str = "https://api.github.com";
+
+/// An asset whose storage will serve byte ranges: where to ask, and how much there is.
+#[derive(Debug, Clone)]
+pub struct AssetRange {
+    pub url: String,
+    pub size: u64,
+}
 
 /// Cache key for a resolved release.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -305,6 +313,35 @@ impl GitHubClient {
         version: &str,
         release_regex: Option<&str>,
     ) -> Result<reqwest::Response> {
+        let (url, release_url, _) = self
+            .release_asset_url(repo, asset_name, version, release_regex)
+            .await?;
+        self.send(url, "application/octet-stream")
+            .await
+            .map_err(|_| VendorError::ReleaseAssetDownloadFailed {
+                asset: asset_name.to_owned(),
+                url: release_url,
+            })
+    }
+
+    /// The API endpoint for a named release asset, the release it belongs to, and its size.
+    ///
+    /// Split out so a download and a range probe agree on which asset they mean, and so
+    /// resolving one costs a single release lookup either way. The size comes from the release
+    /// JSON, which is already in hand - so a decision that turns on how big an asset is need
+    /// not ask the network how big it is.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::ReleaseNotFound`], [`VendorError::ReleaseAssetsMissing`] or
+    /// [`VendorError::ReleaseAssetNotFound`] depending on which step fails.
+    async fn release_asset_url(
+        &self,
+        repo: &Repository,
+        asset_name: &str,
+        version: &str,
+        release_regex: Option<&str>,
+    ) -> Result<(String, String, u64)> {
         let release = if version.is_empty() {
             self.latest_release(repo, release_regex).await?
         } else {
@@ -322,26 +359,117 @@ impl GitHubClient {
             return Err(VendorError::ReleaseAssetsMissing(release_url));
         }
 
-        let asset_id = release
+        let asset = release
             .assets
             .iter()
             .find(|asset| asset.name == asset_name)
-            .map(|asset| asset.id)
             .ok_or_else(|| VendorError::ReleaseAssetNotFound {
                 asset: asset_name.to_owned(),
                 url: release_url.clone(),
             })?;
+        let asset_id = asset.id;
 
-        let url = format!(
-            "{API_ROOT}/repos/{}/{}/releases/assets/{asset_id}",
-            repo.owner, repo.name
-        );
-        self.send(url, "application/octet-stream")
-            .await
-            .map_err(|_| VendorError::ReleaseAssetDownloadFailed {
-                asset: asset_name.to_owned(),
-                url: release_url,
-            })
+        Ok((
+            format!(
+                "{API_ROOT}/repos/{}/{}/releases/assets/{asset_id}",
+                repo.owner, repo.name
+            ),
+            release_url,
+            u64::try_from(asset.size).unwrap_or(0),
+        ))
+    }
+
+    /// Where an asset's bytes can be range-fetched from, when its storage will serve ranges.
+    ///
+    /// The API's asset endpoint redirects to a signed URL on GitHub's release storage, and it is
+    /// *that* URL the ranges go to rather than the endpoint itself. Two reasons, both of which
+    /// would otherwise sink the idea:
+    ///
+    /// - Every request through `api.github.com` counts against the rate limit, which is 60 an
+    ///   hour without a token. Reading an asset in four ranges instead of downloading it once
+    ///   would cost four times the quota to save bandwidth, which is the wrong trade.
+    /// - The signed URL carries its own authorisation and rejects a request that also bears a
+    ///   bearer token. Nothing is sent to it: reqwest drops the `Authorization` header when a
+    ///   redirect crosses to another host, which is exactly what is wanted here.
+    ///
+    /// An asset smaller than `minimum` is refused before anything is sent: the release JSON
+    /// already records every asset's size, so an asset too small to be worth ranging costs no
+    /// request at all to rule out.
+    ///
+    /// `None` means ranges are not on offer - too small, no `Accept-Ranges`, no length to read
+    /// the index against - and the caller should download the asset instead. An error means the
+    /// asset could not be resolved at all, which is the caller's problem either way.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever [`release_asset_url`](Self::release_asset_url) produced when the asset
+    /// cannot be resolved.
+    pub async fn asset_range_source(
+        &self,
+        repo: &Repository,
+        asset_name: &str,
+        version: &str,
+        release_regex: Option<&str>,
+        minimum: u64,
+    ) -> Result<Option<AssetRange>> {
+        let (url, _, recorded) = self
+            .release_asset_url(repo, asset_name, version, release_regex)
+            .await?;
+        if recorded < minimum {
+            return Ok(None);
+        }
+
+        let mut request = self
+            .http
+            .head(url)
+            .header(reqwest::header::ACCEPT, "application/octet-stream")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if let Some(token) = &self.token {
+            request = request.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", token.expose()),
+            );
+        }
+        let Ok(response) = request.send().await else {
+            return Ok(None);
+        };
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+
+        let serves_ranges = response
+            .headers()
+            .get(reqwest::header::ACCEPT_RANGES)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("bytes"));
+        let size = response.content_length().unwrap_or(0);
+        if !serves_ranges || size < minimum {
+            return Ok(None);
+        }
+
+        Ok(Some(AssetRange {
+            url: response.url().to_string(),
+            size,
+        }))
+    }
+
+    /// A range source over `asset` on this client's HTTP stack.
+    ///
+    /// Built here so the client's `reqwest` handle - its user agent, its TLS, its proxy settings
+    /// - stays the one thing that talks to the network, without being handed out.
+    #[must_use]
+    pub fn range_source(
+        &self,
+        asset: AssetRange,
+        arrivals: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
+    ) -> HttpRangeSource {
+        HttpRangeSource::new(
+            self.http.clone(),
+            asset.url,
+            asset.size,
+            tokio::runtime::Handle::current(),
+            arrivals,
+        )
     }
 
     /// Resolves a repository name to its URL via code search.

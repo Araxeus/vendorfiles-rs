@@ -560,6 +560,18 @@ files = [
 The container format is detected from the file's magic bytes, not its name: zip, tar, gzip, xz,
 tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
 
+Only the members you name are unpacked - an asset that also ships another platform's binaries or
+a manual costs neither the disk to write them out nor, for a tar stream, the time to decompress
+past the last file you asked for.
+
+For a `.zip` bigger than a few megabytes, the members are read straight out of the asset over
+HTTP range requests: the archive's index lives at its end, so two requests are usually enough and
+the rest of the asset is never transferred. Pulling two small files out of a 13 MB release zip
+moves about 320 KB. Any reason that cannot work - storage that will not serve ranges, a member
+the index does not hold - falls back to downloading the asset, so it is only ever faster or the
+same. `.tar.gz` cannot be read this way at all: tar has no index and gzip has no seekable entry
+point, so a member is only reachable by decompressing everything ahead of it.
+
 ### Filtering Releases
 
 `releaseRegex` controls which releases count as "latest". It is tested against each release's

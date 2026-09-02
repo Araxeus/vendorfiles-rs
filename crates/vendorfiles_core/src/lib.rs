@@ -30,6 +30,7 @@ pub mod model;
 pub mod ops;
 pub mod progress;
 pub mod registry;
+pub mod remote_zip;
 pub mod template;
 pub mod ui;
 

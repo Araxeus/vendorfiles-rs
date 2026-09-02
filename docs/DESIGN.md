@@ -36,7 +36,9 @@ vendorfiles-rs/
 │   │       │   └── yaml_emit.rs # block-style YAML matching the `yaml` npm package
 │   │       ├── lockfile.rs   # vendor-lock.json read/write, config→lock file mapping
 │   │       ├── fsx.rs        # delete-file-and-empty-parents, stream-to-file
-│   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction
+│   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction,
+│   │       │                 # selective by member with a full-extraction fallback
+│   │       ├── remote_zip.rs # HTTP-range reader: named members out of a remote ZIP
 │   │       ├── github/
 │   │       │   ├── mod.rs    # GitHubClient: releases (cached), commits, search, downloads
 │   │       │   ├── auth.rs   # token resolution, OAuth device flow
