@@ -111,6 +111,14 @@ pub enum VendorError {
     #[error("Request failed with status {0}")]
     RequestFailed(u16),
 
+    // The crate reads its own responses and adds the `x-ratelimit-*` headers to them.
+    // Octocrab deserializes the body and ignores the headers, so it does not know the limit from the status and message.
+    #[error(
+        "GitHub API rate limit reached{0}\nRun `vendor login` or use a GITHUB_TOKEN env \
+         variable - unauthenticated requests are limited to 60 an hour, a token to 5000"
+    )]
+    RateLimited(String),
+
     #[error("Could not save {path}:\n{source}")]
     SaveFailed {
         path: String,
@@ -245,12 +253,72 @@ impl From<octocrab::Error> for VendorError {
     fn from(source: octocrab::Error) -> Self {
         match &source {
             octocrab::Error::GitHub { source: gh, .. } => {
-                Self::RequestFailed(gh.status_code.as_u16())
+                let status = gh.status_code.as_u16();
+                if is_rate_limited(status, &gh.message) {
+                    return Self::RateLimited(String::new());
+                }
+                Self::RequestFailed(status)
             }
             _ => Self::Http(source.to_string()),
         }
     }
 }
 
+/// GitHub answers an exhausted limit with `403` - or `429` for the secondary limits - and says so
+/// in the body.
+///
+/// The status alone is not enough to go on: a bad token is also a `403`, and telling someone to
+/// run `vendor login` when they already did would send them the wrong way.
+#[must_use]
+pub fn is_rate_limited(status: u16, message: &str) -> bool {
+    matches!(status, 403 | 429) && message.to_ascii_lowercase().contains("rate limit")
+}
+
 /// Convenience alias used throughout the library.
 pub type Result<T, E = VendorError> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::{VendorError, is_rate_limited};
+
+    #[test]
+    fn a_refusal_is_only_a_rate_limit_when_github_says_so() {
+        assert!(is_rate_limited(
+            403,
+            "API rate limit exceeded for 1.2.3.4. (But here's the good news: ...)"
+        ));
+        // The secondary limits answer 429.
+        assert!(is_rate_limited(
+            429,
+            "You have exceeded a secondary rate limit"
+        ));
+        // A bad or expired token is a 403 too, and must not be blamed on quota - the advice
+        // would be to log in, which is the one thing that would not help.
+        assert!(!is_rate_limited(403, "Bad credentials"));
+        assert!(!is_rate_limited(
+            403,
+            "Resource not accessible by integration"
+        ));
+        // A limit message on some other status is not a refusal for quota.
+        assert!(!is_rate_limited(404, "API rate limit exceeded"));
+    }
+
+    #[test]
+    fn the_rate_limit_message_carries_its_specifics_and_always_its_advice() {
+        let bare = VendorError::RateLimited(String::new()).to_string();
+        assert!(
+            bare.starts_with("GitHub API rate limit reached\n"),
+            "{bare}"
+        );
+        assert!(bare.contains("vendor login"));
+        assert!(bare.contains("60 an hour"));
+
+        let detailed =
+            VendorError::RateLimited(" - 0 of 60 left, resets in 12 min".to_owned()).to_string();
+        assert!(
+            detailed
+                .starts_with("GitHub API rate limit reached - 0 of 60 left, resets in 12 min\n"),
+            "{detailed}"
+        );
+    }
+}
