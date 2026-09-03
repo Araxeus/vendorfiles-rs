@@ -544,3 +544,14 @@ code and the complete resulting file tree (including binary payloads). Covered:
    together, `"C:\Program Files\...\code.exe" --wait`. Quotes settle the third, and the second
    cannot be told from the first by looking at it, so the filesystem breaks the tie - a value that
    names an existing file is the program and takes no arguments.
+18. **A failed request is never reported as something missing.** The reference catches every
+   failure of a release lookup alike, so an empty version comes back whether the repository has
+   no release or the request was refused. That turns a bad `GITHUB_TOKEN` into "Could not find a
+   version" under `outdated` and `Release "v1.7.0" was not found` under `sync` - two sentences
+   about versions, for a problem that has nothing to do with them. Here only the answers GitHub
+   actually gives to that question are treated as answers: a `404`, or a `releaseRegex` that
+   matched nothing (`means_no_release`). Every other failure - `401`, an exhausted quota, a `503`,
+   a dropped connection - is reported as itself, and `401` has a message of its own naming
+   `GITHUB_TOKEN` and `vendor login`. The same rule governs the lookups in `github`
+   (`unless_the_request_failed`), which is why a refused token no longer arrives as a missing
+   release.

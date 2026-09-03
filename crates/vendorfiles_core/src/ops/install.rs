@@ -83,7 +83,7 @@ impl Session {
         match download(Arc::clone(&self.github), prepared).await {
             Ok(prepared) => self.commit(prepared).await,
             Err(error) => {
-                progress.failed();
+                progress.failed(&error.brief());
                 self.progress.end();
                 Err(error)
             }

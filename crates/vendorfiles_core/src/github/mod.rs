@@ -400,7 +400,7 @@ impl GitHubClient {
         self.send(url, "application/octet-stream")
             .await
             .map_err(|error| {
-                unless_rate_limited(error, || VendorError::ReleaseAssetDownloadFailed {
+                unless_the_request_failed(error, || VendorError::ReleaseAssetDownloadFailed {
                     asset: asset_name.to_owned(),
                     url: release_url,
                 })
@@ -429,7 +429,7 @@ impl GitHubClient {
             self.latest_release(repo, release_regex).await?
         } else {
             self.release_by_tag(repo, version).await.map_err(|error| {
-                unless_rate_limited(error, || VendorError::ReleaseNotFound {
+                unless_the_request_failed(error, || VendorError::ReleaseNotFound {
                     version: version.to_owned(),
                     owner: repo.owner.clone(),
                     repo: repo.name.clone(),
@@ -613,26 +613,34 @@ impl GitHubClient {
             if let Some(detail) = rate_limit_detail(&response) {
                 return Err(VendorError::RateLimited(detail));
             }
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(VendorError::BadCredentials);
+            }
             return Err(VendorError::RequestFailed(response.status().as_u16()));
         }
         Ok(response)
     }
 }
 
-/// Replaces a failure with a friendlier one, unless it was the rate limit.
+/// Rewrites a failure as the friendlier one it was written for, but only when GitHub actually
+/// answered that the thing is not there.
 ///
 /// The lookups here translate their failures into something a user can act on - "release not
-/// found", "could not download the asset". That is the right reading for the failure each one
-/// was written for, and exactly the wrong one for an exhausted quota: a run that dies on the
-/// limit while resolving a pinned version would otherwise be told the version does not exist,
-/// which sends the reader off to check a tag that is perfectly fine.
-fn unless_rate_limited(
+/// found", "could not download the asset". That reading is right for a `404` and wrong for
+/// everything else: a `401` means the credentials were refused, a `429` means the quota ran out,
+/// a `503` means GitHub is unwell. Reported as "release not found", any of those sends the
+/// reader off to check a tag that is perfectly fine - which is exactly what a bad `GITHUB_TOKEN`
+/// used to do.
+///
+/// So the test is the status, not a list of errors worth protecting: only absence is rewritten,
+/// and every other failure is reported as itself.
+fn unless_the_request_failed(
     error: VendorError,
-    replacement: impl FnOnce() -> VendorError,
+    absent: impl FnOnce() -> VendorError,
 ) -> VendorError {
     match error {
-        limited @ VendorError::RateLimited(_) => limited,
-        _ => replacement(),
+        VendorError::RequestFailed(404) => absent(),
+        other => other,
     }
 }
 
@@ -746,7 +754,7 @@ fn encode_query(value: &str) -> String {
 mod tests {
     use super::{
         LOW_QUOTA, Quota, VendorError, encode_path, encode_query, quota_warning, resets_in,
-        unless_rate_limited,
+        unless_the_request_failed,
     };
 
     /// A reading with `remaining` left and a window an hour out from `now`.
@@ -759,31 +767,35 @@ mod tests {
     }
 
     #[test]
-    fn a_rate_limit_survives_the_friendlier_error_that_would_replace_it() {
-        // The case that matters: a pinned version whose lookup ran out of quota must not be
-        // reported as a version that does not exist.
-        let limited = unless_rate_limited(
-            VendorError::RateLimited(" - 0 of 60 left".to_owned()),
-            || VendorError::ReleaseNotFound {
-                version: "v1.0.0".to_owned(),
-                owner: "o".to_owned(),
-                repo: "r".to_owned(),
-            },
-        );
-        assert!(matches!(limited, VendorError::RateLimited(_)), "{limited}");
+    fn only_a_404_is_rewritten_as_the_thing_not_being_there() {
+        let absent = || VendorError::ReleaseNotFound {
+            version: "v1.0.0".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
 
-        // Anything else still gets the wording written for it.
-        let other = unless_rate_limited(VendorError::RequestFailed(404), || {
-            VendorError::ReleaseNotFound {
-                version: "v1.0.0".to_owned(),
-                owner: "o".to_owned(),
-                repo: "r".to_owned(),
-            }
-        });
+        // GitHub answered "no such release", so that is what the user is told.
+        let missing = unless_the_request_failed(VendorError::RequestFailed(404), absent);
         assert!(
-            matches!(other, VendorError::ReleaseNotFound { .. }),
-            "{other}"
+            matches!(missing, VendorError::ReleaseNotFound { .. }),
+            "{missing}"
         );
+
+        // Everything else is a failed request and has to survive intact. A refused token
+        // reported as a missing release is what sent the reader to check a tag that was fine.
+        for failure in [
+            VendorError::BadCredentials,
+            VendorError::RateLimited(" - 0 of 60 left".to_owned()),
+            VendorError::RequestFailed(503),
+            VendorError::Http("connection reset".to_owned()),
+        ] {
+            let rendered = failure.to_string();
+            let kept = unless_the_request_failed(failure, absent);
+            assert!(
+                !matches!(kept, VendorError::ReleaseNotFound { .. }),
+                "{rendered} was rewritten as a missing release"
+            );
+        }
     }
 
     #[test]

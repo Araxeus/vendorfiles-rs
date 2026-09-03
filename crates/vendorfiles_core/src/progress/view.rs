@@ -14,7 +14,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Widget};
 
-use super::state::{Outcome, RunState, Stage};
+use super::state::{MARK_WIDTH, Outcome, RunState, Stage};
 
 /// The frames a spinner cycles through.
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -158,19 +158,30 @@ fn worker_line(name: &str, stage: &Stage, tick: usize, width: usize) -> Line<'st
     let mark = match stage {
         Stage::Waiting => Span::styled(IDLE_MARK, Style::new().dim()),
         Stage::Done { outcome, .. } => {
-            let (symbol, colour) = badge(*outcome);
-            Span::styled(symbol, Style::new().fg(colour))
+            let (glyph, _) = outcome.mark();
+            // The failure mark is an emoji: it has its own colour and ignores a foreground one.
+            colour_of(*outcome).map_or_else(
+                || Span::raw(glyph),
+                |colour| Span::styled(glyph, Style::new().fg(colour)),
+            )
         }
         // Only work that is actually moving gets a spinner.
         _ => Span::styled(SPINNER[tick % SPINNER.len()], Style::new().fg(Color::Cyan)),
     };
+    // Padded to a fixed width because the marks are not all one cell wide, and a name that
+    // shifted a column when its dependency failed would be worse than either.
+    let pad = match stage {
+        Stage::Done { outcome, .. } => outcome.mark().1,
+        _ => " ",
+    };
     let mut spans = vec![
         mark,
+        Span::raw(pad),
         Span::raw(" "),
         Span::styled(column(name), Style::new().bold()),
         Span::raw(" "),
     ];
-    let used = 2 + NAME_WIDTH + 1;
+    let used = MARK_WIDTH + 1 + NAME_WIDTH + 1;
     let rest = width.saturating_sub(used);
 
     match stage {
@@ -225,7 +236,9 @@ fn worker_line(name: &str, stage: &Stage, tick: usize, width: usize) -> Line<'st
             ));
         }
         Stage::Done { outcome, detail } => {
-            let (_, colour) = badge(*outcome);
+            // Red on the text even where the mark supplies its own, so a failed row reads as one
+            // at a glance and a long reason still gets clipped to the room available.
+            let colour = colour_of(*outcome).unwrap_or(Color::Red);
             spans.push(Span::styled(clip(detail, rest), Style::new().fg(colour)));
         }
         Stage::Queued | Stage::Gone => {}
@@ -233,12 +246,12 @@ fn worker_line(name: &str, stage: &Stage, tick: usize, width: usize) -> Line<'st
     Line::from(spans)
 }
 
-/// The mark and colour for a settled dependency, matching the plain-path lines.
-const fn badge(outcome: Outcome) -> (&'static str, Color) {
+/// The colour a settled outcome is drawn in, or `None` when its mark supplies its own.
+const fn colour_of(outcome: Outcome) -> Option<Color> {
     match outcome {
-        Outcome::Changed => ("\u{2714}", Color::Green),
-        Outcome::Unchanged => ("\u{b7}", Color::Cyan),
-        Outcome::Failed => ("\u{2716}", Color::Red),
+        Outcome::Changed => Some(Color::Green),
+        Outcome::Unchanged => Some(Color::Cyan),
+        Outcome::Failed => None,
     }
 }
 
@@ -573,7 +586,7 @@ mod tests {
                 },
                 Stage::Done {
                     outcome: Outcome::Failed,
-                    detail: Cow::Borrowed("failed"),
+                    detail: Cow::Borrowed("GitHub rejected the credentials (401)"),
                 },
             ],
             3,
@@ -590,8 +603,18 @@ mod tests {
             frame[3]
         );
         assert!(
-            frame[4].contains("✖") && frame[4].contains("failed"),
+            frame[4].contains("❌") && frame[4].contains("GitHub rejected the credentials"),
             "{:?}",
+            frame[4]
+        );
+        // The failure mark is two cells wide and the other two are one, so the mark field is
+        // padded: without that, a failed row's name would sit a column right of every other.
+        let column_of = |line: &str, name: &str| line.find(name).expect("the name is on the row");
+        assert_eq!(
+            column_of(&frame[2], "dep-0"),
+            column_of(&frame[4], "dep-2"),
+            "names must line up whatever the mark:\n{:?}\n{:?}",
+            frame[2],
             frame[4]
         );
         // Nothing here is working, so nothing here spins.

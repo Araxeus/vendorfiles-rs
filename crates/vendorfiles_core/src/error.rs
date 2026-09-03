@@ -111,6 +111,17 @@ pub enum VendorError {
     #[error("Request failed with status {0}")]
     RequestFailed(u16),
 
+    /// GitHub refused the credentials on an ordinary API request.
+    ///
+    /// Distinct from [`InvalidToken`](Self::InvalidToken), which answers "is this token you just
+    /// gave me any good?" during `vendor login`. Here nobody was asked for a token, so the
+    /// message has to say where one comes from.
+    #[error(
+        "GitHub rejected the credentials (401 Bad credentials).\n\
+         Check your GITHUB_TOKEN, or run `vendor login`"
+    )]
+    BadCredentials,
+
     // The crate reads its own responses and adds the `x-ratelimit-*` headers to them.
     // Octocrab deserializes the body and ignores the headers, so it does not know the limit from the status and message.
     #[error(
@@ -257,10 +268,33 @@ impl From<octocrab::Error> for VendorError {
                 if is_rate_limited(status, &gh.message) {
                     return Self::RateLimited(String::new());
                 }
+                // No headers on this route to say how much was left, but the status is enough
+                // to say whose fault it is.
+                if status == 401 {
+                    return Self::BadCredentials;
+                }
                 Self::RequestFailed(status)
             }
             _ => Self::Http(source.to_string()),
         }
+    }
+}
+
+impl VendorError {
+    /// The first line of this error's message.
+    ///
+    /// Several of these messages run to two lines - a wrapped source, an instruction on its own
+    /// line - and the live display has one row per dependency to say what went wrong in. The
+    /// whole message still reaches the user as the command's `ERROR:` line.
+    #[must_use]
+    pub fn brief(&self) -> String {
+        let rendered = self.to_string();
+        rendered
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim_end()
+            .to_owned()
     }
 }
 
@@ -301,6 +335,22 @@ mod tests {
         ));
         // A limit message on some other status is not a refusal for quota.
         assert!(!is_rate_limited(404, "API rate limit exceeded"));
+    }
+
+    #[test]
+    fn brief_is_the_first_line_of_a_message_that_has_several() {
+        // The 401 message puts its instruction on a second line; a row has space for one.
+        let full = VendorError::BadCredentials.to_string();
+        assert!(full.contains('\n'), "{full}");
+        assert_eq!(
+            VendorError::BadCredentials.brief(),
+            "GitHub rejected the credentials (401 Bad credentials)."
+        );
+        // A single-line message is its own brief.
+        assert_eq!(
+            VendorError::RequestFailed(500).brief(),
+            "Request failed with status 500"
+        );
     }
 
     #[test]
