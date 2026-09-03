@@ -16,7 +16,7 @@ use crate::ops::Session;
 const fn means_no_release(error: &VendorError) -> bool {
     matches!(
         error,
-        VendorError::RequestFailed(404) | VendorError::NoMatchingRelease { .. }
+        VendorError::RequestFailed { status: 404, .. } | VendorError::NoMatchingRelease { .. }
     )
 }
 
@@ -138,7 +138,10 @@ mod tests {
     #[test]
     fn only_a_real_answer_counts_as_the_repository_having_no_release() {
         // What GitHub actually says when there is nothing to find.
-        assert!(means_no_release(&VendorError::RequestFailed(404)));
+        assert!(means_no_release(&VendorError::RequestFailed {
+            status: 404,
+            message: "Not Found".to_owned(),
+        }));
         assert!(means_no_release(&VendorError::NoMatchingRelease {
             regex: "^v".to_owned(),
             owner: "o".to_owned(),
@@ -150,9 +153,18 @@ mod tests {
         for failure in [
             VendorError::BadCredentials,
             VendorError::RateLimited(String::new()),
-            VendorError::RequestFailed(401),
-            VendorError::RequestFailed(403),
-            VendorError::RequestFailed(503),
+            VendorError::RequestFailed {
+                status: 401,
+                message: String::new(),
+            },
+            VendorError::RequestFailed {
+                status: 403,
+                message: "Resource protected by organization SAML enforcement".to_owned(),
+            },
+            VendorError::RequestFailed {
+                status: 503,
+                message: String::new(),
+            },
             VendorError::Http("connection reset".to_owned()),
         ] {
             assert!(

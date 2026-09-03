@@ -209,7 +209,8 @@ through `auth::resolve_token_async`, which hops to the blocking pool.
 ### 3.6 Errors
 
 `VendorError` (thiserror) in the library; every variant's `Display` is the exact string the
-TS tool prints after the `ERROR: ` prefix. `vendorfiles` uses `anyhow` at the boundary and
+TS tool prints after the `ERROR: ` prefix, with the two deliberate exceptions in §6.18-19 -
+`BadCredentials`, and the message `RequestFailed` quotes from GitHub. `vendorfiles` uses `anyhow` at the boundary and
 renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency
@@ -555,3 +556,23 @@ code and the complete resulting file tree (including binary payloads). Covered:
    `GITHUB_TOKEN` and `vendor login`. The same rule governs the lookups in `github`
    (`unless_the_request_failed`), which is why a refused token no longer arrives as a missing
    release.
+19. **A refused request quotes what GitHub said about it**, so `RequestFailed` carries a `message`
+   beside its status and renders `Request failed with status 403: Resource protected by
+   organization SAML enforcement`. The number alone is not something to act on - a `403` is a
+   SAML-gated organization, a fine-grained token missing one permission, or a secondary rate
+   limit, and they need three different things done about them. GitHub's own body separates them,
+   and the reference throws it away. `GitHubClient::send` reads it (headers first: the body read
+   consumes the response), `one_line` bounds it because it is remote text on a terminal row, and
+   an empty message renders the old sentence unchanged - no dangling colon. Two things fall out:
+   the `octocrab` route stops dropping `gh.message`, and *secondary* rate limits are finally
+   recognised, having been a `403` that leaves `x-ratelimit-remaining` alone and so is invisible
+   to the header test.
+20. **A dependency's failure is reported by the stage that owns it**, and names the dependency in
+   the plain path. The reference prints nothing per dependency when a run fails, which is
+   survivable on a terminal - the row carries the name - and not in a log, where the `ERROR:` line
+   is all there is and a message like a refused token names no repository. So `Dependency::failed`
+   writes `ERROR: {name}: {reason}`, mirroring the row it stands in for. Reported *where the name
+   is still in scope*, which is not where the error surfaces: `download` runs on its own task and
+   `sync` awaits a `Result<Prepared>` whose `Err` side has no name in it at all, so `download`,
+   `commit` and the version lookup each mark their own row (`blame`) rather than leaving it to a
+   caller that cannot. Before this, a failed download in `sync` settled no row and wrote no line.

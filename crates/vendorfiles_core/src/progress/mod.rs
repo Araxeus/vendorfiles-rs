@@ -403,9 +403,18 @@ impl Dependency {
     ///
     /// `reason` is a single line - [`VendorError::brief`](crate::VendorError::brief) produces
     /// one. The full error still reaches the user as the command's `ERROR:` line; this is the
-    /// row, which used to read only "failed" and so said nothing the mark had not already said.
+    /// row, which used to read only "failed".
+    ///
+    /// The plain line names the dependency, because nothing else in a piped run does. A `sync`
+    /// stops at the first failure, so the log used to end with the successes and then a bare
+    /// `ERROR:` that never said which of them it belonged to - and for something like a rejected
+    /// token, whose message mentions no repository, there was no way to tell from the text
+    /// either.
     pub fn failed(&self, reason: &str) {
-        self.finish(Outcome::Failed, reason.to_owned().into(), || {});
+        let name = self.name.clone();
+        self.finish(Outcome::Failed, reason.to_owned().into(), || {
+            ui::error(format!("{name}: {reason}"));
+        });
     }
 
     /// Ends without saying anything, for commands whose real output is elsewhere.

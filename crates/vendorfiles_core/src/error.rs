@@ -108,8 +108,16 @@ pub enum VendorError {
         source: Box<Self>,
     },
 
-    #[error("Request failed with status {0}")]
-    RequestFailed(u16),
+    /// A request GitHub refused, carrying whatever it said about why.
+    ///
+    /// The status on its own is often nothing to act on. A `403` is a SAML-gated organization, a
+    /// fine-grained token missing one permission, or a secondary rate limit - three different
+    /// things to go and do, and the number tells them apart not at all. GitHub's own body does
+    /// ("Resource protected by organization SAML enforcement..."), so it is kept and shown.
+    /// `message` is empty only when there was nothing readable to keep, which is when this reads
+    /// exactly as it always did.
+    #[error("Request failed with status {status}{}", status_detail(message))]
+    RequestFailed { status: u16, message: String },
 
     /// GitHub refused the credentials on an ordinary API request.
     ///
@@ -255,7 +263,12 @@ impl From<reqwest::Error> for VendorError {
     fn from(source: reqwest::Error) -> Self {
         source.status().map_or_else(
             || Self::Http(source.to_string()),
-            |s| Self::RequestFailed(s.as_u16()),
+            // A `reqwest::Error` is raised after the body is gone, so there is no message to
+            // be had on this route - `GitHubClient::send` is the one that reads its own.
+            |s| Self::RequestFailed {
+                status: s.as_u16(),
+                message: String::new(),
+            },
         )
     }
 }
@@ -273,7 +286,10 @@ impl From<octocrab::Error> for VendorError {
                 if status == 401 {
                     return Self::BadCredentials;
                 }
-                Self::RequestFailed(status)
+                Self::RequestFailed {
+                    status,
+                    message: one_line(&gh.message),
+                }
             }
             _ => Self::Http(source.to_string()),
         }
@@ -286,6 +302,10 @@ impl VendorError {
     /// Several of these messages run to two lines - a wrapped source, an instruction on its own
     /// line - and the live display has one row per dependency to say what went wrong in. The
     /// whole message still reaches the user as the command's `ERROR:` line.
+    ///
+    /// A trailing colon goes with it. The variants that wrap a source render as `{source}:` and
+    /// then the context on the next line, so keeping the first line verbatim would end a row on
+    /// punctuation pointing at a line that is not there.
     #[must_use]
     pub fn brief(&self) -> String {
         let rendered = self.to_string();
@@ -294,8 +314,37 @@ impl VendorError {
             .next()
             .unwrap_or_default()
             .trim_end()
+            .trim_end_matches(':')
+            .trim_end()
             .to_owned()
     }
+}
+
+/// `": {message}"`, or nothing at all when GitHub sent no message.
+///
+/// Separate from the `#[error]` attribute so that a refusal with nothing readable in it renders
+/// exactly the sentence it always did, rather than a status code with a dangling colon.
+fn status_detail(message: &str) -> String {
+    if message.is_empty() {
+        String::new()
+    } else {
+        format!(": {message}")
+    }
+}
+
+/// Trims a message GitHub sent to one short line, fit to sit after a status code.
+///
+/// Remote text, so it is bounded on both axes: the first line only, and capped, because this ends
+/// up on a terminal row and an error body is not obliged to be either short or single-line.
+#[must_use]
+pub fn one_line(message: &str) -> String {
+    const LIMIT: usize = 200;
+    let trimmed = message.lines().next().unwrap_or_default().trim();
+    if trimmed.chars().count() <= LIMIT {
+        return trimmed.to_owned();
+    }
+    let kept: String = trimmed.chars().take(LIMIT - 1).collect();
+    format!("{kept}\u{2026}")
 }
 
 /// GitHub answers an exhausted limit with `403` - or `429` for the secondary limits - and says so
@@ -313,7 +362,7 @@ pub type Result<T, E = VendorError> = std::result::Result<T, E>;
 
 #[cfg(test)]
 mod tests {
-    use super::{VendorError, is_rate_limited};
+    use super::{VendorError, is_rate_limited, one_line};
 
     #[test]
     fn a_refusal_is_only_a_rate_limit_when_github_says_so() {
@@ -346,11 +395,73 @@ mod tests {
             VendorError::BadCredentials.brief(),
             "GitHub rejected the credentials (401 Bad credentials)."
         );
+        // A wrapped source ends its first line with the colon that joins it to the context
+        // below, and a row has nothing below it to point at.
+        let wrapped = VendorError::FileDownloadFailed {
+            file: "missing.md".to_owned(),
+            repository: "https://github.com/o/r".to_owned(),
+            version: "v1.0.0".to_owned(),
+            source: Box::new(VendorError::RequestFailed {
+                status: 404,
+                message: "Not Found".to_owned(),
+            }),
+        };
+        assert!(
+            wrapped.to_string().contains(
+                "Not Found:
+"
+            ),
+            "{wrapped}"
+        );
+        assert_eq!(wrapped.brief(), "Request failed with status 404: Not Found");
+
         // A single-line message is its own brief.
         assert_eq!(
-            VendorError::RequestFailed(500).brief(),
+            VendorError::RequestFailed {
+                status: 500,
+                message: String::new(),
+            }
+            .brief(),
             "Request failed with status 500"
         );
+    }
+
+    #[test]
+    fn a_refusal_says_what_github_said_about_it_when_it_said_anything() {
+        // The case this was written for: a 403 whose number could mean three different things,
+        // and whose body says which.
+        assert_eq!(
+            VendorError::RequestFailed {
+                status: 403,
+                message: "Resource protected by organization SAML enforcement".to_owned(),
+            }
+            .to_string(),
+            "Request failed with status 403: Resource protected by organization SAML enforcement"
+        );
+        // Nothing readable in the body leaves the old sentence untouched - no trailing colon.
+        assert_eq!(
+            VendorError::RequestFailed {
+                status: 500,
+                message: String::new(),
+            }
+            .to_string(),
+            "Request failed with status 500"
+        );
+    }
+
+    #[test]
+    fn a_message_from_github_is_bounded_before_it_reaches_a_row() {
+        assert_eq!(
+            one_line("  Resource not accessible  "),
+            "Resource not accessible"
+        );
+        // An error page, or anything else multi-line, contributes its first line and no more.
+        assert_eq!(one_line("Not Found\nthen a stack trace"), "Not Found");
+        assert_eq!(one_line(""), "");
+
+        let long = one_line(&"x".repeat(500));
+        assert_eq!(long.chars().count(), 200);
+        assert!(long.ends_with('\u{2026}'), "{long}");
     }
 
     #[test]

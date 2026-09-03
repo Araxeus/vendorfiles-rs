@@ -16,7 +16,7 @@ use octocrab::Octocrab;
 use octocrab::models::repos::Release;
 use serde::Deserialize;
 
-use crate::error::{Result, VendorError};
+use crate::error::{Result, VendorError, is_rate_limited, one_line};
 use crate::model::Repository;
 use crate::remote_zip::HttpRangeSource;
 use crate::ui;
@@ -608,15 +608,25 @@ impl GitHubClient {
             .await
             .map_err(|e| VendorError::Http(e.to_string()))?;
         if !response.status().is_success() {
-            // This route reads its own responses, so unlike the `octocrab` one it can say how
-            // much was left and when it comes back.
-            if let Some(detail) = rate_limit_detail(&response) {
+            let status = response.status().as_u16();
+            // Headers before body, because reading the body consumes the response. This route
+            // reads its own, so unlike the `octocrab` one it can say how much was left and when
+            // it comes back.
+            let quota = rate_limit_detail(&response);
+            let message = error_message(response).await;
+            if let Some(detail) = quota {
                 return Err(VendorError::RateLimited(detail));
             }
-            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // A *secondary* limit is a `403` or `429` that leaves the remaining count alone, so
+            // the headers above cannot see it and only the wording gives it away. Now that the
+            // body is in hand, the same test the `octocrab` route uses catches those here too.
+            if is_rate_limited(status, &message) {
+                return Err(VendorError::RateLimited(String::new()));
+            }
+            if status == 401 {
                 return Err(VendorError::BadCredentials);
             }
-            return Err(VendorError::RequestFailed(response.status().as_u16()));
+            return Err(VendorError::RequestFailed { status, message });
         }
         Ok(response)
     }
@@ -639,7 +649,7 @@ fn unless_the_request_failed(
     absent: impl FnOnce() -> VendorError,
 ) -> VendorError {
     match error {
-        VendorError::RequestFailed(404) => absent(),
+        VendorError::RequestFailed { status: 404, .. } => absent(),
         other => other,
     }
 }
@@ -701,6 +711,27 @@ fn resets_in(reset: u64, now: u64) -> String {
         return "resets in under a minute".to_owned();
     }
     format!("resets in {} min", seconds / 60)
+}
+
+/// What GitHub said about a refusal, as one short line, or nothing if it said nothing usable.
+///
+/// Refusals come back as `{"message": ..., "documentation_url": ...}`, and the message is the half
+/// worth showing - it names the problem the status code only numbers. Anything else yields an
+/// empty string rather than a wall of markup: a proxy's HTML error page, a truncated body, a `502`
+/// from something that is not GitHub at all.
+async fn error_message(response: reqwest::Response) -> String {
+    let Ok(bytes) = response.bytes().await else {
+        return String::new();
+    };
+    // Parsed from the bytes rather than through `Response::json`, which reqwest is built without -
+    // the same reason `fetch_quota` does it by hand.
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .as_ref()
+        .and_then(|body| body.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .map(one_line)
+        .unwrap_or_default()
 }
 
 /// The specifics for a [`VendorError::RateLimited`], if that is what a refusal is.
@@ -775,7 +806,13 @@ mod tests {
         };
 
         // GitHub answered "no such release", so that is what the user is told.
-        let missing = unless_the_request_failed(VendorError::RequestFailed(404), absent);
+        let missing = unless_the_request_failed(
+            VendorError::RequestFailed {
+                status: 404,
+                message: "Not Found".to_owned(),
+            },
+            absent,
+        );
         assert!(
             matches!(missing, VendorError::ReleaseNotFound { .. }),
             "{missing}"
@@ -786,7 +823,10 @@ mod tests {
         for failure in [
             VendorError::BadCredentials,
             VendorError::RateLimited(" - 0 of 60 left".to_owned()),
-            VendorError::RequestFailed(503),
+            VendorError::RequestFailed {
+                status: 503,
+                message: String::new(),
+            },
             VendorError::Http("connection reset".to_owned()),
         ] {
             let rendered = failure.to_string();

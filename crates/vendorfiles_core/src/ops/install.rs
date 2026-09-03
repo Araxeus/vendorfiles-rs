@@ -76,18 +76,31 @@ impl Session {
     pub async fn install(&mut self, dependency: Dependency, options: InstallOptions) -> OpResult {
         let progress = Arc::new(self.progress.dependency(&dependency.name));
         progress.status("resolving version");
-        let version = self.decide_version(&dependency, &options).await?;
+        let version = match self.decide_version(&dependency, &options).await {
+            Ok(version) => version,
+            // Reported as this dependency's failure rather than handed straight out by `?`. The
+            // version lookup is the first request an install makes and the one a bad token trips
+            // first, and left to `?` it settled no row and wrote no line - so a piped run ended
+            // with an error naming nothing.
+            Err(error) => {
+                let error = blame(&progress, error);
+                self.progress.end();
+                return Err(error);
+            }
+        };
         let prepared = self
             .prepare(dependency, options, version, Arc::clone(&progress))
             .await;
-        match download(Arc::clone(&self.github), prepared).await {
+        // The two stages below report their own failures, so there is nothing to add here.
+        let outcome = match download(Arc::clone(&self.github), prepared).await {
             Ok(prepared) => self.commit(prepared).await,
-            Err(error) => {
-                progress.failed(&error.brief());
-                self.progress.end();
-                Err(error)
-            }
-        }
+            Err(error) => Err(error),
+        };
+        // Closed here rather than left to `Reporter`'s `Drop`, which drains the held lines only
+        // once the session goes - by which point `main` has printed `ERROR:` and the outcome row
+        // would land underneath the error it belongs above.
+        self.progress.end();
+        outcome
     }
 
     /// Picks the version to install: the explicit one, the configured one, or a fresh lookup.
@@ -183,12 +196,15 @@ impl Session {
             },
             &lockfile_path,
         )
-        .await?;
+        .await
+        .map_err(|error| blame(&progress, error))?;
 
         let old_version = dependency.version.clone();
         if old_version.as_deref() != Some(version.as_str()) {
             progress.committing("updating config");
-            self.record_version(&dependency, &version).await?;
+            self.record_version(&dependency, &version)
+                .await
+                .map_err(|error| blame(&progress, error))?;
         }
 
         if options.should_update {
@@ -278,7 +294,20 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     if !prepared.has_work() {
         return Ok(prepared);
     }
+    if let Err(error) = fetch_all(&github, &prepared).await {
+        return Err(blame(&prepared.progress, error));
+    }
+    // Committing waits its turn behind earlier dependencies; there is nothing to animate in
+    // the meantime, and the writes themselves are local and immediate.
+    prepared.progress.waiting();
+    Ok(prepared)
+}
 
+/// Clears the folder and fetches every file into it.
+///
+/// Split out of [`download`] only so that a failure of any part of it is reported once, in one
+/// place, against the right dependency.
+async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
     tokio::fs::create_dir_all(&prepared.folder).await?;
     prepared.progress.status("clearing previous install");
     remove_previously_installed(
@@ -289,17 +318,25 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     .await?;
 
     download_all(
-        &github,
+        github,
         &prepared.dependency,
         &prepared.folder,
         &prepared.version,
         &prepared.progress,
     )
-    .await?;
-    // Committing waits its turn behind earlier dependencies; there is nothing to animate in
-    // the meantime, and the writes themselves are local and immediate.
-    prepared.progress.waiting();
-    Ok(prepared)
+    .await
+}
+
+/// Marks a dependency's row failed and hands the error straight back.
+///
+/// For the stages that have to report their own failures. `download` runs on its own task and
+/// `commit` is handed the dependency by value, so in both cases the caller is left holding an
+/// error with nothing in it to say which dependency it belonged to - `sync` awaits a
+/// `Result<Prepared>` and, on the `Err` side, never learns the name. Reported here, the row is
+/// settled and the plain line written while the name is still in scope.
+fn blame(progress: &progress::Dependency, error: VendorError) -> VendorError {
+    progress.failed(&error.brief());
+    error
 }
 
 /// Deletes whatever the previous install left behind, per the lockfile.
