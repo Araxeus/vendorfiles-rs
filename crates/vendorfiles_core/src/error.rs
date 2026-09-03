@@ -179,6 +179,9 @@ pub enum VendorError {
     #[error("Token is rate limited")]
     TokenRateLimited,
 
+    #[error("Could not remove the stored token: {0}")]
+    KeyringDelete(String),
+
     // ---- registry -----------------------------------------------------------------
     #[error("Could not reach the program registry: {0}")]
     RegistryUnreachable(String),

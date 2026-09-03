@@ -46,6 +46,7 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
             Some(token) => auth::login_with_token(token).await.map_err(Into::into),
             None => auth::login_with_device_flow().await.map_err(Into::into),
         },
+        Command::Logout => auth::logout().await.map_err(Into::into),
 
         _ => return None,
     })
@@ -171,7 +172,9 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
         Command::List | Command::Config { .. } => {
             unreachable!("config and list are dispatched without a session")
         }
-        Command::Login { .. } => unreachable!("login is dispatched without a workspace"),
+        Command::Login { .. } | Command::Logout => {
+            unreachable!("login and logout are dispatched without a workspace")
+        }
         Command::Completions { .. } => {
             unreachable!("completions are dispatched without a workspace")
         }

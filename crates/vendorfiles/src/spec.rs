@@ -36,8 +36,8 @@ pub struct CommandSpec {
     pub options: &'static [OptionSpec],
     /// Help text. For a command the reference CLI has, it is byte-identical to the reference's
     /// but for the deliberate deviations: `--plain` and the short form it took from `--pr`, and
-    /// `install`'s multi-source surface. `list` and `config` have no counterpart there, so
-    /// theirs is ours alone.
+    /// `install`'s multi-source surface. `list`, `config` and `logout` have no counterpart
+    /// there, so theirs is ours alone.
     pub help: &'static str,
 }
 
@@ -227,6 +227,13 @@ pub const COMMANDS: &[CommandSpec] = &[
         max_operands: Some(1),
         options: &[],
         help: include_str!("help/login.txt"),
+    },
+    CommandSpec {
+        name: "logout",
+        aliases: &[],
+        max_operands: Some(0),
+        options: &[],
+        help: include_str!("help/logout.txt"),
     },
     CommandSpec {
         name: "completions",

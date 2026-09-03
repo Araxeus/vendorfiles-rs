@@ -15,5 +15,6 @@ Commands:
   list|ls                                     List dependencies in the config file
   config|cfg [command]                        Show or edit the config file
   login|auth [token]                          Login to GitHub
+  logout                                      Log out of GitHub
   completions <shell>                         Print a shell completion script
   help [command]                              display help for command

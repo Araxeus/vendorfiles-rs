@@ -116,6 +116,10 @@ pub enum Command {
     #[command(alias = "auth", disable_help_flag = true)]
     Login { token: Option<String> },
 
+    /// Remove the stored GitHub token.
+    #[command(disable_help_flag = true)]
+    Logout,
+
     /// Print a completion script for a shell.
     #[command(disable_help_flag = true)]
     Completions {
