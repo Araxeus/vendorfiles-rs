@@ -3,11 +3,13 @@
 //! Mirrors the `unarchive` package the reference depends on: the *content* decides the format,
 //! not the file name, and Chrome/Firefox extension containers are unwrapped as ZIPs.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Result, VendorError};
+use crate::fsx::join_normalized;
 
 /// Archive containers this tool understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,19 +64,282 @@ fn is_tar(header: &[u8]) -> bool {
 pub fn extract(archive: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)?;
 
-    let mut file = File::open(archive)?;
-    let mut header = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut file, &mut header)?;
-    header.truncate(read);
-    file.seek(SeekFrom::Start(0))?;
-
-    match sniff(&header) {
+    let (file, kind) = open_sniffed(archive)?;
+    match kind {
         Some(ArchiveKind::Zip) | None => unzip(file, dest),
         Some(ArchiveKind::Crx) => unzip_crx(archive, dest),
         Some(ArchiveKind::Tar) => untar(file, dest),
         Some(ArchiveKind::Gzip) => ungzip(archive, file, dest),
         Some(ArchiveKind::Xz) => unxz(archive, file, dest),
     }
+}
+
+/// Extracts only the members `wanted` names into `dest`, leaving the rest of the archive alone.
+///
+/// A release asset routinely holds far more than the files a dependency declares - other
+/// platforms' binaries, whole man pages, completions for shells nobody asked about. Unpacking all
+/// of it and then moving two files out of the pile costs the disk space of everything discarded,
+/// and for a `.tar.gz` the CPU to decompress it as well. This walks the same containers
+/// [`extract`] does and writes out only the names asked for, stopping the moment the last one is
+/// found - which for a tar stream means the tail is never decompressed at all.
+///
+/// Only regular files are pulled out selectively. A directory, a symlink, or a name that would
+/// escape `dest` is left to [`extract`], as is any member that was asked for but not matched:
+/// when this pass has not satisfied every name, the whole archive is extracted the old way. So
+/// the fast path can only ever be an optimisation - anything it does not recognise degrades to
+/// the behaviour that was there before it, rather than to a failure.
+///
+/// `wanted` names members as they appear inside the archive, already version-substituted. An
+/// empty `wanted` means the caller has nothing to select by, and the whole archive comes out.
+///
+/// Blocking; call from [`tokio::task::spawn_blocking`].
+///
+/// # Errors
+///
+/// Returns an error if the container cannot be read or is not a supported archive; callers map
+/// that to [`VendorError::CannotExtract`].
+pub fn extract_members(archive: &Path, dest: &Path, wanted: &[String]) -> Result<()> {
+    if wanted.is_empty() {
+        return extract(archive, dest);
+    }
+    std::fs::create_dir_all(dest)?;
+
+    let mut selection = Selection::new(dest, wanted);
+    let (file, kind) = open_sniffed(archive)?;
+    match kind {
+        Some(ArchiveKind::Zip) | None => {
+            unzip_selected(BufReader::new(file), dest, &mut selection)?;
+        }
+        Some(ArchiveKind::Crx) => {
+            let bytes = std::fs::read(archive)?;
+            let start = crx_payload_offset(&bytes)
+                .ok_or_else(|| VendorError::Http("unsupported CRX header".to_owned()))?;
+            unzip_selected(std::io::Cursor::new(&bytes[start..]), dest, &mut selection)?;
+        }
+        Some(ArchiveKind::Tar) => untar_selected(BufReader::new(file), dest, &mut selection)?,
+        Some(ArchiveKind::Gzip) => ungzip_selected(archive, file, dest, &mut selection)?,
+        Some(ArchiveKind::Xz) => unxz_selected(archive, file, dest, &mut selection)?,
+    }
+
+    if selection.satisfied() {
+        return Ok(());
+    }
+    // Something was asked for that the selective pass did not produce. Rather than decide why -
+    // a spelling the archive disagrees with, a member that turned out to be a directory, a
+    // container this does not walk - hand the archive to the extraction that predates this one
+    // and let the caller's own "member is missing" error be the verdict, as before.
+    extract(archive, dest)
+}
+
+/// [`extract_members`] for a ZIP that is not a local file: something that seeks is all it takes.
+///
+/// This is what lets [`crate::remote_zip`] read a release asset over HTTP range requests without
+/// downloading it. The selection rules are the same ones [`extract_members`] applies - regular
+/// files, names that stay inside `dest` - but the fallback is not available here, since there is
+/// no local archive to fall back *to*. So the verdict is handed back instead: `false` means the
+/// caller should download the asset and use [`extract_members`] on it.
+///
+/// Blocking; call from [`tokio::task::spawn_blocking`].
+///
+/// # Errors
+///
+/// Returns an error if the ZIP cannot be read or a member cannot be written out.
+pub fn extract_zip_members(
+    reader: impl Read + Seek,
+    dest: &Path,
+    wanted: &[String],
+) -> Result<bool> {
+    if wanted.is_empty() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(dest)?;
+    let mut selection = Selection::new(dest, wanted);
+    unzip_selected(reader, dest, &mut selection)?;
+    Ok(selection.satisfied())
+}
+
+/// The members an extraction was asked for, tracked by where each one lands under `dest`.
+///
+/// Names are compared as *paths*, resolved the way installation resolves them, so `./bin/tool`
+/// and `bin/tool` are the same member - a raw string comparison would miss one of them.
+struct Selection {
+    pending: HashSet<PathBuf>,
+}
+
+impl Selection {
+    fn new(dest: &Path, wanted: &[String]) -> Self {
+        Self {
+            pending: wanted
+                .iter()
+                .map(|name| join_normalized(dest, &[name]))
+                .collect(),
+        }
+    }
+
+    /// Where `name` would land, if it is a member still being looked for.
+    fn target(&self, dest: &Path, name: &str) -> Option<PathBuf> {
+        let path = join_normalized(dest, &[name]);
+        self.pending.contains(&path).then_some(path)
+    }
+
+    /// Records that `path` has been written out.
+    fn claim(&mut self, path: &Path) {
+        self.pending.remove(path);
+    }
+
+    /// Whether every member asked for has been written out.
+    fn satisfied(&self) -> bool {
+        self.pending.is_empty()
+    }
+}
+
+/// Writes out the selected members of a ZIP, opening no entry it was not asked for.
+fn unzip_selected(reader: impl Read + Seek, dest: &Path, selection: &mut Selection) -> Result<()> {
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| VendorError::Http(e.to_string()))?;
+    // Matched against the index alone, before anything is opened. Opening an entry reads its
+    // local file header, so doing that to *every* entry just to learn its name would cost a
+    // round trip per member of the archive when the ZIP is being read over the network - which
+    // is most of what [`crate::remote_zip`] exists to avoid.
+    let targets: Vec<(String, PathBuf)> = archive
+        .file_names()
+        .filter_map(|name| {
+            selection
+                .target(dest, name)
+                .map(|out| (name.to_owned(), out))
+        })
+        .collect();
+
+    for (name, out) in targets {
+        let mut entry = archive
+            .by_name(&name)
+            .map_err(|e| VendorError::Http(e.to_string()))?;
+        // Regular files only, and only ones whose name stays inside `dest`. Everything else is
+        // the full extraction's business.
+        if entry.is_dir() || entry.is_symlink() || entry.enclosed_name().is_none() {
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut sink = File::create(&out)?;
+        std::io::copy(&mut entry, &mut sink)?;
+        sink.flush()?;
+        drop(sink);
+        // Carried across the way the `zip` crate's own `extract` carries it, or a binary pulled
+        // out of an archive would land without its executable bit.
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
+        }
+        selection.claim(&out);
+    }
+    Ok(())
+}
+
+/// Writes out the selected members of a tar stream, stopping at the last one.
+///
+/// The early stop is what makes this worth doing for a `.tar.gz`: the entries after the last
+/// wanted one are never pulled through the decompressor.
+///
+/// It does mean the stream's own trailer - a gzip CRC, an xz check - goes unverified, which is
+/// the opposite of the choice [`members`] makes a few functions down. Deliberate, and the
+/// difference is what each one is for: a listing exists to say what an archive holds, so a
+/// stream that does not decode cleanly should say so there rather than at install time, and it
+/// pays nothing to read on. Here the bytes wanted are already out and checked - tar carries a
+/// checksum in every header - and reading to the end would give up the entire saving to
+/// validate blocks nothing is taken from.
+fn untar_selected(reader: impl Read, dest: &Path, selection: &mut Selection) -> Result<()> {
+    let mut tarball = tar::Archive::new(reader);
+    for entry in tarball.entries()? {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let name = entry.path()?.to_string_lossy().into_owned();
+        let Some(out) = selection.target(dest, &name) else {
+            continue;
+        };
+        // `unpack_in` refuses to write outside `dest` and carries the entry's mode across; a
+        // refusal leaves the member unclaimed, so the full extraction gets its turn.
+        if entry.unpack_in(dest)? {
+            selection.claim(&out);
+        }
+        if selection.satisfied() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// [`ungzip`], writing out only the selected members.
+fn ungzip_selected(
+    archive: &Path,
+    file: File,
+    dest: &Path,
+    selection: &mut Selection,
+) -> Result<()> {
+    let mut decoder = flate2::read::GzDecoder::new(BufReader::new(file));
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut decoder, &mut head)?;
+    head.truncate(read);
+
+    if is_tar(&head) {
+        // Restart from the beginning: the tar reader needs the header bytes back.
+        let file = File::open(archive)?;
+        let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
+        return untar_selected(decoder, dest, selection);
+    }
+
+    // A lone compressed file: one member, under the archive's own name. If that is not what was
+    // asked for, nothing in here is - and not decompressing it is the whole point.
+    let Some(out) = selection.target(dest, &lone_file_name(archive, ".gz")) else {
+        return Ok(());
+    };
+    let mut sink = File::create(&out)?;
+    sink.write_all(&head)?;
+    std::io::copy(&mut decoder, &mut sink)?;
+    selection.claim(&out);
+    Ok(())
+}
+
+/// [`unxz`], writing out only the selected members.
+///
+/// The payload still passes through a temporary file, for the reason [`unxz`] gives: `lzma-rs`
+/// decodes into a writer, so there is no reader to stop early against. What is saved here is the
+/// unpacking, not the decompression.
+fn unxz_selected(archive: &Path, file: File, dest: &Path, selection: &mut Selection) -> Result<()> {
+    let mut decoded = tempfile::Builder::new()
+        .prefix("vendorfiles-xz-")
+        .tempfile()?;
+    {
+        let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
+        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
+            .map_err(|source| VendorError::Http(source.to_string()))?;
+        writer.flush()?;
+    }
+
+    if decompresses_to_a_tar(&mut decoded.reopen()?)? {
+        return untar_selected(BufReader::new(decoded.reopen()?), dest, selection);
+    }
+
+    let Some(out) = selection.target(dest, &lone_file_name(archive, ".xz")) else {
+        return Ok(());
+    };
+    let mut sink = File::create(&out)?;
+    std::io::copy(&mut decoded.reopen()?, &mut sink)?;
+    selection.claim(&out);
+    Ok(())
+}
+
+/// Opens `archive` and identifies it, leaving the handle at the start.
+fn open_sniffed(archive: &Path) -> Result<(File, Option<ArchiveKind>)> {
+    let mut file = File::open(archive)?;
+    let mut header = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(&mut file, &mut header)?;
+    header.truncate(read);
+    file.seek(SeekFrom::Start(0))?;
+    Ok((file, sniff(&header)))
 }
 
 fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -174,13 +439,8 @@ fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
 ///
 /// Returns an error if the container cannot be read or is not a supported archive.
 pub fn members(archive: &Path) -> Result<Vec<String>> {
-    let mut file = File::open(archive)?;
-    let mut header = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut file, &mut header)?;
-    header.truncate(read);
-    file.seek(SeekFrom::Start(0))?;
-
-    match sniff(&header) {
+    let (file, kind) = open_sniffed(archive)?;
+    match kind {
         Some(ArchiveKind::Zip) | None => zip_names(BufReader::new(file)),
         Some(ArchiveKind::Crx) => {
             let bytes = std::fs::read(archive)?;
@@ -443,6 +703,177 @@ mod tests {
             std::fs::read_to_string(out.join("notes.txt")).unwrap(),
             "plain content"
         );
+    }
+
+    /// A tar.gz holding `wanted`, then `bulk` filled with compressible padding.
+    fn tar_gz_with_padding(path: &std::path::Path, wanted: &str, bulk: &str, bulk_len: usize) {
+        let file = std::fs::File::create(path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut builder = tar::Builder::new(encoder);
+        for (name, size) in [(wanted, 2usize), (bulk, bulk_len)] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(size as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            let body = vec![b'x'; size];
+            let body = if size == 2 { b"hi".to_vec() } else { body };
+            builder.append_data(&mut header, name, &body[..]).unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    #[test]
+    fn selective_extraction_writes_only_the_members_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let zipped = dir.path().join("a.zip");
+        {
+            let file = std::fs::File::create(&zipped).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            for name in ["bin/tool", "share/man/tool.1", "other-platform/tool"] {
+                writer
+                    .start_file::<_, ()>(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(b"hi").unwrap();
+            }
+            writer.finish().unwrap();
+        }
+
+        let out = dir.path().join("out");
+        super::extract_members(&zipped, &out, &["bin/tool".to_owned()]).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("bin/tool")).unwrap(), "hi");
+        // The rest of the archive was never written out.
+        assert!(!out.join("share").exists());
+        assert!(!out.join("other-platform").exists());
+    }
+
+    #[test]
+    fn selective_extraction_resolves_names_as_paths_not_strings() {
+        // A `./` prefix is how plenty of tars spell their entries, and users write either form.
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = dir.path().join("a.tar.gz");
+        tar_gz_with_padding(&tgz, "./bin/tool", "docs/manual.txt", 64);
+
+        let out = dir.path().join("out");
+        super::extract_members(&tgz, &out, &["bin/tool".to_owned()]).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("bin/tool")).unwrap(), "hi");
+        assert!(!out.join("docs").exists());
+    }
+
+    #[test]
+    fn selective_extraction_of_a_tar_stops_at_the_last_wanted_member() {
+        // The point of the early stop: the padding after the wanted file is never decompressed,
+        // so it never reaches the disk either.
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = dir.path().join("a.tar.gz");
+        tar_gz_with_padding(&tgz, "tool", "bulk.bin", 4 * 1024 * 1024);
+
+        let out = dir.path().join("out");
+        super::extract_members(&tgz, &out, &["tool".to_owned()]).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("tool")).unwrap(), "hi");
+        assert!(!out.join("bulk.bin").exists());
+    }
+
+    #[test]
+    fn a_member_the_selective_pass_misses_falls_back_to_full_extraction() {
+        // A directory cannot be pulled out selectively, so the whole archive comes out and the
+        // caller sees exactly what it saw before this path existed.
+        let dir = tempfile::tempdir().unwrap();
+        let zipped = dir.path().join("a.zip");
+        {
+            let file = std::fs::File::create(&zipped).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            writer
+                .add_directory::<_, ()>("themes", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer
+                .start_file::<_, ()>("themes/dark.css", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"hi").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let out = dir.path().join("out");
+        super::extract_members(&zipped, &out, &["themes".to_owned()]).unwrap();
+        assert!(out.join("themes").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(out.join("themes/dark.css")).unwrap(),
+            "hi"
+        );
+    }
+
+    #[test]
+    fn a_lone_compressed_file_is_selected_by_the_name_it_extracts_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("notes.txt.gz");
+        {
+            let file = std::fs::File::create(&archive_path).unwrap();
+            let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+            encoder.write_all(b"plain content").unwrap();
+            encoder.finish().unwrap();
+        }
+
+        let out = dir.path().join("out");
+        super::extract_members(&archive_path, &out, &["notes.txt".to_owned()]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join("notes.txt")).unwrap(),
+            "plain content"
+        );
+    }
+
+    #[test]
+    fn selective_extraction_of_a_tar_xz_writes_only_the_wanted_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("a.tar.xz");
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            for name in ["fresh", "README.md"] {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(2);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, name, &b"hi"[..]).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        std::fs::write(&archive_path, &compressed).unwrap();
+
+        let out = dir.path().join("out");
+        super::extract_members(&archive_path, &out, &["fresh".to_owned()]).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("fresh")).unwrap(), "hi");
+        assert!(!out.join("README.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_selected_zip_member_keeps_its_executable_bit() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let zipped = dir.path().join("a.zip");
+        {
+            let file = std::fs::File::create(&zipped).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            writer
+                .start_file::<_, ()>(
+                    "tool",
+                    zip::write::SimpleFileOptions::default().unix_permissions(0o755),
+                )
+                .unwrap();
+            writer.write_all(b"hi").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let out = dir.path().join("out");
+        super::extract_members(&zipped, &out, &["tool".to_owned()]).unwrap();
+        let mode = std::fs::metadata(out.join("tool"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o111, 0o111, "the binary has to stay runnable");
     }
 
     #[test]
