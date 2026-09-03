@@ -117,6 +117,58 @@ pub fn save_token(token: &Token) {
     }
 }
 
+/// What the credential store had for `logout` to remove.
+#[derive(Debug, PartialEq, Eq)]
+enum Logout {
+    Removed,
+    NotStored,
+}
+
+/// Deletes a stored token, or reports that there was none.
+fn forget(service: &str, user: &str) -> Result<Logout> {
+    let Some(entry) = credentials::entry(service, user) else {
+        return Ok(Logout::NotStored);
+    };
+    match entry.delete_credential() {
+        Ok(()) => Ok(Logout::Removed),
+        Err(keyring_core::Error::NoEntry) => Ok(Logout::NotStored),
+        Err(error) => Err(VendorError::KeyringDelete(error.to_string())),
+    }
+}
+
+/// Removes the token `login` saved, and warns about anything that still authenticates.
+///
+/// The reference tool's entry is not ours to delete, so a token still readable from it is
+/// reported rather than removed.
+///
+/// # Errors
+///
+/// Returns [`VendorError::KeyringDelete`] if the store had a token but would not delete it.
+pub async fn logout() -> Result<()> {
+    let (outcome, leftover) = tokio::task::spawn_blocking(|| {
+        let outcome = forget(KEYRING_SERVICE, KEYRING_USER);
+        // Read after the delete, so this can only be the reference tool's entry.
+        let leftover = outcome.is_ok() && keyring_token().is_some();
+        (outcome, leftover)
+    })
+    .await
+    .map_err(|_| VendorError::AuthUnknownFailure)?;
+
+    match outcome? {
+        Logout::Removed => ui::success("Logged out successfully"),
+        Logout::NotStored => ui::info("Not logged in"),
+    }
+    if std::env::var("GITHUB_TOKEN").is_ok_and(|value| !value.is_empty()) {
+        ui::warning("GITHUB_TOKEN is set, so requests are still authenticated");
+    }
+    if leftover {
+        ui::warning(
+            "a token from the vendorfiles npm CLI is still in the keyring, and will be used",
+        );
+    }
+    Ok(())
+}
+
 /// Verifies a token against the API and stores it.
 ///
 /// # Errors
@@ -194,7 +246,8 @@ fn wait_for_enter() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Token, is_plausible_token};
+    use super::{Logout, Token, forget, is_plausible_token};
+    use crate::github::credentials;
 
     #[test]
     fn plausible_tokens_exclude_base64_ciphertext() {
@@ -208,5 +261,22 @@ mod tests {
     #[test]
     fn tokens_do_not_leak_through_debug() {
         assert_eq!(format!("{:?}", Token::new("ghp_secret")), "Token(***)");
+    }
+
+    #[test]
+    fn forgetting_a_token_removes_it_once_and_then_says_so() {
+        const USER: &str = "logout";
+        let entry = credentials::entry("vendorfiles-cli-test", USER).expect("a store");
+        if entry.set_password("ghp_logout_0123456789").is_err() {
+            return; // No writable store here; `credentials`'s own tests report that.
+        }
+        assert_eq!(
+            forget("vendorfiles-cli-test", USER).expect("delete"),
+            Logout::Removed
+        );
+        assert_eq!(
+            forget("vendorfiles-cli-test", USER).expect("delete again"),
+            Logout::NotStored
+        );
     }
 }

@@ -1,0 +1,6 @@
+Usage: vendor logout [options]
+
+Remove the GitHub token saved by login
+
+Options:
+  -h, --help  display help for command

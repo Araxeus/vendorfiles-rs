@@ -790,6 +790,7 @@ Commands:
   list|ls                                     List dependencies in the config file
   config|cfg [command]                        Show or edit the config file
   login|auth [token]                          Login to GitHub
+  logout                                      Log out of GitHub
   completions <shell>                         Print a shell completion script
   help [command]                              display help for command
 ```
@@ -825,6 +826,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |
 | `vendor config edit [editor]` | Open the config file. Naming an editor here runs that one and reports it if it fails; with no name, `$EDITOR` is tried and then whatever the OS associates with the file. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
+| `vendor logout` | Delete the stored token. The npm CLI's own keyring entry is left alone. |
 | `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
 Examples:
@@ -1026,6 +1028,10 @@ Opening your web browser...
 SUCCESS: Logged in successfully
 ```
 
+`vendor logout` deletes it again, and says so if something still authenticates you: a
+`GITHUB_TOKEN` in the environment, or a token the npm CLI left in its own keyring entry - that
+entry is not this tool's to delete.
+
 Native stores are compiled in per platform - there is no cross-platform facade, and no system
 library to install:
 
@@ -1054,7 +1060,7 @@ Two ways to get persistence if you see that: run a Secret Service daemon (instal
 [this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
 your shell profile or CI secrets.
 
-`login` is the one command that does not need a config file - it works from any directory.
+`login` and `logout` need no config file - they work from any directory.
 
 ## Lockfile
 

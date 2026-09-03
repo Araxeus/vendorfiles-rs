@@ -204,7 +204,7 @@ its initialise-before-first-use ordering hazard - out of the design; the store o
 once, behind a `OnceLock`.
 
 Keyring access is blocking IPC (on Linux it can prompt to unlock), so the CLI reaches it
-through `auth::resolve_token_async`, which hops to the blocking pool.
+through `auth::resolve_token_async` and `auth::logout`, which hop to the blocking pool.
 
 ### 3.6 Errors
 
@@ -465,7 +465,7 @@ code and the complete resulting file tree (including binary payloads). Covered:
 5. **Failures the TS tool never handled** - a nonexistent tag, for instance - print the message
    the source already had for them and exit 1, instead of dumping an unhandled Octokit
    rejection and exiting 127.
-6. **`vendor login` needs no config file**, and **`vendor update <name>` honours the `default`
+6. **`vendor login` and `vendor logout` need no config file**, and **`vendor update <name>` honours the `default`
    block** (the TS tool read the un-merged config entry there and reported "No repository
    found").
 7. **`vendor install owner/repo` keeps a configured dependency's own repository URL** rather
@@ -520,15 +520,18 @@ code and the complete resulting file tree (including binary payloads). Covered:
    `install`'s two help screens therefore depart from the captured reference as well; the
    fixtures keep the reference text and the test applies the delta, exactly as for `--plain`
    in §9.
-15. **`vendor config|cfg` and `vendor list|ls`**, which the reference has neither of. `config`
+15. **`vendor config|cfg`, `vendor list|ls` and `vendor logout`**, which the reference has none of. `config`
    prints the resolved config path alone - no `INFO:` prefix, so `$EDITOR "$(vendor config)"`
    composes - and `config edit [editor]` opens it. Both resolve the path through
    `Workspace::locate`, which runs the same search as `Workspace::load` but stops before parsing:
    a config that no longer loads is exactly when its path is worth asking for, and `config edit`
    is how it gets repaired. `list` (also spelled `config list`) prints the dependencies as a
    `name`/`version`/`repository` table in config order, reading the file and nothing else - no
-   credential lookup, no display. These are the only commands with no fixture to check against, so
-   `spec.rs` tests instead that every entry in `COMMANDS` appears in the root help in table order.
+   credential lookup, no display. `logout` deletes the entry `login` wrote and nothing else: the
+   reference tool's entry is not ours to remove, so a token still readable from it is reported
+   instead, as is a `GITHUB_TOKEN` that would keep outranking the keyring anyway. These commands
+   have no fixture to check against, so `spec.rs` tests instead that every entry in `COMMANDS`
+   appears in the root help in table order.
 16. **Only `$EDITOR` falls through.** `config edit` has three candidates - the editor named on the
    command line, `$EDITOR`, and the operating system's own association - but an editor named on
    the command line is what the user asked for, so a failure there is reported rather than papered

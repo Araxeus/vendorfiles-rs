@@ -80,8 +80,8 @@ fn fixture(name: &str) -> String {
 /// what the reference printed, and how we depart from it. Three decisions account for the deltas,
 /// all recorded in `docs/DESIGN.md` §6 - `-p` means `--plain` everywhere, so `--pr` gave up its
 /// short form; `install` takes any number of sources, with the version moved out of its second
-/// operand into `source@version`; and `list` and `config` are commands the reference never had,
-/// so the root help gains two lines with nothing to compare against.
+/// operand into `source@version`; and `list`, `config` and `logout` are commands the reference
+/// never had, so the root help gains lines with nothing to compare against.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
@@ -100,9 +100,10 @@ fn expected_help(name: &str) -> String {
             )
             .replace(
                 "  help [command]                              display help for command",
-                "  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
+                "  logout                                      Log out of GitHub\n  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
             )
-            // `list` and `config` have no counterpart in the reference at all.
+            // `list` and `config` have no counterpart in the reference at all - nor does
+            // `logout`, inserted alongside `completions` above.
             .replace(
                 "  login|auth [token]",
                 &format!(
@@ -281,7 +282,7 @@ fn the_script_covers_the_help_and_version_surface() {
         r#"opts="-c -p -h -v --config --plain --help --version"#,
         // `help` is a command, and the arm that recognises it offers the topics.
         "vendor,help)",
-        r#"opts="-c -p --config --plain sync update outdated install uninstall list config login completions"#,
+        r#"opts="-c -p --config --plain sync update outdated install uninstall list config login logout completions"#,
         // Each real subcommand takes `-h` too; `help` itself must not, `vendor help -h` fails.
         r#"opts="-f -h -c -p --force --help --config --plain"#,
     ] {
@@ -312,19 +313,21 @@ fn the_shell_name_is_case_insensitive() {
 }
 
 #[test]
-fn completions_help_is_routed_like_every_other_command() {
+fn our_own_commands_serve_the_help_we_ship() {
     let dir = project("{}");
-    let served = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/help/completions.txt"),
-    )
-    .expect("the served help text")
-    .replace("\r\n", "\n");
     // No reference fixture to diff against - the reference has no such command - so this checks
     // the binary serves the text we ship, through both routes.
-    for args in [vec!["completions", "--help"], vec!["help", "completions"]] {
-        let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), served, "stdout for `vendor {args:?}`");
-        assert_eq!(code(&out), 0);
+    for command in ["completions", "logout"] {
+        let served = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("src/help/{command}.txt")),
+        )
+        .expect("the served help text")
+        .replace("\r\n", "\n");
+        for args in [vec![command, "--help"], vec!["help", command]] {
+            let out = vendor(dir.path(), &args);
+            assert_eq!(stdout(&out), served, "stdout for `vendor {args:?}`");
+            assert_eq!(code(&out), 0);
+        }
     }
 }
 
