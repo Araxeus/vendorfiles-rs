@@ -5,7 +5,9 @@ pub mod credentials;
 pub mod http;
 
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::OnceCell;
 
@@ -23,6 +25,32 @@ pub use auth::Token;
 pub use http::USER_AGENT;
 
 const API_ROOT: &str = "https://api.github.com";
+
+/// The quota below which a run is worth mentioning.
+///
+/// Anonymous requests get 60 an hour and resolving a dependency costs about one, so with two
+/// thirds of the budget still there, saying anything would be noise. Below this it stops being
+/// theoretical.
+const LOW_QUOTA: u64 = 40;
+
+/// A reading of the core rate limit.
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct Quota {
+    limit: u64,
+    remaining: u64,
+    /// When the window rolls over, as a Unix timestamp.
+    reset: u64,
+}
+
+#[derive(Deserialize)]
+struct RateLimitBody {
+    resources: RateLimitResources,
+}
+
+#[derive(Deserialize)]
+struct RateLimitResources {
+    core: Quota,
+}
 
 /// An asset whose storage will serve byte ranges: where to ask, and how much there is.
 #[derive(Debug, Clone)]
@@ -62,7 +90,11 @@ pub struct GitHubClient {
     http: reqwest::Client,
     token: Option<Token>,
     releases: Mutex<IndexMap<ReleaseKey, ReleaseSlot>>,
-    warned: Once,
+    /// The quota lookup of an anonymous run, from the first request onwards.
+    quota: Mutex<Option<tokio::task::JoinHandle<Option<Quota>>>>,
+    /// Requests charged to the core limit since that lookup was started.
+    spent: AtomicU64,
+    probing: Once,
 }
 
 impl std::fmt::Debug for GitHubClient {
@@ -91,19 +123,68 @@ impl GitHubClient {
             http: http::client()?,
             token,
             releases: Mutex::new(IndexMap::new()),
-            warned: Once::new(),
+            quota: Mutex::new(None),
+            spent: AtomicU64::new(0),
+            probing: Once::new(),
         })
     }
 
-    /// Warns once, on first use, that anonymous requests are rate limited.
-    fn warn_if_anonymous(&self) {
-        if self.token.is_none() {
-            self.warned.call_once(|| {
-                ui::warning(
-                    "You may be rate limited, run `vendor login` or use a GITHUB_TOKEN env variable",
-                );
-            });
+    /// Notes a request charged to the core rate limit, and starts the quota lookup if this is
+    /// the first of the run.
+    fn note_api_request(&self) {
+        self.spent.fetch_add(1, Ordering::Relaxed);
+        self.begin_quota_lookup();
+    }
+
+    /// Notes a request billed somewhere other than the core limit.
+    ///
+    /// Search has a limit of its own, so counting one against the core budget would report a run
+    /// as more expensive than it was.
+    fn note_search_request(&self) {
+        self.begin_quota_lookup();
+    }
+
+    /// Puts the quota lookup in flight, once per run, for an anonymous client only.
+    ///
+    /// Spawned rather than awaited: nothing needs the answer until the run is over, and waiting
+    /// for it here would put a round trip in front of the first request that actually does work.
+    ///
+    /// Anonymous only for two reasons. It is the only limit that bites - a token gets 5000 an
+    /// hour - and it is the only one `/rate_limit` reports truthfully: measured against a
+    /// `gh`-issued token, that endpoint answered `0 of 5000 used` while the `x-ratelimit-used`
+    /// header on real responses said 210. The headers are authoritative, but `octocrab`'s typed
+    /// calls - the ones that spend the quota - deserialise the body and drop them.
+    fn begin_quota_lookup(&self) {
+        if self.token.is_some() {
+            return;
         }
+        self.probing.call_once(|| {
+            let client = self.http.clone();
+            let handle = tokio::spawn(async move { fetch_quota(&client).await });
+            if let Ok(mut slot) = self.quota.lock() {
+                *slot = Some(handle);
+            }
+        });
+    }
+
+    /// Silent unless there is something to say: a healthy budget, an authenticated run, a run
+    /// that made no API requests at all, or a lookup that failed all say nothing. A diagnostic
+    /// is never worth interrupting a run over.
+    pub async fn report_quota(&self) {
+        if let Some(warning) = self.quota_report().await {
+            ui::warning(warning);
+        }
+    }
+
+    /// What [`report_quota`](Self::report_quota) would say, so the decision can be tested
+    /// against a live reading rather than only against numbers made up here.
+    async fn quota_report(&self) -> Option<String> {
+        let lookup = self.quota.lock().ok().and_then(|mut slot| slot.take())?;
+        let quota = lookup.await.ok()??;
+        // The reading was taken alongside the run's first request, so what has been spent since
+        // is everything counted after that one - give or take the one that raced the lookup.
+        let spent = self.spent.load(Ordering::Relaxed).saturating_sub(1);
+        quota_warning(&quota, spent, now())
     }
 
     /// The slot for `key`, creating an empty one if this is the first request for it.
@@ -147,7 +228,7 @@ impl GitHubClient {
             tag: tag.to_owned(),
         });
         slot.get_or_try_init(|| async {
-            self.warn_if_anonymous();
+            self.note_api_request();
             self.api
                 .repos(&repo.owner, &repo.name)
                 .releases()
@@ -178,7 +259,7 @@ impl GitHubClient {
             repo: repo.to_string(),
         });
         slot.get_or_try_init(|| async {
-            self.warn_if_anonymous();
+            self.note_api_request();
             self.api
                 .repos(&repo.owner, &repo.name)
                 .releases()
@@ -203,7 +284,7 @@ impl GitHubClient {
             regex: regex.to_owned(),
         });
         slot.get_or_try_init(|| async {
-            self.warn_if_anonymous();
+            self.note_api_request();
             // `fancy_regex` accepts the JavaScript patterns users already have, lookaround
             // included.
             let compiled =
@@ -247,7 +328,7 @@ impl GitHubClient {
             sha: String,
         }
 
-        self.warn_if_anonymous();
+        self.note_api_request();
         let route = format!(
             "/repos/{}/{}/commits?path={}&per_page=1",
             repo.owner,
@@ -282,7 +363,7 @@ impl GitHubClient {
         path: &str,
         git_ref: Option<&str>,
     ) -> Result<reqwest::Response> {
-        self.warn_if_anonymous();
+        self.note_api_request();
         let mut url = format!(
             "{API_ROOT}/repos/{}/{}/contents/{}",
             repo.owner,
@@ -318,9 +399,11 @@ impl GitHubClient {
             .await?;
         self.send(url, "application/octet-stream")
             .await
-            .map_err(|_| VendorError::ReleaseAssetDownloadFailed {
-                asset: asset_name.to_owned(),
-                url: release_url,
+            .map_err(|error| {
+                unless_rate_limited(error, || VendorError::ReleaseAssetDownloadFailed {
+                    asset: asset_name.to_owned(),
+                    url: release_url,
+                })
             })
     }
 
@@ -345,13 +428,13 @@ impl GitHubClient {
         let release = if version.is_empty() {
             self.latest_release(repo, release_regex).await?
         } else {
-            self.release_by_tag(repo, version)
-                .await
-                .map_err(|_| VendorError::ReleaseNotFound {
+            self.release_by_tag(repo, version).await.map_err(|error| {
+                unless_rate_limited(error, || VendorError::ReleaseNotFound {
                     version: version.to_owned(),
                     owner: repo.owner.clone(),
                     repo: repo.name.clone(),
-                })?
+                })
+            })?
         };
 
         let release_url = release.url.to_string();
@@ -479,7 +562,7 @@ impl GitHubClient {
     /// Returns [`VendorError::NoSearchResults`] when the search is empty, or
     /// [`VendorError::NoSearchResultsDidYouMean`] when the best hit has a different name.
     pub async fn find_repo_url(&self, name: &str) -> Result<String> {
-        self.warn_if_anonymous();
+        self.note_search_request();
         let page = self
             .api
             .search()
@@ -525,10 +608,114 @@ impl GitHubClient {
             .await
             .map_err(|e| VendorError::Http(e.to_string()))?;
         if !response.status().is_success() {
+            // This route reads its own responses, so unlike the `octocrab` one it can say how
+            // much was left and when it comes back.
+            if let Some(detail) = rate_limit_detail(&response) {
+                return Err(VendorError::RateLimited(detail));
+            }
             return Err(VendorError::RequestFailed(response.status().as_u16()));
         }
         Ok(response)
     }
+}
+
+/// Replaces a failure with a friendlier one, unless it was the rate limit.
+///
+/// The lookups here translate their failures into something a user can act on - "release not
+/// found", "could not download the asset". That is the right reading for the failure each one
+/// was written for, and exactly the wrong one for an exhausted quota: a run that dies on the
+/// limit while resolving a pinned version would otherwise be told the version does not exist,
+/// which sends the reader off to check a tag that is perfectly fine.
+fn unless_rate_limited(
+    error: VendorError,
+    replacement: impl FnOnce() -> VendorError,
+) -> VendorError {
+    match error {
+        limited @ VendorError::RateLimited(_) => limited,
+        _ => replacement(),
+    }
+}
+
+/// Asks GitHub what is left of the core limit.
+///
+/// Unauthenticated on purpose - see [`GitHubClient::begin_quota_lookup`] - and free: this
+/// endpoint does not itself count against the limit it reports.
+async fn fetch_quota(client: &reqwest::Client) -> Option<Quota> {
+    let response = client
+        .get(format!("{API_ROOT}/rate_limit"))
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    // Parsed from the bytes rather than through `Response::json`: reqwest is built without its
+    // `json` feature, and `serde_json` is already here.
+    let body: RateLimitBody = serde_json::from_slice(&response.bytes().await.ok()?).ok()?;
+    Some(body.resources.core)
+}
+
+/// Seconds since the Unix epoch, or zero if the clock is before it.
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// What to tell the user about a quota reading, if anything.
+///
+/// `spent` is what the run has charged since the reading was taken, which is what makes the
+/// figure current rather than a snapshot from the start of the run.
+fn quota_warning(quota: &Quota, spent: u64, now: u64) -> Option<String> {
+    // A window that has already rolled over makes the reading meaningless - and generous, since
+    // the budget is back to full.
+    if quota.reset <= now {
+        return None;
+    }
+    let left = quota.remaining.saturating_sub(spent);
+    if left >= LOW_QUOTA {
+        return None;
+    }
+    Some(format!(
+        "{left} of {} GitHub API requests left this hour ({}). Run `vendor login` or use a \
+         GITHUB_TOKEN env variable to raise the limit to 5000",
+        quota.limit,
+        resets_in(quota.reset, now)
+    ))
+}
+
+/// How long until a limit window rolls over, in words.
+fn resets_in(reset: u64, now: u64) -> String {
+    let seconds = reset.saturating_sub(now);
+    if seconds < 60 {
+        return "resets in under a minute".to_owned();
+    }
+    format!("resets in {} min", seconds / 60)
+}
+
+/// The specifics for a [`VendorError::RateLimited`], if that is what a refusal is.
+///
+/// The headers are what decide it: an exhausted limit answers with `x-ratelimit-remaining: 0`,
+/// and a `403` without that is some other refusal entirely - a bad token, most likely.
+fn rate_limit_detail(response: &reqwest::Response) -> Option<String> {
+    // The status alone is checked here rather than through `is_rate_limited`: that one has to
+    // read the body's wording because it is all the `octocrab` route gets, whereas the header
+    // below is a stronger test than any message.
+    if !matches!(response.status().as_u16(), 403 | 429) {
+        return None;
+    }
+    let number =
+        |name: &str| -> Option<u64> { response.headers().get(name)?.to_str().ok()?.parse().ok() };
+    if number("x-ratelimit-remaining")? > 0 {
+        return None;
+    }
+    Some(format!(
+        " - 0 of {} left, {}",
+        number("x-ratelimit-limit")?,
+        resets_in(number("x-ratelimit-reset")?, now())
+    ))
 }
 
 /// Percent-encodes a path, keeping `/` separators intact.
@@ -557,7 +744,130 @@ fn encode_query(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_path, encode_query};
+    use super::{
+        LOW_QUOTA, Quota, VendorError, encode_path, encode_query, quota_warning, resets_in,
+        unless_rate_limited,
+    };
+
+    /// A reading with `remaining` left and a window an hour out from `now`.
+    fn reading(remaining: u64) -> Quota {
+        Quota {
+            limit: 60,
+            remaining,
+            reset: 10_000 + 3600,
+        }
+    }
+
+    #[test]
+    fn a_rate_limit_survives_the_friendlier_error_that_would_replace_it() {
+        // The case that matters: a pinned version whose lookup ran out of quota must not be
+        // reported as a version that does not exist.
+        let limited = unless_rate_limited(
+            VendorError::RateLimited(" - 0 of 60 left".to_owned()),
+            || VendorError::ReleaseNotFound {
+                version: "v1.0.0".to_owned(),
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
+            },
+        );
+        assert!(matches!(limited, VendorError::RateLimited(_)), "{limited}");
+
+        // Anything else still gets the wording written for it.
+        let other = unless_rate_limited(VendorError::RequestFailed(404), || {
+            VendorError::ReleaseNotFound {
+                version: "v1.0.0".to_owned(),
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
+            }
+        });
+        assert!(
+            matches!(other, VendorError::ReleaseNotFound { .. }),
+            "{other}"
+        );
+    }
+
+    #[test]
+    fn a_healthy_budget_says_nothing() {
+        assert!(quota_warning(&reading(60), 0, 10_000).is_none());
+        // The threshold is a floor, not a trigger: exactly at it is still healthy.
+        assert!(quota_warning(&reading(LOW_QUOTA), 0, 10_000).is_none());
+    }
+
+    #[test]
+    fn a_low_budget_reports_what_is_left_and_how_to_raise_it() {
+        // Pinned whole, the way the rest of the tool's wording is: this is what the user reads,
+        // and it should only ever change on purpose.
+        assert_eq!(
+            quota_warning(&reading(LOW_QUOTA - 1), 0, 10_000).expect("a warning"),
+            concat!(
+                "39 of 60 GitHub API requests left this hour (resets in 60 min). ",
+                "Run `vendor login` or use a GITHUB_TOKEN env variable to raise the limit to 5000"
+            )
+        );
+    }
+
+    #[test]
+    fn what_the_run_has_spent_since_the_reading_comes_off_the_figure() {
+        // 45 left at the start is healthy, but not after the run has spent 10 of them.
+        assert!(quota_warning(&reading(45), 0, 10_000).is_none());
+        let warning = quota_warning(&reading(45), 10, 10_000).expect("a warning");
+        assert!(warning.starts_with("35 of 60"), "{warning}");
+        // Spending more than the reading knew about cannot underflow into a huge number.
+        let warning = quota_warning(&reading(45), 999, 10_000).expect("a warning");
+        assert!(warning.starts_with("0 of 60"), "{warning}");
+    }
+
+    #[test]
+    fn a_reading_from_a_window_that_has_since_rolled_over_is_not_reported() {
+        // The budget is back to full, so the old figure would only mislead.
+        let stale = Quota {
+            limit: 60,
+            remaining: 1,
+            reset: 9_000,
+        };
+        assert!(quota_warning(&stale, 0, 10_000).is_none());
+    }
+
+    /// Proves the lookup against the shape GitHub actually answers with, rather than a fixture
+    /// of it, and proves the anonymous path end to end: a spawned lookup, collected later, put
+    /// through the same decision a real run uses.
+    ///
+    /// Costs no quota - `/rate_limit` does not count against the limit it reports - and is
+    /// anonymous, which is the only way the client ever calls it.
+    #[tokio::test]
+    #[ignore = "queries the GitHub API"]
+    async fn an_anonymous_run_reads_its_real_quota() {
+        let github = crate::GitHubClient::new(None).expect("a client");
+        // Stand in for a run that made one request, which is what starts the lookup.
+        github.note_api_request();
+
+        // A budget nobody has eaten into has nothing to report.
+        assert!(
+            github.quota_report().await.is_none(),
+            "a healthy anonymous budget should stay quiet - rerun in an hour if this machine              has been hammering the API"
+        );
+
+        // And one that has been spent does. A second client, since the first consumed its
+        // lookup; the spend is forced past the threshold rather than waited for.
+        let github = crate::GitHubClient::new(None).expect("a client");
+        github.note_api_request();
+        github.spent.fetch_add(60, super::Ordering::Relaxed);
+        let warning = github.quota_report().await.expect("a warning");
+        assert!(
+            warning.contains("of 60 GitHub API requests left"),
+            "{warning}"
+        );
+        assert!(warning.contains("vendor login"), "{warning}");
+    }
+
+    #[test]
+    fn reset_times_read_as_english() {
+        assert_eq!(resets_in(10_030, 10_000), "resets in under a minute");
+        assert_eq!(resets_in(10_060, 10_000), "resets in 1 min");
+        assert_eq!(resets_in(10_800, 10_000), "resets in 13 min");
+        // A window already past is not a negative duration.
+        assert_eq!(resets_in(9_000, 10_000), "resets in under a minute");
+    }
 
     #[test]
     fn path_encoding_keeps_separators() {

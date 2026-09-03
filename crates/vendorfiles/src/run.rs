@@ -90,7 +90,21 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Session::new(github, workspace)
     };
 
-    match cli.command {
+    let outcome = run_command(&mut session, cli.command).await;
+
+    let already_said = outcome
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<VendorError>())
+        .is_some_and(|error| matches!(error, VendorError::RateLimited(_)));
+    if !already_said {
+        session.github.report_quota().await;
+    }
+    outcome
+}
+
+async fn run_command(session: &mut Session, command: Command) -> Result<()> {
+    match command {
         Command::Sync { force } => {
             session
                 .sync(SyncOptions {
@@ -112,7 +126,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                     .await?;
             } else {
                 for name in names {
-                    upgrade_one(&mut session, &name).await?;
+                    upgrade_one(session, &name).await?;
                 }
             }
         }
@@ -135,7 +149,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             dry_run,
         } => {
             install_all(
-                &mut session,
+                session,
                 &sources,
                 name.flatten(),
                 files,
