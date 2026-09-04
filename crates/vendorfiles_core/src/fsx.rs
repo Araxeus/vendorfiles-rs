@@ -189,12 +189,19 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
 
 /// Deletes `relative_path` under `root`, then prunes the directories it leaves empty.
 ///
-/// Stops at `root` and at the first non-empty directory. Fails if the file is not there,
-/// matching the reference - callers decide whether that matters.
+/// Stops at `root` and at the first non-empty directory.
+///
+/// A file that is already gone counts as deleted, and so does a `root` that is: this is asked
+/// for a state rather than an action, and `uninstall` has to be able to drop a dependency whose
+/// files the user removed by hand. The reference fails in that case and leaves callers to decide
+/// whether it matters, which is what let a delete that *could not* be done pass for one that had
+/// been - see §6.21.
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::ReadFile`] if `root` cannot be resolved or the file is not there.
+/// Returns [`VendorError::DeleteFailed`] if the file is there and will not go; on Windows the
+/// usual reason is that it is an executable which is currently running. Returns
+/// [`VendorError::ReadFile`] if `root` exists but cannot be resolved.
 pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> Result<()> {
     // Asked for a state, not an action: what is already gone needs no deleting, and `uninstall`
     // has to be able to drop a dependency whose files the user removed by hand. Every other

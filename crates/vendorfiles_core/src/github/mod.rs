@@ -628,14 +628,15 @@ impl GitHubClient {
             .map_err(|e| VendorError::Http(e.to_string()))?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            // Headers before body, because reading the body consumes the response. This route
-            // reads its own, so unlike the `octocrab` one it can say how much was left and when
-            // it comes back.
-            let quota = rate_limit_detail(&response);
-            let message = error_message(response).await;
-            if let Some(detail) = quota {
+            // Headers first, and on their own when they settle it: an exhausted primary limit
+            // says so in `x-ratelimit-remaining`, and this route reads its own responses, so
+            // unlike the `octocrab` one it can say how much was left and when it comes back.
+            // Returning here also leaves the body unread, which is the point - reading it would
+            // consume the response for a message nothing goes on to use.
+            if let Some(detail) = rate_limit_detail(&response) {
                 return Err(VendorError::RateLimited(detail));
             }
+            let message = error_message(response).await;
             // A *secondary* limit is a `403` or `429` that leaves the remaining count alone, so
             // the headers above cannot see it and only the wording gives it away. Now that the
             // body is in hand, the same test the `octocrab` route uses catches those here too.
@@ -732,19 +733,35 @@ fn resets_in(reset: u64, now: u64) -> String {
     format!("resets in {} min", seconds / 60)
 }
 
+/// How much of an error body is read before it is given up on.
+///
+/// Generous next to any refusal GitHub actually sends, which is why exceeding it is taken as
+/// evidence that whatever answered was not GitHub.
+const MAX_ERROR_BODY: usize = 64 * 1024;
+
 /// What GitHub said about a refusal, as one short line, or nothing if it said nothing usable.
 ///
 /// Refusals come back as `{"message": ..., "documentation_url": ...}`, and the message is the half
 /// worth showing - it names the problem the status code only numbers. Anything else yields an
 /// empty string rather than a wall of markup: a proxy's HTML error page, a truncated body, a `502`
 /// from something that is not GitHub at all.
-async fn error_message(response: reqwest::Response) -> String {
-    let Ok(bytes) = response.bytes().await else {
-        return String::new();
-    };
+async fn error_message(mut response: reqwest::Response) -> String {
+    // Read a chunk at a time up to the cap rather than whole: a refusal from GitHub is a couple
+    // of hundred bytes, and a body vastly larger than that is not one - an HTML error page from
+    // something in between, most likely - so there is no reason to hold all of it in memory to
+    // look for a `message` it does not have.
+    let mut body: Vec<u8> = Vec::new();
+    while body.len() < MAX_ERROR_BODY {
+        let Ok(Some(chunk)) = response.chunk().await else {
+            break;
+        };
+        let room = MAX_ERROR_BODY - body.len();
+        body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    }
     // Parsed from the bytes rather than through `Response::json`, which reqwest is built without -
-    // the same reason `fetch_quota` does it by hand.
-    serde_json::from_slice::<serde_json::Value>(&bytes)
+    // the same reason `fetch_quota` does it by hand. A body cut off at the cap will not parse,
+    // which lands on the same empty string as any other unusable one.
+    serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
         .as_ref()
         .and_then(|body| body.get("message"))

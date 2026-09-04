@@ -12,7 +12,9 @@ use crate::ops::Session;
 /// Whether a failed release lookup means the repository simply has no release.
 ///
 /// A `404` does, and so does a `releaseRegex` that matched nothing - both are answers rather
-/// than failures. Anything else reached GitHub and was refused.
+/// than failures. Everything else is the absence of an answer, whether GitHub sent the refusal
+/// itself (`401`, an exhausted quota, a `503`) or the request never arrived at all (a dropped
+/// connection), and none of it says anything about which releases exist.
 const fn means_no_release(error: &VendorError) -> bool {
     matches!(
         error,
