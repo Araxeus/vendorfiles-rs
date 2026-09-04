@@ -208,10 +208,11 @@ through `auth::resolve_token_async`, which hops to the blocking pool.
 
 ### 3.6 Errors
 
-`VendorError` (thiserror) in the library; every variant's `Display` is the exact string the
-TS tool prints after the `ERROR: ` prefix, with the two deliberate exceptions in §6.18-19 -
-`BadCredentials`, and the message `RequestFailed` quotes from GitHub. `vendorfiles` uses `anyhow` at the boundary and
-renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
+`VendorError` (thiserror) in the library. Every variant's `Display` opens with the exact string
+the TS tool prints after the `ERROR: ` prefix; the deliberate departures are collected in
+§6.18-22 and all of them *add* - a cause, a hint, a name - below a first line that is unchanged,
+which is why `brief` takes only that line for the display's rows. `vendorfiles` uses
+`anyhow` at the boundary and renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency
 
@@ -576,3 +577,26 @@ code and the complete resulting file tree (including binary payloads). Covered:
    `sync` awaits a `Result<Prepared>` whose `Err` side has no name in it at all, so `download`,
    `commit` and the version lookup each mark their own row (`blame`) rather than leaving it to a
    caller that cannot. Before this, a failed download in `sync` settled no row and wrote no line.
+21. **A delete that cannot be done stops the uninstall.** The reference deletes on a best-effort
+   basis, and so did this: every delete was `let _ =`, so `uninstall` printed
+   `SUCCESS: Uninstalled x` and exited 0 with the file still on disk - having removed the config
+   entry and lockfile that were the only record of it. On Windows that is the ordinary case, not
+   a corner: a running executable refuses deletion with `os error 5`, and putting executables on
+   `PATH` is most of what the tool does. Deleting is treated as being asked for a *state*, so a
+   file that is already gone still counts as deleted - the case the best-effort handling existed
+   for, now handled inside `delete_file_and_empty_folders` - and anything else stops the run with
+   the config untouched, so closing the program and running it again finishes the job. The
+   lockfile and empty-folder cleanup stay best-effort, since by then nothing they record is
+   untrue.
+22. **Errors say more than the reference's, always underneath its wording.** `CannotExtract` kept
+   only "check that it's either a zip | tar | tar.gz", so a full disk, a held-open file and a
+   genuinely corrupt archive were one sentence; it now carries its source, which is what let
+   `stream_to_file` drop the `report_failures` flag whose single `false` caller existed to
+   produce that sentence by losing the reason. `DeleteFailed` exists because a failed delete was
+   reported as `ReadFile` - "Could not read" about a file being removed. `RepositoryNotFound`
+   exists because a mistyped `repository` arrived as a complaint about a file at an empty
+   version; `repository_exists` is asked only after a download has already failed, so it costs a
+   request on a failing path and none on the ordinary one. `SaveFailed` and `DeleteFailed` add a
+   line naming the likely cause when Windows reports `os error 5` or `32`. And the version clause
+   of `FileDownloadFailed` is omitted when there is no version, rather than ending the sentence
+   on "with version " and nothing else.
