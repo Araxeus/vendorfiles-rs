@@ -209,9 +209,10 @@ through `auth::resolve_token_async`, which hops to the blocking pool.
 ### 3.6 Errors
 
 `VendorError` (thiserror) in the library. Every variant's `Display` opens with the exact string
-the TS tool prints after the `ERROR: ` prefix; the deliberate departures are collected in
-§6.18-22 and all of them *add* - a cause, a hint, a name - below a first line that is unchanged,
-which is why `brief` takes only that line for the display's rows. `vendorfiles` uses
+the TS tool prints after the `ERROR: ` prefix. The departures to its *wording* are §6.18, 19
+and 22, and all of them *add* - a cause, a hint, a name - below a first line left unchanged,
+which is why `brief` takes only that line for the display's rows. (§6.20 and 21 are about which
+failures get reported and when, not about what any sentence says.) `vendorfiles` uses
 `anyhow` at the boundary and renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency

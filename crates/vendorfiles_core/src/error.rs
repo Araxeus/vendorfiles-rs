@@ -115,8 +115,9 @@ pub enum VendorError {
     /// is what a mistyped `repository` used to be reported as: a complaint about a file, at a
     /// version that had resolved to nothing because the release lookup 404ed for the same
     /// reason. Says "or" about access because a private repository and a nonexistent one are
-    /// deliberately indistinguishable from outside.
-    #[error("Repository {repository} does not exist, or the token in use cannot see it")]
+    /// deliberately indistinguishable from outside - and phrased without mentioning a token,
+    /// since a run with no token at all reaches this too.
+    #[error("Repository {repository} does not exist, or you do not have access to it")]
     RepositoryNotFound { repository: String },
 
     /// A request GitHub refused, carrying whatever it said about why.
