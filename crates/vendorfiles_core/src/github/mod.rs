@@ -352,6 +352,25 @@ impl GitHubClient {
             })
     }
 
+    /// Whether the repository exists and the token in use can see it.
+    ///
+    /// `None` when the question could not be answered - a refused token, an exhausted quota, a
+    /// `503`. Only a `404` is an answer, for the reason §6.18 exists: reporting "no such
+    /// repository" because a request failed would be the same mistake in a new place.
+    ///
+    /// Asked only once a download has already failed, so it costs one request on a path that is
+    /// failing anyway and nothing at all on the ordinary one.
+    pub async fn repository_exists(&self, repo: &Repository) -> Option<bool> {
+        self.note_api_request();
+        match self.api.repos(&repo.owner, &repo.name).get().await {
+            Ok(_) => Some(true),
+            Err(error) => match VendorError::from(error) {
+                VendorError::RequestFailed { status: 404, .. } => Some(false),
+                _ => None,
+            },
+        }
+    }
+
     /// Starts a streaming download of a file from the repository tree.
     ///
     /// # Errors

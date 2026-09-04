@@ -98,7 +98,8 @@ pub enum VendorError {
     FileNotFoundInRepo { file: String, repository: String },
 
     #[error(
-        "{source}:\nCould not download file \"{file}\" from {repository} with version {version}"
+        "{source}:\nCould not download file \"{file}\" from {repository}{}",
+        at_version(version)
     )]
     FileDownloadFailed {
         file: String,
@@ -107,6 +108,16 @@ pub enum VendorError {
         #[source]
         source: Box<Self>,
     },
+
+    /// A repository that GitHub says is not there.
+    ///
+    /// Distinct from a missing file, which answers identically - `404`, "Not Found" - and which
+    /// is what a mistyped `repository` used to be reported as: a complaint about a file, at a
+    /// version that had resolved to nothing because the release lookup 404ed for the same
+    /// reason. Says "or" about access because a private repository and a nonexistent one are
+    /// deliberately indistinguishable from outside.
+    #[error("Repository {repository} does not exist, or the token in use cannot see it")]
+    RepositoryNotFound { repository: String },
 
     /// A request GitHub refused, carrying whatever it said about why.
     ///
@@ -344,6 +355,18 @@ impl VendorError {
     }
 }
 
+/// `" with version {version}"`, or nothing when the version resolved to nothing.
+///
+/// A repository with no usable release leaves the version empty, and the clause was printed
+/// anyway - `with version ` with nothing after it, which reads like the sentence was cut off.
+fn at_version(version: &str) -> String {
+    if version.is_empty() {
+        String::new()
+    } else {
+        format!(" with version {version}")
+    }
+}
+
 /// `": {message}"`, or nothing at all when GitHub sent no message.
 ///
 /// Separate from the `#[error]` attribute so that a refusal with nothing readable in it renders
@@ -470,6 +493,30 @@ mod tests {
             }
             .to_string(),
             "Request failed with status 500"
+        );
+    }
+
+    #[test]
+    fn a_download_failure_names_a_version_only_when_there_is_one() {
+        let failed = |version: &str| {
+            VendorError::FileDownloadFailed {
+                file: "README.md".to_owned(),
+                repository: "https://github.com/o/r".to_owned(),
+                version: version.to_owned(),
+                source: Box::new(VendorError::RequestFailed {
+                    status: 404,
+                    message: "Not Found".to_owned(),
+                }),
+            }
+            .to_string()
+        };
+        assert!(failed("v1.0.0").ends_with("from https://github.com/o/r with version v1.0.0"));
+        // A repository with no usable release leaves the version empty, and the clause used to
+        // be printed anyway - ending the sentence on "with version " and nothing else.
+        assert!(
+            failed("").ends_with("from https://github.com/o/r"),
+            "{}",
+            failed("")
         );
     }
 

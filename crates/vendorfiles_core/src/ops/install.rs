@@ -371,6 +371,44 @@ async fn download_all(
     version: &str,
     progress: &progress::Dependency,
 ) -> Result<()> {
+    match download_each(github, dependency, folder, version, progress).await {
+        Ok(()) => Ok(()),
+        Err(error) => Err(explain_absence(github, dependency, error).await),
+    }
+}
+
+/// Reports a `404` as the missing repository it may actually be.
+///
+/// A missing repository and a missing file are the same answer from GitHub, so telling them
+/// apart takes another question, and it is only worth asking once something has already failed.
+/// The error is handed back untouched unless the repository is definitively not there.
+async fn explain_absence(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    error: VendorError,
+) -> VendorError {
+    let cause = match &error {
+        VendorError::FileDownloadFailed { source, .. } => source.as_ref(),
+        other => other,
+    };
+    if !matches!(cause, VendorError::RequestFailed { status: 404, .. }) {
+        return error;
+    }
+    if github.repository_exists(&dependency.repo).await == Some(false) {
+        return VendorError::RepositoryNotFound {
+            repository: dependency.repository.clone(),
+        };
+    }
+    error
+}
+
+async fn download_each(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    folder: &Path,
+    version: &str,
+    progress: &progress::Dependency,
+) -> Result<()> {
     let (release_files, repo_files): (Vec<FileSpec>, Vec<FileSpec>) =
         flatten_files(&dependency.files)
             .into_iter()
