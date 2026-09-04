@@ -76,18 +76,31 @@ impl Session {
     pub async fn install(&mut self, dependency: Dependency, options: InstallOptions) -> OpResult {
         let progress = Arc::new(self.progress.dependency(&dependency.name));
         progress.status("resolving version");
-        let version = self.decide_version(&dependency, &options).await?;
+        let version = match self.decide_version(&dependency, &options).await {
+            Ok(version) => version,
+            // Reported as this dependency's failure rather than handed straight out by `?`. The
+            // version lookup is the first request an install makes and the one a bad token trips
+            // first, and left to `?` it settled no row and wrote no line - so a piped run ended
+            // with an error naming nothing.
+            Err(error) => {
+                let error = blame(&progress, error);
+                self.progress.end();
+                return Err(error);
+            }
+        };
         let prepared = self
             .prepare(dependency, options, version, Arc::clone(&progress))
             .await;
-        match download(Arc::clone(&self.github), prepared).await {
+        // The two stages below report their own failures, so there is nothing to add here.
+        let outcome = match download(Arc::clone(&self.github), prepared).await {
             Ok(prepared) => self.commit(prepared).await,
-            Err(error) => {
-                progress.failed();
-                self.progress.end();
-                Err(error)
-            }
-        }
+            Err(error) => Err(error),
+        };
+        // Closed here rather than left to `Reporter`'s `Drop`, which drains the held lines only
+        // once the session goes - by which point `main` has printed `ERROR:` and the outcome row
+        // would land underneath the error it belongs above.
+        self.progress.end();
+        outcome
     }
 
     /// Picks the version to install: the explicit one, the configured one, or a fresh lookup.
@@ -183,12 +196,15 @@ impl Session {
             },
             &lockfile_path,
         )
-        .await?;
+        .await
+        .map_err(|error| blame(&progress, error))?;
 
         let old_version = dependency.version.clone();
         if old_version.as_deref() != Some(version.as_str()) {
             progress.committing("updating config");
-            self.record_version(&dependency, &version).await?;
+            self.record_version(&dependency, &version)
+                .await
+                .map_err(|error| blame(&progress, error))?;
         }
 
         if options.should_update {
@@ -278,7 +294,20 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     if !prepared.has_work() {
         return Ok(prepared);
     }
+    if let Err(error) = fetch_all(&github, &prepared).await {
+        return Err(blame(&prepared.progress, error));
+    }
+    // Committing waits its turn behind earlier dependencies; there is nothing to animate in
+    // the meantime, and the writes themselves are local and immediate.
+    prepared.progress.waiting();
+    Ok(prepared)
+}
 
+/// Clears the folder and fetches every file into it.
+///
+/// Split out of [`download`] only so that a failure of any part of it is reported once, in one
+/// place, against the right dependency.
+async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
     tokio::fs::create_dir_all(&prepared.folder).await?;
     prepared.progress.status("clearing previous install");
     remove_previously_installed(
@@ -289,17 +318,25 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     .await?;
 
     download_all(
-        &github,
+        github,
         &prepared.dependency,
         &prepared.folder,
         &prepared.version,
         &prepared.progress,
     )
-    .await?;
-    // Committing waits its turn behind earlier dependencies; there is nothing to animate in
-    // the meantime, and the writes themselves are local and immediate.
-    prepared.progress.waiting();
-    Ok(prepared)
+    .await
+}
+
+/// Marks a dependency's row failed and hands the error straight back.
+///
+/// For the stages that have to report their own failures. `download` runs on its own task and
+/// `commit` is handed the dependency by value, so in both cases the caller is left holding an
+/// error with nothing in it to say which dependency it belonged to - `sync` awaits a
+/// `Result<Prepared>` and, on the `Err` side, never learns the name. Reported here, the row is
+/// settled and the plain line written while the name is still in scope.
+fn blame(progress: &progress::Dependency, error: VendorError) -> VendorError {
+    progress.failed(&error.brief());
+    error
 }
 
 /// Deletes whatever the previous install left behind, per the lockfile.
@@ -328,6 +365,44 @@ async fn remove_previously_installed(
 /// Each batch runs concurrently, and every file in it gets its own bar for as long as it is in
 /// flight.
 async fn download_all(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    folder: &Path,
+    version: &str,
+    progress: &progress::Dependency,
+) -> Result<()> {
+    match download_each(github, dependency, folder, version, progress).await {
+        Ok(()) => Ok(()),
+        Err(error) => Err(explain_absence(github, dependency, error).await),
+    }
+}
+
+/// Reports a `404` as the missing repository it may actually be.
+///
+/// A missing repository and a missing file are the same answer from GitHub, so telling them
+/// apart takes another question, and it is only worth asking once something has already failed.
+/// The error is handed back untouched unless the repository is definitively not there.
+async fn explain_absence(
+    github: &GitHubClient,
+    dependency: &Dependency,
+    error: VendorError,
+) -> VendorError {
+    let cause = match &error {
+        VendorError::FileDownloadFailed { source, .. } => source.as_ref(),
+        other => other,
+    };
+    if !matches!(cause, VendorError::RequestFailed { status: 404, .. }) {
+        return error;
+    }
+    if github.repository_exists(&dependency.repo).await == Some(false) {
+        return VendorError::RepositoryNotFound {
+            repository: dependency.repository.clone(),
+        };
+    }
+    error
+}
+
+async fn download_each(
     github: &GitHubClient,
     dependency: &Dependency,
     folder: &Path,
@@ -401,7 +476,7 @@ async fn download_repo_file(
 
     let save_path = anchor(folder, output.as_str());
     let transfer = progress.transfer(response.content_length());
-    stream_to_file(response, &save_path, true, Some(&transfer)).await?;
+    stream_to_file(response, &save_path, Some(&transfer)).await?;
     drop(transfer);
     Ok(save_path)
 }
@@ -425,7 +500,7 @@ async fn download_release_file(
         let response = fetch_asset(github, dependency, &asset, version).await?;
         let save_path = anchor(folder, replace_version(output, version).as_str());
         let transfer = progress.transfer(response.content_length());
-        stream_to_file(response, &save_path, true, Some(&transfer)).await?;
+        stream_to_file(response, &save_path, Some(&transfer)).await?;
         drop(transfer);
         return Ok(vec![save_path]);
     };
@@ -566,7 +641,12 @@ async fn download_and_extract(
     // suffix, so a random temporary name would produce the wrong member.
     let archive_path = temp.join(asset);
     let transfer = progress.transfer(response.content_length());
-    stream_to_file(response, &archive_path, false, Some(&transfer)).await?;
+    // Reported as the extraction failure the reference prints for it, because that is what a
+    // half-written archive amounts to - but carrying the reason, which used to be dropped here
+    // so that extraction could rediscover the symptom and not the cause.
+    stream_to_file(response, &archive_path, Some(&transfer))
+        .await
+        .map_err(|source| cannot_extract(asset, source))?;
     drop(transfer);
 
     let extract_target = temp.join("extracted");
@@ -578,7 +658,15 @@ async fn download_and_extract(
     })
     .await
     .map_err(|e| VendorError::Http(e.to_string()))?
-    .map_err(|_| VendorError::CannotExtract(name))
+    .map_err(|source| cannot_extract(&name, source))
+}
+
+/// The reference's wording for an archive that would not open, over the reason it would not.
+fn cannot_extract(asset: &str, source: VendorError) -> VendorError {
+    VendorError::CannotExtract {
+        file: asset.to_owned(),
+        source: Box::new(source),
+    }
 }
 
 /// Moves an extracted member into the dependency folder.

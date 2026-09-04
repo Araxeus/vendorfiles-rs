@@ -40,6 +40,9 @@ const MAX_WINDOW: u64 = 8 * 1024 * 1024;
 
 /// How much of the tail is fetched before the index is looked for.
 ///
+/// Enough to hold the end-of-central-directory record and, for all but the largest archives, the
+/// whole central directory in front of it - so the index arrives in the same request that finds
+/// it, rather than one more after.
 const TAIL: u64 = 64 * 1024;
 
 /// The asset size below which ranges are not worth attempting.

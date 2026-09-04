@@ -16,7 +16,7 @@ use octocrab::Octocrab;
 use octocrab::models::repos::Release;
 use serde::Deserialize;
 
-use crate::error::{Result, VendorError};
+use crate::error::{Result, VendorError, is_rate_limited, one_line};
 use crate::model::Repository;
 use crate::remote_zip::HttpRangeSource;
 use crate::ui;
@@ -352,6 +352,25 @@ impl GitHubClient {
             })
     }
 
+    /// Whether the repository exists and the token in use can see it.
+    ///
+    /// `None` when the question could not be answered - a refused token, an exhausted quota, a
+    /// `503`. Only a `404` is an answer, for the reason §6.18 exists: reporting "no such
+    /// repository" because a request failed would be the same mistake in a new place.
+    ///
+    /// Asked only once a download has already failed, so it costs one request on a path that is
+    /// failing anyway and nothing at all on the ordinary one.
+    pub async fn repository_exists(&self, repo: &Repository) -> Option<bool> {
+        self.note_api_request();
+        match self.api.repos(&repo.owner, &repo.name).get().await {
+            Ok(_) => Some(true),
+            Err(error) => match VendorError::from(error) {
+                VendorError::RequestFailed { status: 404, .. } => Some(false),
+                _ => None,
+            },
+        }
+    }
+
     /// Starts a streaming download of a file from the repository tree.
     ///
     /// # Errors
@@ -400,7 +419,7 @@ impl GitHubClient {
         self.send(url, "application/octet-stream")
             .await
             .map_err(|error| {
-                unless_rate_limited(error, || VendorError::ReleaseAssetDownloadFailed {
+                unless_the_request_failed(error, || VendorError::ReleaseAssetDownloadFailed {
                     asset: asset_name.to_owned(),
                     url: release_url,
                 })
@@ -429,7 +448,7 @@ impl GitHubClient {
             self.latest_release(repo, release_regex).await?
         } else {
             self.release_by_tag(repo, version).await.map_err(|error| {
-                unless_rate_limited(error, || VendorError::ReleaseNotFound {
+                unless_the_request_failed(error, || VendorError::ReleaseNotFound {
                     version: version.to_owned(),
                     owner: repo.owner.clone(),
                     repo: repo.name.clone(),
@@ -608,31 +627,50 @@ impl GitHubClient {
             .await
             .map_err(|e| VendorError::Http(e.to_string()))?;
         if !response.status().is_success() {
-            // This route reads its own responses, so unlike the `octocrab` one it can say how
-            // much was left and when it comes back.
+            let status = response.status().as_u16();
+            // Headers first, and on their own when they settle it: an exhausted primary limit
+            // says so in `x-ratelimit-remaining`, and this route reads its own responses, so
+            // unlike the `octocrab` one it can say how much was left and when it comes back.
+            // Returning here also leaves the body unread, which is the point - reading it would
+            // consume the response for a message nothing goes on to use.
             if let Some(detail) = rate_limit_detail(&response) {
                 return Err(VendorError::RateLimited(detail));
             }
-            return Err(VendorError::RequestFailed(response.status().as_u16()));
+            let message = error_message(response).await;
+            // A *secondary* limit is a `403` or `429` that leaves the remaining count alone, so
+            // the headers above cannot see it and only the wording gives it away. Now that the
+            // body is in hand, the same test the `octocrab` route uses catches those here too.
+            if is_rate_limited(status, &message) {
+                return Err(VendorError::RateLimited(String::new()));
+            }
+            if status == 401 {
+                return Err(VendorError::BadCredentials);
+            }
+            return Err(VendorError::RequestFailed { status, message });
         }
         Ok(response)
     }
 }
 
-/// Replaces a failure with a friendlier one, unless it was the rate limit.
+/// Rewrites a failure as the friendlier one it was written for, but only when GitHub actually
+/// answered that the thing is not there.
 ///
 /// The lookups here translate their failures into something a user can act on - "release not
-/// found", "could not download the asset". That is the right reading for the failure each one
-/// was written for, and exactly the wrong one for an exhausted quota: a run that dies on the
-/// limit while resolving a pinned version would otherwise be told the version does not exist,
-/// which sends the reader off to check a tag that is perfectly fine.
-fn unless_rate_limited(
+/// found", "could not download the asset". That reading is right for a `404` and wrong for
+/// everything else: a `401` means the credentials were refused, a `429` means the quota ran out,
+/// a `503` means GitHub is unwell. Reported as "release not found", any of those sends the
+/// reader off to check a tag that is perfectly fine - which is exactly what a bad `GITHUB_TOKEN`
+/// used to do.
+///
+/// So the test is the status, not a list of errors worth protecting: only absence is rewritten,
+/// and every other failure is reported as itself.
+fn unless_the_request_failed(
     error: VendorError,
-    replacement: impl FnOnce() -> VendorError,
+    absent: impl FnOnce() -> VendorError,
 ) -> VendorError {
     match error {
-        limited @ VendorError::RateLimited(_) => limited,
-        _ => replacement(),
+        VendorError::RequestFailed { status: 404, .. } => absent(),
+        other => other,
     }
 }
 
@@ -695,6 +733,43 @@ fn resets_in(reset: u64, now: u64) -> String {
     format!("resets in {} min", seconds / 60)
 }
 
+/// How much of an error body is read before it is given up on.
+///
+/// Generous next to any refusal GitHub actually sends, which is why exceeding it is taken as
+/// evidence that whatever answered was not GitHub.
+const MAX_ERROR_BODY: usize = 64 * 1024;
+
+/// What GitHub said about a refusal, as one short line, or nothing if it said nothing usable.
+///
+/// Refusals come back as `{"message": ..., "documentation_url": ...}`, and the message is the half
+/// worth showing - it names the problem the status code only numbers. Anything else yields an
+/// empty string rather than a wall of markup: a proxy's HTML error page, a truncated body, a `502`
+/// from something that is not GitHub at all.
+async fn error_message(mut response: reqwest::Response) -> String {
+    // Read a chunk at a time up to the cap rather than whole: a refusal from GitHub is a couple
+    // of hundred bytes, and a body vastly larger than that is not one - an HTML error page from
+    // something in between, most likely - so there is no reason to hold all of it in memory to
+    // look for a `message` it does not have.
+    let mut body: Vec<u8> = Vec::new();
+    while body.len() < MAX_ERROR_BODY {
+        let Ok(Some(chunk)) = response.chunk().await else {
+            break;
+        };
+        let room = MAX_ERROR_BODY - body.len();
+        body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    }
+    // Parsed from the bytes rather than through `Response::json`, which reqwest is built without -
+    // the same reason `fetch_quota` does it by hand. A body cut off at the cap will not parse,
+    // which lands on the same empty string as any other unusable one.
+    serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .as_ref()
+        .and_then(|body| body.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .map(one_line)
+        .unwrap_or_default()
+}
+
 /// The specifics for a [`VendorError::RateLimited`], if that is what a refusal is.
 ///
 /// The headers are what decide it: an exhausted limit answers with `x-ratelimit-remaining: 0`,
@@ -746,7 +821,7 @@ fn encode_query(value: &str) -> String {
 mod tests {
     use super::{
         LOW_QUOTA, Quota, VendorError, encode_path, encode_query, quota_warning, resets_in,
-        unless_rate_limited,
+        unless_the_request_failed,
     };
 
     /// A reading with `remaining` left and a window an hour out from `now`.
@@ -759,31 +834,44 @@ mod tests {
     }
 
     #[test]
-    fn a_rate_limit_survives_the_friendlier_error_that_would_replace_it() {
-        // The case that matters: a pinned version whose lookup ran out of quota must not be
-        // reported as a version that does not exist.
-        let limited = unless_rate_limited(
-            VendorError::RateLimited(" - 0 of 60 left".to_owned()),
-            || VendorError::ReleaseNotFound {
-                version: "v1.0.0".to_owned(),
-                owner: "o".to_owned(),
-                repo: "r".to_owned(),
-            },
-        );
-        assert!(matches!(limited, VendorError::RateLimited(_)), "{limited}");
+    fn only_a_404_is_rewritten_as_the_thing_not_being_there() {
+        let absent = || VendorError::ReleaseNotFound {
+            version: "v1.0.0".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
 
-        // Anything else still gets the wording written for it.
-        let other = unless_rate_limited(VendorError::RequestFailed(404), || {
-            VendorError::ReleaseNotFound {
-                version: "v1.0.0".to_owned(),
-                owner: "o".to_owned(),
-                repo: "r".to_owned(),
-            }
-        });
-        assert!(
-            matches!(other, VendorError::ReleaseNotFound { .. }),
-            "{other}"
+        // GitHub answered "no such release", so that is what the user is told.
+        let missing = unless_the_request_failed(
+            VendorError::RequestFailed {
+                status: 404,
+                message: "Not Found".to_owned(),
+            },
+            absent,
         );
+        assert!(
+            matches!(missing, VendorError::ReleaseNotFound { .. }),
+            "{missing}"
+        );
+
+        // Everything else is a failed request and has to survive intact. A refused token
+        // reported as a missing release is what sent the reader to check a tag that was fine.
+        for failure in [
+            VendorError::BadCredentials,
+            VendorError::RateLimited(" - 0 of 60 left".to_owned()),
+            VendorError::RequestFailed {
+                status: 503,
+                message: String::new(),
+            },
+            VendorError::Http("connection reset".to_owned()),
+        ] {
+            let rendered = failure.to_string();
+            let kept = unless_the_request_failed(failure, absent);
+            assert!(
+                !matches!(kept, VendorError::ReleaseNotFound { .. }),
+                "{rendered} was rewritten as a missing release"
+            );
+        }
     }
 
     #[test]

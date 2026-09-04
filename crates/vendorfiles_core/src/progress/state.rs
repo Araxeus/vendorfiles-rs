@@ -99,6 +99,33 @@ pub enum Outcome {
     Failed,
 }
 
+/// How many columns the mark before a name occupies, whichever outcome it is.
+///
+/// Two, because the failure mark needs two - see [`Outcome::mark`]. Fixed rather than natural so
+/// every row's name starts in the same column.
+pub const MARK_WIDTH: usize = 2;
+
+impl Outcome {
+    /// The mark for a settled row, and the padding that brings it to [`MARK_WIDTH`] columns.
+    ///
+    /// One place, used by both the live rows and the lines left in the scrollback, because the
+    /// two have to agree about where a name starts.
+    ///
+    /// `❌` is an emoji-presentation code point (`Emoji_Presentation`, East Asian Width `W`), so
+    /// it is two cells wide and carries its own colour - a foreground escape does nothing to it,
+    /// which is exactly why it is used here: the `✖` it replaced was a *text* code point that
+    /// many fonts render as an emoji anyway, losing the red and swallowing the space after it.
+    /// The other two marks are one cell and do take a colour, so they are padded to match.
+    #[must_use]
+    pub const fn mark(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Changed => ("\u{2714}", " "),
+            Self::Unchanged => ("\u{b7}", " "),
+            Self::Failed => ("\u{274c}", ""),
+        }
+    }
+}
+
 impl Stage {
     /// How badly this dependency needs one of the limited rows, lowest first.
     ///

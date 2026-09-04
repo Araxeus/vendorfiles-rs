@@ -399,9 +399,22 @@ impl Dependency {
         });
     }
 
-    /// Ends because the dependency failed. The error itself is reported by the caller.
-    pub fn failed(&self) {
-        self.finish(Outcome::Failed, "failed".into(), || {});
+    /// Ends because the dependency failed, saying briefly why.
+    ///
+    /// `reason` is a single line - [`VendorError::brief`](crate::VendorError::brief) produces
+    /// one. The full error still reaches the user as the command's `ERROR:` line; this is the
+    /// row, which used to read only "failed".
+    ///
+    /// The plain line names the dependency, because nothing else in a piped run does. A `sync`
+    /// stops at the first failure, so the log used to end with the successes and then a bare
+    /// `ERROR:` that never said which of them it belonged to - and for something like a rejected
+    /// token, whose message mentions no repository, there was no way to tell from the text
+    /// either.
+    pub fn failed(&self, reason: &str) {
+        let name = self.name.clone();
+        self.finish(Outcome::Failed, reason.to_owned().into(), || {
+            ui::error(format!("{name}: {reason}"));
+        });
     }
 
     /// Ends without saying anything, for commands whose real output is elsewhere.
@@ -434,12 +447,15 @@ impl Dependency {
             // Held rather than printed: emitting it now would push the region one row down the
             // screen, once per dependency. `Reporter::end` prints them all as the region comes
             // down, so the scrollback still gets the whole run.
+            let (glyph, pad) = outcome.mark();
+            // No escape around the failure mark: it is an emoji and paints itself, so a
+            // foreground colour would be dead bytes in the scrollback.
             let mark = match outcome {
-                Outcome::Changed => ui::green("✔"),
-                Outcome::Unchanged => ui::cyan("·"),
-                Outcome::Failed => ui::red("✖"),
+                Outcome::Changed => ui::green(glyph),
+                Outcome::Unchanged => ui::cyan(glyph),
+                Outcome::Failed => glyph.to_owned(),
             };
-            let line = format!("{mark} {} {detail}", column(&self.name));
+            let line = format!("{mark}{pad} {} {detail}", column(&self.name));
             if let Ok(mut results) = self.results.lock() {
                 results.push(line);
             }
@@ -690,7 +706,29 @@ mod tests {
         reporter.begin(1);
         let dependency = reporter.dependency("micro");
         dependency.saved(Path::new("vendor/micro/LICENSE"));
-        dependency.failed();
+        dependency.failed("GitHub rejected the credentials (401 Bad credentials).");
+    }
+
+    #[test]
+    fn a_settled_row_says_why_it_failed_and_lines_up_with_the_rest() {
+        let reporter = Reporter::new(true);
+        let failed = reporter.dependency("ls-interactive(lsi)");
+        failed.failed("GitHub rejected the credentials (401 Bad credentials).");
+        let installed = reporter.dependency("fd");
+        installed.installed("v10.5.0");
+
+        let held = reporter.results.lock().expect("results lock").clone();
+        // The reason, rather than the bare word the row used to carry.
+        assert!(
+            held[0].contains("GitHub rejected the credentials"),
+            "{:?}",
+            held[0]
+        );
+        assert!(!held[0].contains("failed"), "{:?}", held[0]);
+        // The failure mark paints itself, so no escape is spent colouring it; the others get one.
+        assert!(held[0].contains('\u{274c}'), "{:?}", held[0]);
+        assert!(!held[0].contains('\u{1b}'), "{:?}", held[0]);
+        assert!(held[1].contains('\u{1b}'), "{:?}", held[1]);
     }
 
     #[test]

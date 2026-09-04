@@ -105,7 +105,7 @@ impl Session {
             let version = match version {
                 Ok(version) => version,
                 Err(error) => {
-                    plan.progress.failed();
+                    plan.progress.failed(&error.brief());
                     self.progress.end();
                     return Err(error);
                 }

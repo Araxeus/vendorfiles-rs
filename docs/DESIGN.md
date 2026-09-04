@@ -208,9 +208,12 @@ through `auth::resolve_token_async` and `auth::logout`, which hop to the blockin
 
 ### 3.6 Errors
 
-`VendorError` (thiserror) in the library; every variant's `Display` is the exact string the
-TS tool prints after the `ERROR: ` prefix. `vendorfiles` uses `anyhow` at the boundary and
-renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
+`VendorError` (thiserror) in the library. Every variant's `Display` opens with the exact string
+the TS tool prints after the `ERROR: ` prefix. The departures to its *wording* are §6.18, 19
+and 22, and all of them *add* - a cause, a hint, a name - below a first line left unchanged,
+which is why `brief` takes only that line for the display's rows. (§6.20 and 21 are about which
+failures get reported and when, not about what any sentence says.) `vendorfiles` uses
+`anyhow` at the boundary and renders `\x1b[31mERROR: {e}\x1b[0m` to stderr, exit 1.
 
 ## 4. Concurrency
 
@@ -547,3 +550,57 @@ code and the complete resulting file tree (including binary payloads). Covered:
    together, `"C:\Program Files\...\code.exe" --wait`. Quotes settle the third, and the second
    cannot be told from the first by looking at it, so the filesystem breaks the tie - a value that
    names an existing file is the program and takes no arguments.
+18. **A failed request is never reported as something missing.** The reference catches every
+   failure of a release lookup alike, so an empty version comes back whether the repository has
+   no release or the request was refused. That turns a bad `GITHUB_TOKEN` into "Could not find a
+   version" under `outdated` and `Release "v1.7.0" was not found` under `sync` - two sentences
+   about versions, for a problem that has nothing to do with them. Here only the answers GitHub
+   actually gives to that question are treated as answers: a `404`, or a `releaseRegex` that
+   matched nothing (`means_no_release`). Every other failure - `401`, an exhausted quota, a `503`,
+   a dropped connection - is reported as itself, and `401` has a message of its own naming
+   `GITHUB_TOKEN` and `vendor login`. The same rule governs the lookups in `github`
+   (`unless_the_request_failed`), which is why a refused token no longer arrives as a missing
+   release.
+19. **A refused request quotes what GitHub said about it**, so `RequestFailed` carries a `message`
+   beside its status and renders `Request failed with status 403: Resource protected by
+   organization SAML enforcement`. The number alone is not something to act on - a `403` is a
+   SAML-gated organization, a fine-grained token missing one permission, or a secondary rate
+   limit, and they need three different things done about them. GitHub's own body separates them,
+   and the reference throws it away. `GitHubClient::send` reads it (headers first: the body read
+   consumes the response), `one_line` bounds it because it is remote text on a terminal row, and
+   an empty message renders the old sentence unchanged - no dangling colon. Two things fall out:
+   the `octocrab` route stops dropping `gh.message`, and *secondary* rate limits are finally
+   recognised, having been a `403` that leaves `x-ratelimit-remaining` alone and so is invisible
+   to the header test.
+20. **A dependency's failure is reported by the stage that owns it**, and names the dependency in
+   the plain path. The reference prints nothing per dependency when a run fails, which is
+   survivable on a terminal - the row carries the name - and not in a log, where the `ERROR:` line
+   is all there is and a message like a refused token names no repository. So `Dependency::failed`
+   writes `ERROR: {name}: {reason}`, mirroring the row it stands in for. Reported *where the name
+   is still in scope*, which is not where the error surfaces: `download` runs on its own task and
+   `sync` awaits a `Result<Prepared>` whose `Err` side has no name in it at all, so `download`,
+   `commit` and the version lookup each mark their own row (`blame`) rather than leaving it to a
+   caller that cannot. Before this, a failed download in `sync` settled no row and wrote no line.
+21. **A delete that cannot be done stops the uninstall.** The reference deletes on a best-effort
+   basis, and so did this: every delete was `let _ =`, so `uninstall` printed
+   `SUCCESS: Uninstalled x` and exited 0 with the file still on disk - having removed the config
+   entry and lockfile that were the only record of it. On Windows that is the ordinary case, not
+   a corner: a running executable refuses deletion with `os error 5`, and putting executables on
+   `PATH` is most of what the tool does. Deleting is treated as being asked for a *state*, so a
+   file that is already gone still counts as deleted - the case the best-effort handling existed
+   for, now handled inside `delete_file_and_empty_folders` - and anything else stops the run with
+   the config untouched, so closing the program and running it again finishes the job. The
+   lockfile and empty-folder cleanup stay best-effort, since by then nothing they record is
+   untrue.
+22. **Errors say more than the reference's, always underneath its wording.** `CannotExtract` kept
+   only "check that it's either a zip | tar | tar.gz", so a full disk, a held-open file and a
+   genuinely corrupt archive were one sentence; it now carries its source, which is what let
+   `stream_to_file` drop the `report_failures` flag whose single `false` caller existed to
+   produce that sentence by losing the reason. `DeleteFailed` exists because a failed delete was
+   reported as `ReadFile` - "Could not read" about a file being removed. `RepositoryNotFound`
+   exists because a mistyped `repository` arrived as a complaint about a file at an empty
+   version; `repository_exists` is asked only after a download has already failed, so it costs a
+   request on a failing path and none on the ordinary one. `SaveFailed` and `DeleteFailed` add a
+   line naming the likely cause when Windows reports `os error 5` or `32`. And the version clause
+   of `FileDownloadFailed` is omitted when there is no version, rather than ending the sentence
+   on "with version " and nothing else.
