@@ -149,7 +149,7 @@ pub enum VendorError {
     )]
     RateLimited(String),
 
-    #[error("Could not save {path}:\n{source}")]
+    #[error("Could not save {path}:\n{source}{}", in_use_hint(source))]
     SaveFailed {
         path: String,
         #[source]
@@ -257,7 +257,7 @@ pub enum VendorError {
     /// reported as: "Could not read" sends the reader to look at permissions on a file they were
     /// trying to remove. On Windows the common cause is an executable that is currently running,
     /// which refuses deletion with `os error 5`.
-    #[error("Could not delete {path}: {source}")]
+    #[error("Could not delete {path}: {source}{}", in_use_hint(source))]
     DeleteFailed {
         path: PathBuf,
         #[source]
@@ -352,6 +352,24 @@ impl VendorError {
             .trim_end_matches(':')
             .trim_end()
             .to_owned()
+    }
+}
+
+/// A hint for the sharing violations a tool that vendors executables runs into.
+///
+/// `os error 5` on a delete says only "Access is denied", which is equally true of a file whose
+/// permissions are wrong and of one that is merely running - and those want opposite things done
+/// about them. `os error 32` says more, but still not what to do. Vendoring executables onto
+/// `PATH` is most of what this tool is for, so meeting one that is running is ordinary rather
+/// than exotic.
+///
+/// Windows only: 5 and 32 mean other things on Unix (`EIO`, `EPIPE`), where a running binary
+/// does not lock its own image in the first place.
+fn in_use_hint(source: &std::io::Error) -> &'static str {
+    if cfg!(windows) && matches!(source.raw_os_error(), Some(5 | 32)) {
+        "\nThe file may be in use - close whatever is running it and try again."
+    } else {
+        ""
     }
 }
 
@@ -494,6 +512,36 @@ mod tests {
             .to_string(),
             "Request failed with status 500"
         );
+    }
+
+    #[test]
+    #[cfg_attr(not(windows), ignore = "the hint is for Windows sharing violations")]
+    fn a_file_that_will_not_budge_says_it_may_be_in_use() {
+        let denied = VendorError::DeleteFailed {
+            path: std::path::PathBuf::from("tool.exe"),
+            source: std::io::Error::from_raw_os_error(5),
+        };
+        let rendered = denied.to_string();
+        assert!(
+            rendered.starts_with("Could not delete tool.exe: "),
+            "{rendered}"
+        );
+        assert!(
+            rendered.ends_with("close whatever is running it and try again."),
+            "{rendered}"
+        );
+        // The row still carries the failure, not the advice.
+        assert_eq!(
+            denied.brief(),
+            "Could not delete tool.exe: Access is denied. (os error 5)"
+        );
+
+        // An unrelated failure gets no hint invented for it.
+        let other = VendorError::DeleteFailed {
+            path: std::path::PathBuf::from("tool.exe"),
+            source: std::io::Error::from(std::io::ErrorKind::InvalidData),
+        };
+        assert!(!other.to_string().contains("may be in use"), "{other}");
     }
 
     #[test]
