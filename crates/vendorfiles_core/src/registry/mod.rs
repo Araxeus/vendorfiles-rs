@@ -661,9 +661,7 @@ programs:
                     .tempdir()
                     .expect("a temporary directory");
                 let downloaded = temporary.path().join(&asset_name);
-                if let Err(error) =
-                    crate::fsx::stream_to_file(response, &downloaded, true, None).await
-                {
+                if let Err(error) = crate::fsx::stream_to_file(response, &downloaded, None).await {
                     problems.push(format!("{canonical} for {host}: {error}"));
                     continue;
                 }

@@ -196,14 +196,25 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
 ///
 /// Returns [`VendorError::ReadFile`] if `root` cannot be resolved or the file is not there.
 pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> Result<()> {
+    // Asked for a state, not an action: what is already gone needs no deleting, and `uninstall`
+    // has to be able to drop a dependency whose files the user removed by hand. Every other
+    // failure is returned - a file held open by a running program is not "already gone", and
+    // calling it that is how an orphan gets left behind with nothing left recording it.
+    if !root.exists() {
+        return Ok(());
+    }
     let root = real_path(root)?;
     let filepath = anchor(&root, relative_path);
-    tokio::fs::remove_file(&filepath)
-        .await
-        .map_err(|source| VendorError::ReadFile {
-            path: filepath.clone(),
-            source,
-        })?;
+    match tokio::fs::remove_file(&filepath).await {
+        Ok(()) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(VendorError::DeleteFailed {
+                path: filepath,
+                source,
+            });
+        }
+    }
 
     let mut dir = filepath.parent().map(Path::to_path_buf);
     while let Some(current) = dir {
@@ -226,29 +237,27 @@ pub async fn delete_file_and_empty_folders(root: &Path, relative_path: &str) -> 
 
 /// Streams an HTTP response body to `save_path`, creating parent directories.
 ///
-/// `report_failures` mirrors the reference's `log` flag, which decided both whether to announce
-/// the file and whether a write error was fatal. Announcing is now the caller's job - it
-/// batches the lines so `sync` can keep them in dependency order - but the error behaviour is
-/// preserved: a silent write failure is swallowed so the caller reports the follow-on error
-/// (a temp archive that fails to save shows up as "cannot be extracted").
+/// Always reports. The reference had a `log` flag here that decided both whether to announce the
+/// file and whether a write error was fatal, and the archive path passed it `false` so that a
+/// temp archive which failed to save arrived as "cannot be extracted" instead. That sentence is
+/// still what the user sees - [`download_and_extract`](crate::ops::install) puts it there - but
+/// the reason is now carried underneath it rather than dropped here, where nothing else knew
+/// whether the disk was full or the file was held open.
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::SaveFailed`] if the body cannot be written and `report_failures` is
-/// set; otherwise write failures are swallowed.
+/// Returns [`VendorError::SaveFailed`] if the body cannot be written.
 pub async fn stream_to_file(
     response: reqwest::Response,
     save_path: &Path,
-    report_failures: bool,
     transfer: Option<&Transfer<'_>>,
 ) -> Result<()> {
-    match write_stream(response, save_path, transfer).await {
-        Err(source) if report_failures => Err(VendorError::SaveFailed {
+    write_stream(response, save_path, transfer)
+        .await
+        .map_err(|source| VendorError::SaveFailed {
             path: save_path.display().to_string(),
             source,
-        }),
-        Ok(()) | Err(_) => Ok(()),
-    }
+        })
 }
 
 async fn write_stream(
@@ -413,7 +422,7 @@ mod tests {
             .send()
             .await
             .expect("a response");
-        let outcome = stream_to_file(response, &save_path, true, None).await;
+        let outcome = stream_to_file(response, &save_path, None).await;
 
         // Refused either by the transport, which enforces `Content-Length`, or by the byte count
         // below it. Which one wins is not the point; that it never succeeds is.
@@ -437,7 +446,7 @@ mod tests {
             .send()
             .await
             .expect("a response");
-        stream_to_file(response, &save_path, true, None)
+        stream_to_file(response, &save_path, None)
             .await
             .expect("a complete download");
         assert_eq!(std::fs::read(&save_path).unwrap(), body);
@@ -469,16 +478,17 @@ mod tests {
             .send()
             .await
             .expect("a response");
-        stream_to_file(response, &save_path, true, None)
+        stream_to_file(response, &save_path, None)
             .await
             .expect("an encoded body is complete, not short");
         assert_eq!(std::fs::read(&save_path).unwrap(), plain);
     }
 
     #[tokio::test]
-    async fn a_short_body_stays_quiet_when_failures_are_not_reported() {
-        // Archives are fetched with `report_failures: false` so the follow-on error is the one
-        // the user sees ("cannot be extracted"). That contract must not change.
+    async fn a_short_body_is_reported_even_on_the_archive_path() {
+        // It used to be swallowed here so the follow-on error read "cannot be extracted". The
+        // user still reads that sentence - `download_and_extract` writes it - but the reason
+        // now travels with it instead of dying at this line.
         let dir = tempfile::tempdir().unwrap();
         let save_path = dir.path().join("asset.zip");
         let url = serve_once(4096, b"truncated");
@@ -489,9 +499,13 @@ mod tests {
             .send()
             .await
             .expect("a response");
-        stream_to_file(response, &save_path, false, None)
+        let error = stream_to_file(response, &save_path, None)
             .await
-            .expect("swallowed, as the archive path expects");
+            .expect_err("a truncated archive must not pass for a saved one");
+        assert!(
+            matches!(error, crate::VendorError::SaveFailed { .. }),
+            "{error}"
+        );
     }
 
     #[test]

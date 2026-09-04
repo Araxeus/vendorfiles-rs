@@ -438,7 +438,7 @@ async fn download_repo_file(
 
     let save_path = anchor(folder, output.as_str());
     let transfer = progress.transfer(response.content_length());
-    stream_to_file(response, &save_path, true, Some(&transfer)).await?;
+    stream_to_file(response, &save_path, Some(&transfer)).await?;
     drop(transfer);
     Ok(save_path)
 }
@@ -462,7 +462,7 @@ async fn download_release_file(
         let response = fetch_asset(github, dependency, &asset, version).await?;
         let save_path = anchor(folder, replace_version(output, version).as_str());
         let transfer = progress.transfer(response.content_length());
-        stream_to_file(response, &save_path, true, Some(&transfer)).await?;
+        stream_to_file(response, &save_path, Some(&transfer)).await?;
         drop(transfer);
         return Ok(vec![save_path]);
     };
@@ -603,7 +603,12 @@ async fn download_and_extract(
     // suffix, so a random temporary name would produce the wrong member.
     let archive_path = temp.join(asset);
     let transfer = progress.transfer(response.content_length());
-    stream_to_file(response, &archive_path, false, Some(&transfer)).await?;
+    // Reported as the extraction failure the reference prints for it, because that is what a
+    // half-written archive amounts to - but carrying the reason, which used to be dropped here
+    // so that extraction could rediscover the symptom and not the cause.
+    stream_to_file(response, &archive_path, Some(&transfer))
+        .await
+        .map_err(|source| cannot_extract(asset, source))?;
     drop(transfer);
 
     let extract_target = temp.join("extracted");
@@ -615,7 +620,15 @@ async fn download_and_extract(
     })
     .await
     .map_err(|e| VendorError::Http(e.to_string()))?
-    .map_err(|_| VendorError::CannotExtract(name))
+    .map_err(|source| cannot_extract(&name, source))
+}
+
+/// The reference's wording for an archive that would not open, over the reason it would not.
+fn cannot_extract(asset: &str, source: VendorError) -> VendorError {
+    VendorError::CannotExtract {
+        file: asset.to_owned(),
+        source: Box::new(source),
+    }
 }
 
 /// Moves an extracted member into the dependency folder.

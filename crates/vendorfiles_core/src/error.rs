@@ -172,10 +172,21 @@ pub enum VendorError {
     },
 
     // ---- archives ------------------------------------------------------------------
+    /// An archive that could not be unpacked, and why.
+    ///
+    /// The first two lines are the reference's, to the letter, because they are what a user has
+    /// seen for years and what the fixtures check. The cause goes underneath rather than
+    /// replacing them: "check that it's either a zip | tar | tar.gz" is advice for one of the
+    /// things that lands here and a waste of the reader's time for the rest - a full disk, a
+    /// file held open, an asset that never finished downloading.
     #[error(
-        "file \"{0}\" cannot be extracted.\nplease check that it's either a zip | tar | tar.gz"
+        "file \"{file}\" cannot be extracted.\nplease check that it's either a zip | tar | tar.gz\n{source}"
     )]
-    CannotExtract(String),
+    CannotExtract {
+        file: String,
+        #[source]
+        source: Box<Self>,
+    },
 
     #[error("Error while moving file \"{from}\" to \"{to}\":\n{source}")]
     MoveFailed {
@@ -225,6 +236,19 @@ pub enum VendorError {
     // ---- infrastructure ------------------------------------------------------------
     #[error("{source}")]
     Io {
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A file that would not go away.
+    ///
+    /// Separate from [`ReadFile`](Self::ReadFile), which is what a failed delete used to be
+    /// reported as: "Could not read" sends the reader to look at permissions on a file they were
+    /// trying to remove. On Windows the common cause is an executable that is currently running,
+    /// which refuses deletion with `os error 5`.
+    #[error("Could not delete {path}: {source}")]
+    DeleteFailed {
+        path: PathBuf,
         #[source]
         source: std::io::Error,
     },
