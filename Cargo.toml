@@ -30,12 +30,12 @@ indexmap = { version = "2.14.0", features = ["serde"] }
 # for the crate: it keeps comments as ordinary sibling nodes, so a `//` note on an example
 # survives into the generated YAML and TOML instead of being dropped on the way through a value
 # tree. `serde` gives the same text back as a `serde_json::Value` for the round-trip check.
-jsonc-parser = { version = "0.33", default-features = false, features = ["cst", "serde"] }
+jsonc-parser = { version = "0.34", default-features = false, features = ["cst", "serde"] }
 # Validates `registry.schema.json` in the tests, so a broken `$ref` or a regression in the
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
 # refers to nothing outside itself.
-jsonschema = { version = "0.52.1", default-features = false }
+jsonschema = { version = "0.58.5", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
