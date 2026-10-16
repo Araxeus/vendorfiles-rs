@@ -230,16 +230,25 @@ programs:
         asset: "{release}/yt-dlp_linux_aarch64"
         as: "yt-dlp"
 
-  ox:
-    repository: https://github.com/curlpipe/ox
+  ttt:
+    repository: https://github.com/eugenioenko/ttt
     targets:
       windows-x86_64:
-        asset: "{release}/ox.exe"
+        asset: "{release}/ttt-windows-amd64.exe"
+        as: "ttt.exe"
       macos-x86_64:
-        asset: "{release}/ox-macos"
-        as: "ox"
+        asset: "{release}/ttt-darwin-amd64"
+        as: "ttt"
+      macos-aarch64:
+        asset: "{release}/ttt-darwin-arm64"
+        as: "ttt"
       linux-x86_64:
-        asset: "{release}/ox"
+        asset: "{release}/ttt-linux-amd64"
+        as: "ttt"
+      linux-aarch64:
+        asset: "{release}/ttt-linux-arm64"
+        as: "ttt"
+
 
   # Bare binaries everywhere but Windows, where the release is a zip and `herdr.exe` loads the
   # `conpty/` directory shipped beside it - so that target lists every file it needs rather than
