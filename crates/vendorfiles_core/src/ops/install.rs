@@ -680,17 +680,17 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
         source: source_error,
     };
 
-    tokio::fs::metadata(source).await.map_err(&fail)?;
+    tokio::fs::metadata(source).await.map_err(fail)?;
     if fsx::is_running_executable(destination) {
         // The archive member is a new copy of this very binary: hand the swap to `self-replace`
         // rather than trying to move onto an image the operating system has open.
         return fsx::replace_running_executable(source).await;
     }
     if let Some(parent) = destination.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(&fail)?;
+        tokio::fs::create_dir_all(parent).await.map_err(fail)?;
     }
     if tokio::fs::rename(source, destination).await.is_err() {
-        tokio::fs::copy(source, destination).await.map_err(&fail)?;
+        tokio::fs::copy(source, destination).await.map_err(fail)?;
         let _ = tokio::fs::remove_file(source).await;
     }
     Ok(())
