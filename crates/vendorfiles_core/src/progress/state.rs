@@ -585,7 +585,7 @@ mod tests {
         let mut state = state(vec![Stage::Waiting, Stage::Waiting]);
         state.resize(0);
         state.assign();
-        assert!(state.selection().is_empty());
+        assert_eq!(state.selection(), []);
     }
 
     #[test]

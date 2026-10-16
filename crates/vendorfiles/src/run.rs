@@ -947,7 +947,10 @@ mod tests {
             .join("nothing there")
             .to_string_lossy()
             .into_owned();
-        assert!(!super::split_editor_command(&missing).1.is_empty());
+        assert_ne!(
+            super::split_editor_command(&missing).1,
+            [] as [std::string::String; 0]
+        );
     }
 
     fn defaults(json: &str) -> DefaultOptions {

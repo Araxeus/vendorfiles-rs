@@ -237,8 +237,11 @@ mod tests {
         // YAML escapes a quote inside a single-quoted string by doubling it. Toggling on each
         // quote closes and reopens the string with no character in between, so every character
         // lands on the side a real parser would put it on and the `#` stays protected.
-        assert!(comments_in("a: 'don''t #1'").is_empty());
-        assert!(comments_in("a: '''#x'").is_empty());
+        assert_eq!(
+            comments_in("a: 'don''t #1'"),
+            [] as [std::string::String; 0]
+        );
+        assert_eq!(comments_in("a: '''#x'"), [] as [std::string::String; 0]);
         assert_eq!(comments_in("a: 'x''' # note"), [" note"]);
         assert_eq!(comments_in("a: 'a''b''c #1' # note"), [" note"]);
         assert_eq!(comments_in("'k''#': 'v' # note"), [" note"]);
