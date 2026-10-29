@@ -200,14 +200,13 @@ fn unzip_selected(reader: impl Read + Seek, dest: &Path, selection: &mut Selecti
     // local file header, so doing that to *every* entry just to learn its name would cost a
     // round trip per member of the archive when the ZIP is being read over the network - which
     // is most of what [`crate::remote_zip`] exists to avoid.
-    let targets: Vec<(String, PathBuf)> = archive
-        .file_names()
-        .filter_map(|name| {
-            selection
-                .target(dest, name)
-                .map(|out| (name.to_owned(), out))
-        })
-        .collect();
+    let mut targets: Vec<(String, PathBuf)> = Vec::new();
+    for name in archive.file_names() {
+        let name = name.map_err(|e| VendorError::Http(e.to_string()))?;
+        if let Some(out) = selection.target(dest, &name) {
+            targets.push((name.into_owned(), out));
+        }
+    }
 
     for (name, out) in targets {
         let mut entry = archive
@@ -532,13 +531,16 @@ fn decompresses_to_a_tar(reader: &mut impl Read) -> Result<bool> {
 
 fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
     let archive = zip::ZipArchive::new(reader).map_err(|e| VendorError::Http(e.to_string()))?;
-    Ok(archive
-        .file_names()
+    let mut names = Vec::new();
+    for name in archive.file_names() {
+        let name = name.map_err(|e| VendorError::Http(e.to_string()))?;
         // What `ZipFile::is_dir` itself tests, without paying to parse every local header: a ZIP
         // marks a directory by the trailing separator on its name.
-        .filter(|name| !name.ends_with(['/', '\\']))
-        .map(str::to_owned)
-        .collect())
+        if !name.ends_with(['/', '\\']) {
+            names.push(name.into_owned());
+        }
+    }
+    Ok(names)
 }
 
 fn tar_names(reader: impl Read) -> Result<Vec<String>> {
