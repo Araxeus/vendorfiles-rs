@@ -187,6 +187,47 @@ const fn copy_executable_mode(_staged: &Path) -> std::result::Result<(), std::io
     Ok(())
 }
 
+/// Whether `head` opens like a native executable or a script: ELF, Mach-O (thin or fat) or `#!`.
+#[cfg(unix)]
+fn looks_executable(head: &[u8]) -> bool {
+    const MAGICS: [&[u8]; 8] = [
+        b"\x7fELF",
+        b"#!",
+        &[0xfe, 0xed, 0xfa, 0xce],
+        &[0xfe, 0xed, 0xfa, 0xcf],
+        &[0xce, 0xfa, 0xed, 0xfe],
+        &[0xcf, 0xfa, 0xed, 0xfe],
+        &[0xca, 0xfe, 0xba, 0xbe],
+        &[0xbe, 0xba, 0xfe, 0xca],
+    ];
+    MAGICS.iter().any(|magic| head.starts_with(magic))
+}
+
+/// A downloaded file is created `0644`, so a bare release binary would not run. Sniffed rather
+/// than assumed, because vendored data files are often committed and must not gain a mode bit.
+#[cfg(unix)]
+async fn mark_executable_if_binary(path: &Path) -> std::result::Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::io::AsyncReadExt;
+
+    let mut head = [0_u8; 4];
+    let read = tokio::fs::File::open(path).await?.read(&mut head).await?;
+    if !looks_executable(&head[..read]) {
+        return Ok(());
+    }
+    let mode = tokio::fs::metadata(path).await?.permissions().mode();
+    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o111)).await
+}
+
+#[cfg(not(unix))]
+#[expect(
+    clippy::unused_async,
+    reason = "matches the unix signature, which can fail"
+)]
+async fn mark_executable_if_binary(_path: &Path) -> std::result::Result<(), std::io::Error> {
+    Ok(())
+}
+
 /// Deletes `relative_path` under `root`, then prunes the directories it leaves empty.
 ///
 /// Stops at `root` and at the first non-empty directory.
@@ -316,6 +357,8 @@ async fn write_bytes(
         }
     }
     file.flush().await?;
+    drop(file);
+    mark_executable_if_binary(save_path).await?;
 
     // The transport already enforces `Content-Length` - a body that stops early surfaces as
     // "error decoding response body", which the tests below pin down. This is the second line of
@@ -340,6 +383,17 @@ mod tests {
         stream_to_file,
     };
     use std::path::{Path, PathBuf};
+
+    #[cfg(unix)]
+    #[test]
+    fn only_native_binaries_and_scripts_look_executable() {
+        use super::looks_executable;
+        assert!(looks_executable(b"\x7fELF\x02"));
+        assert!(looks_executable(b"#!/bin/sh"));
+        assert!(looks_executable(&[0xcf, 0xfa, 0xed, 0xfe]));
+        assert!(!looks_executable(b"{\"a\":1}"));
+        assert!(!looks_executable(b""));
+    }
 
     #[test]
     fn the_running_binary_recognises_itself() {
