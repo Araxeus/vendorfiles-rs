@@ -137,7 +137,7 @@ impl Session {
         let folder = self
             .workspace
             .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
-        let lockfile_path = Self::lockfile_path(&folder);
+        let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
             || self
                 .needs_update(&dependency.name, &lockfile_path, &version)

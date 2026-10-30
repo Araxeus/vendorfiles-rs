@@ -39,7 +39,7 @@ impl Session {
         let folder = self
             .workspace
             .dependency_folder(dependency.vendor_folder.as_deref(), name);
-        let lockfile_path = Self::lockfile_path(&folder);
+        let lockfile_path = self.workspace.lockfile_path(&folder);
 
         let lockfile = read_lockfile(&lockfile_path).await.ok();
         let locked_files = lockfile
