@@ -18,6 +18,7 @@ use crate::{gh, sh};
 /// no flag at all the steps are asked about instead. Choosing the version is a prompt either
 /// way: there is no flag for it, because there is nothing to script it from.
 #[derive(Args)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Options {
     /// Push the release commit and its tag to `origin main` without asking.
     #[arg(long)]
@@ -30,6 +31,10 @@ pub struct Options {
     /// instead of at the release commit.
     #[arg(long)]
     draft_release: bool,
+    /// Release even though the working directory is not clean. Only the version bump files
+    /// (`Cargo.toml`, `Cargo.lock`, `README.md`) are committed; other changes are left alone.
+    #[arg(long)]
+    force: bool,
 }
 
 /// The three steps, resolved from the flags or from the answers.
@@ -90,7 +95,7 @@ pub fn run(options: &Options) -> Result<()> {
     let root = sh::workspace_root()?;
 
     let status = git(&root, &["status", "--porcelain"])?;
-    if !status.trim().is_empty() {
+    if !options.force && !status.trim().is_empty() {
         bail!("Git working directory is not clean. Please commit changes before bumping version.");
     }
 
@@ -152,7 +157,13 @@ pub fn run(options: &Options) -> Result<()> {
     sh::run(&root, "Formatting sources", "cargo", &["fmt", "--all"])?;
 
     let tag = format!("v{new_version}");
-    sh::run(&root, "Staging changes", "git", &["add", "."])?;
+    // A forced release may have unrelated changes around, which must stay out of the commit.
+    let paths: &[&str] = if options.force {
+        &["Cargo.toml", "Cargo.lock", "README.md"]
+    } else {
+        &["."]
+    };
+    sh::run(&root, "Staging changes", "git", &[&["add"], paths].concat())?;
     sh::run(
         &root,
         &format!("Committing {tag}"),
@@ -510,6 +521,7 @@ anyhow = \"1.0\"
             push: false,
             publish: false,
             draft_release: false,
+            force: false,
         };
         assert_eq!(options.plan(), None);
     }
@@ -520,6 +532,7 @@ anyhow = \"1.0\"
             push: false,
             publish: false,
             draft_release: true,
+            force: false,
         };
         assert_eq!(
             options.plan(),
@@ -537,6 +550,7 @@ anyhow = \"1.0\"
             push: true,
             publish: false,
             draft_release: false,
+            force: false,
         };
         assert_eq!(
             options.plan(),
