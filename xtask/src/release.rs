@@ -198,17 +198,6 @@ fn finish(
         println!("run 'git push origin main && git push --tags origin main' to push changes.");
     }
 
-    if plan.publish {
-        sh::run(
-            root,
-            "Publishing crates",
-            "cargo",
-            &["publish", "--workspace"],
-        )?;
-    } else {
-        println!("run 'cargo publish --workspace' to publish crates.");
-    }
-
     if let Some(probe) = gh_probe {
         // A panicked probe is indistinguishable from an unusable `gh`, and has the same fallback.
         match probe.join().unwrap_or(gh::Status::Missing).blocker() {
@@ -228,6 +217,17 @@ fn finish(
             )?,
             Some(blocker) => println!("{blocker} - {}", draft_release_hint(tag)),
         }
+    }
+
+    if plan.publish {
+        sh::run(
+            root,
+            "Publishing crates",
+            "cargo",
+            &["publish", "--workspace"],
+        )?;
+    } else {
+        println!("run 'cargo publish --workspace' to publish crates.");
     }
     Ok(())
 }
