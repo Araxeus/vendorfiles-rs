@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::{Result, VendorError};
 use crate::model::Dependency;
-use crate::ops::install::{Prepared, download};
+use crate::ops::install::{Prepared, clear_previous, download};
 use crate::ops::{InstallOptions, Session};
 use crate::progress;
 use crate::ui;
@@ -68,7 +68,8 @@ impl Session {
     ///    and the cost that dominates `update` and `outdated` on a large config.
     /// 2. **Download** each dependency on its own task, up to
     ///    [`MAX_CONCURRENT_DOWNLOADS`] at a time, collecting the log lines instead of
-    ///    printing them.
+    ///    printing them. Before the first one starts, what the previous installs left behind
+    ///    is cleared for every dependency, since they may swap folders.
     /// 3. **Commit** in config order: write each lockfile, update the config, and settle that
     ///    dependency's line. Awaiting the tasks in order is what keeps piped output ordered
     ///    while later dependencies are still downloading.
@@ -122,6 +123,13 @@ impl Session {
         let working = prepared.iter().filter(|item| item.has_work()).count();
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
+
+        for item in &prepared {
+            if let Err(error) = clear_previous(item).await {
+                self.progress.end();
+                return Err(error);
+            }
+        }
 
         let mut tasks = self.spawn_downloads(prepared);
         let mut bumps: Vec<Bump> = Vec::new();

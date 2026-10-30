@@ -4,7 +4,8 @@
 //! dependencies:
 //!
 //! 1. [`Session::prepare`] - decide the version and whether anything is stale. Read-only.
-//! 2. [`download`] - fetch and extract into the dependency folder, reporting to the
+//! 2. [`clear_previous`] then [`download`] - delete what the last install left, then fetch and
+//!    extract into the dependency folder, reporting to the
 //!    dependency's own progress line as it goes. Owns everything it needs, so it can run on
 //!    its own task.
 //! 3. [`Session::commit`] - write the lockfile, update the config, settle the line. Ordered.
@@ -96,7 +97,11 @@ impl Session {
             .prepare(dependency, options, version, Arc::clone(&progress))
             .await;
         // The two stages below report their own failures, so there is nothing to add here.
-        let outcome = match download(Arc::clone(&self.github), prepared).await {
+        let outcome = match clear_previous(&prepared).await {
+            Ok(()) => download(Arc::clone(&self.github), prepared).await,
+            Err(error) => Err(error),
+        };
+        let outcome = match outcome {
             Ok(prepared) => self.commit(prepared).await,
             Err(error) => Err(error),
         };
@@ -203,6 +208,12 @@ impl Session {
         let save_path = self.workspace.config.single_lockfile.is_some().then(|| {
             save_path(
                 lockfile_path.parent().unwrap_or_else(|| Path::new(".")),
+                self.workspace
+                    .file
+                    .settings
+                    .path
+                    .parent()
+                    .unwrap_or_else(|| Path::new(".")),
                 &folder,
             )
         });
@@ -327,19 +338,35 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     Ok(prepared)
 }
 
-/// Clears the folder and fetches every file into it.
+/// Deletes what the previous install left behind, per the lockfile.
 ///
-/// Split out of [`download`] only so that a failure of any part of it is reported once, in one
-/// place, against the right dependency.
-async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
-    tokio::fs::create_dir_all(&prepared.folder).await?;
+/// Kept apart from [`download`] and run for every dependency *before* any download starts:
+/// dependencies can swap folders, and a cleanup that ran inside a download task could delete a
+/// file another task had already written into the folder it is clearing.
+///
+/// # Errors
+///
+/// Returns the error of the first file that could not be deleted.
+pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
+    if !prepared.has_work() {
+        return Ok(());
+    }
     prepared.progress.status("clearing previous install");
     remove_previously_installed(
         &prepared.folder,
         &prepared.lockfile_path,
         prepared.previous.as_ref(),
     )
-    .await?;
+    .await
+    .map_err(|error| blame(&prepared.progress, error))
+}
+
+/// Fetches every file into the dependency folder.
+///
+/// Split out of [`download`] only so that a failure of any part of it is reported once, in one
+/// place, against the right dependency.
+async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
+    tokio::fs::create_dir_all(&prepared.folder).await?;
 
     download_all(
         github,

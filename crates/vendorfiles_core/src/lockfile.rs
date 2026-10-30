@@ -30,24 +30,25 @@ pub struct VendorLock {
     pub files: LockFiles,
     /// Where the dependency was installed, recorded only with `singleLockfile` (otherwise the
     /// lockfile's own folder is the dependency folder). Relative to the lockfile's folder when
-    /// close to it, absolute otherwise.
+    /// close to it or inside the project, absolute otherwise.
     #[serde(rename = "savePath", default, skip_serializing_if = "Option::is_none")]
     pub save_path: Option<String>,
 }
 
 /// The `savePath` to record for `folder`, given the folder holding the lockfile.
 ///
-/// Relative (with `/` separators) when `folder` is inside `lock_dir` or at most
-/// [`MAX_PARENT_HOPS`] levels above-and-beside it; absolute otherwise. Both paths must already be
-/// normalised.
+/// Relative (with `/` separators) when `folder` is inside `lock_dir`, at most
+/// `MAX_PARENT_HOPS` levels above-and-beside it, or anywhere inside the project - a path that
+/// belongs to the checkout must not turn machine-specific just because the lockfile sits deep.
+/// Absolute otherwise. All paths must already be normalised.
 #[must_use]
-pub fn save_path(lock_dir: &Path, folder: &Path) -> String {
+pub fn save_path(lock_dir: &Path, project_dir: &Path, folder: &Path) -> String {
     let from: Vec<_> = lock_dir.components().collect();
     let to: Vec<_> = folder.components().collect();
     let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
     let hops = from.len() - common;
     // No shared root (another drive) can only be spelled absolutely.
-    if common == 0 || hops > MAX_PARENT_HOPS {
+    if common == 0 || (hops > MAX_PARENT_HOPS && !folder.starts_with(project_dir)) {
         return folder.display().to_string();
     }
     let parts: Vec<_> = std::iter::repeat_n("..".to_owned(), hops)
@@ -221,12 +222,20 @@ pub async fn previous_entry(
     if !single {
         return None;
     }
-    entry(folder_lockfile(folder, lockfile_path).await?).await
+    let path = folder_lockfile(folder, lockfile_path).await?;
+    let mut found = entry(path.clone()).await?;
+    // A `savePath` is relative to the lockfile that holds it. This one is being read from
+    // somewhere other than the current lockfile (a shared lockfile that used to live here), so
+    // pin it down now or it would later be resolved against the wrong directory.
+    if let (Some(saved), Some(dir)) = (found.save_path.as_deref(), path.parent()) {
+        found.save_path = Some(anchor(dir, saved).display().to_string());
+    }
+    Some(found)
 }
 
 /// Drops `name` from the dependency folder's own lockfile once `singleLockfile` has taken over
-/// its entry, deleting the file when
-/// nothing else is in it. Best-effort: by now the shared record is written.
+/// its entry, deleting the file when nothing else is in it. Best-effort: by now the shared
+/// record is written.
 pub async fn retire_folder_entry(name: &str, folder: &Path, shared: &Path) {
     let Some(path) = folder_lockfile(folder, shared).await else {
         return;
@@ -260,7 +269,7 @@ mod tests {
 
     use super::{
         Lockfile, VendorLock, config_files_to_lock_files, flat_files, previous_entry,
-        read_lockfile, retire_folder_entry, save_path, to_json,
+        read_lockfile, retire_folder_entry, save_path, saved_folder, to_json,
     };
     use crate::model::{FileEntry, FileTarget};
 
@@ -321,7 +330,8 @@ mod tests {
     #[test]
     fn save_path_is_relative_when_inside_or_within_two_hops_else_absolute() {
         let lock_dir = Path::new("/p/a/b");
-        let rel = |folder: &str| save_path(lock_dir, Path::new(folder));
+        let project = Path::new("/p/a");
+        let rel = |folder: &str| save_path(lock_dir, project, Path::new(folder));
         assert_eq!(rel("/p/a/b"), ".");
         assert_eq!(rel("/p/a/b/vendor/fzf"), "vendor/fzf");
         assert_eq!(rel("/p/a/other"), "../other");
@@ -329,6 +339,44 @@ mod tests {
         assert_eq!(rel("/p/x/y"), "../../x/y");
         assert_eq!(Path::new(&rel("/x/y")), Path::new("/x/y"));
     }
+
+    #[test]
+    fn save_path_stays_relative_inside_the_project_however_deep_the_lockfile_is() {
+        let rel = |lock_dir: &str, folder: &str| {
+            save_path(Path::new(lock_dir), Path::new("/p"), Path::new(folder))
+        };
+        assert_eq!(rel("/p/locks/a/b", "/p/vendor/A"), "../../../vendor/A");
+        // Outside the project the two-hop limit still applies.
+        assert_eq!(
+            Path::new(&rel("/p/locks/a/b", "/q/vendor/A")),
+            Path::new("/q/vendor/A")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fallback_entrys_save_path_is_pinned_to_the_lockfile_it_came_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("vendor/a");
+        std::fs::create_dir_all(&folder).unwrap();
+        // An earlier shared lockfile that lived in the folder: its `savePath` is relative to it.
+        let mut earlier = Lockfile::new();
+        earlier.insert(
+            "a".to_owned(),
+            VendorLock {
+                repository: "r".to_owned(),
+                version: "1".to_owned(),
+                files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                save_path: Some(".".to_owned()),
+            },
+        );
+        std::fs::write(folder.join("vendor-lock.json"), to_json(&earlier).unwrap()).unwrap();
+        let shared = dir.path().join("vendor-lock.json");
+
+        let found = previous_entry("a", &folder, &shared, true).await.unwrap();
+        let saved = saved_folder(dir.path(), &found).unwrap();
+        assert_eq!(saved, folder);
+    }
+
     fn files(json: &str) -> Vec<FileEntry> {
         serde_json::from_str(json).expect("valid files array")
     }
