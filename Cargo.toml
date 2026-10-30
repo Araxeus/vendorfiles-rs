@@ -19,28 +19,28 @@ categories = ["command-line-utilities", "development-tools"]
 vendorfiles_core = { path = "crates/vendorfiles_core", version = "2.3.0" }
 
 anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive", "string"] }
-clap_complete = "4.6.9"
+clap = { version = "4.6.7", features = ["derive", "string"] }
+clap_complete = "4.6.11"
 dialoguer = { version = "0.12.0", default-features = false }
-fancy-regex = "0.19.0"
-flate2 = "1.1.9"
+fancy-regex = "0.20.0"
+flate2 = "1.1.10"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
-indexmap = { version = "2.14.0", features = ["serde"] }
+indexmap = { version = "2.14.2", features = ["serde"] }
 # Reads the README's config examples for `cargo xtask readme`. The `cst` feature is the reason
 # for the crate: it keeps comments as ordinary sibling nodes, so a `//` note on an example
 # survives into the generated YAML and TOML instead of being dropped on the way through a value
 # tree. `serde` gives the same text back as a `serde_json::Value` for the round-trip check.
-jsonc-parser = { version = "0.33", default-features = false, features = ["cst", "serde"] }
+jsonc-parser = { version = "0.34.0", default-features = false, features = ["cst", "serde"] }
 # Validates `registry.schema.json` in the tests, so a broken `$ref` or a regression in the
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
 # refers to nothing outside itself.
-jsonschema = { version = "0.52.1", default-features = false }
+jsonschema = { version = "0.60.2", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
 # on Linux, link libdbus for a Secret Service backend we do not use.
-keyring-core = "1.0.0"
+keyring-core = "1.0.1"
 # `keychain` selects the macOS login keychain; the iOS-only `protected` store stays out.
 apple-native-keyring-store = { version = "1.0.2", default-features = false, features = [
     "keychain",
@@ -60,7 +60,7 @@ lzma-rs = "0.3.0"
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
-octocrab = { version = "0.54.1", default-features = false, features = [
+octocrab = { version = "0.54.7", default-features = false, features = [
     "default-client",
     "follow-redirect",
     "retry",
@@ -71,7 +71,7 @@ octocrab = { version = "0.54.1", default-features = false, features = [
     "jwt-rust-crypto",
     "timeout",
 ] }
-open = "5.4.1"
+open = "5.4.5"
 # The live display. Default features off: only the crossterm backend is wanted, and the inline
 # viewport is the whole reason for the dependency - a fixed region we redraw from a state
 # snapshot, rather than cursor arithmetic of our own.
@@ -80,27 +80,27 @@ regex = "1.13.1"
 # `rustls-no-provider` rather than `rustls`: the latter hard-wires the aws-lc-rs provider,
 # which would compile a second crypto backend alongside the `ring` one octocrab uses (and drag
 # in aws-lc-sys's C build). `github::http` installs `ring` as the process default instead.
-reqwest = { version = "0.13.4", default-features = false, features = [
+reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls-no-provider",
     "http2",
     "system-proxy",
     "gzip",
     "stream",
 ] }
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 secrecy = "0.10.3"
 # Swapping a running binary is platform work: on Windows the file is locked, so the old image has
 # to be moved aside and deleted after exit. `vendor` uses it when an install lands on top of
 # itself.
-self-replace = "1.5.0"
+self-replace = "1.5.1"
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
 tar = "0.4.46"
 tempfile = "3.27.0"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = [
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = [
     "rt-multi-thread",
     "macros",
     "fs",
@@ -110,8 +110,8 @@ tokio = { version = "1.53.1", features = [
     # Ctrl-C has to give the terminal back: nothing else runs when the process is signalled.
     "signal",
 ] }
-toml_edit = { version = "0.25.13", features = ["serde"] }
-zip = { version = "8.6.0", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+toml_edit = { version = "0.25.17", features = ["serde"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 
 # The lint set CI enforces, declared here so a bare `cargo clippy` is the same gate as the
 # workflow. `priority = -1` keeps these groups below any individual lint, so a specific
