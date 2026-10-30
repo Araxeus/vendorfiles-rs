@@ -383,17 +383,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("vendor.json");
         let write = |body: &str| std::fs::write(&config, body).unwrap();
-        let lock = |ws: &super::Workspace| ws.lockfile_path(Path::new("ignored"));
+        // Compared against the loaded config's own folder: discovery canonicalizes the path, so
+        // the temp dir's spelling (e.g. Windows 8.3 short names) can differ from `dir.path()`.
+        let lock = |ws: &super::Workspace| {
+            let base = ws.file.settings.path.parent().unwrap().to_path_buf();
+            (ws.lockfile_path(Path::new("ignored")), base)
+        };
 
         write(
             r#"{"vendorConfig": {"vendorFolder": "libs", "singleLockfile": "{vendorFolder}/locks"}}"#,
         );
         let ws = super::Workspace::load(config.to_str()).await.unwrap();
-        assert_eq!(lock(&ws), dir.path().join("libs/locks/vendor-lock.json"));
+        let (path, base) = lock(&ws);
+        assert_eq!(
+            path,
+            base.join("libs").join("locks").join("vendor-lock.json")
+        );
 
         write(r#"{"vendorConfig": {"singleLockfile": true}}"#);
         let ws = super::Workspace::load(config.to_str()).await.unwrap();
-        assert_eq!(lock(&ws), dir.path().join("vendor-lock.json"));
+        let (path, base) = lock(&ws);
+        assert_eq!(path, base.join("vendor-lock.json"));
     }
 
     #[test]
