@@ -160,7 +160,7 @@ impl Workspace {
                 )
             },
         );
-        dir.join("vendor-lock.json")
+        dir.join(crate::lockfile::LOCKFILE_NAME)
     }
 }
 

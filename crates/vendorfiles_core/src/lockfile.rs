@@ -3,7 +3,7 @@
 //! Field order (`repository`, `version`, `files`) and key order inside `files` are part of the
 //! on-disk format, so every map here is an [`IndexMap`].
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,9 @@ pub type LockFiles = IndexMap<String, FileTarget>;
 
 /// How many `..` a recorded `savePath` may climb before it is written as an absolute path.
 const MAX_PARENT_HOPS: usize = 2;
+
+/// The lockfile's file name.
+pub const LOCKFILE_NAME: &str = "vendor-lock.json";
 
 /// One dependency's entry in the lockfile.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -63,7 +66,7 @@ pub fn save_path(lock_dir: &Path, folder: &Path) -> String {
 
 /// The folder an entry was installed to, if it recorded one.
 #[must_use]
-pub fn saved_folder(lock_dir: &Path, lock: &VendorLock) -> Option<std::path::PathBuf> {
+pub fn saved_folder(lock_dir: &Path, lock: &VendorLock) -> Option<PathBuf> {
     lock.save_path
         .as_deref()
         .map(|saved| anchor(lock_dir, saved))
@@ -195,12 +198,125 @@ pub async fn write_string(path: &Path, data: &str) -> Result<()> {
         })
 }
 
+/// Reads the entry for `name` as it stood before this run: the shared lockfile's, or, when
+/// `singleLockfile` was just enabled, the one still sitting in the dependency's own folder.
+///
+/// Taken while preparing, before any download starts, so a concurrent commit rewriting the
+/// shared file cannot hide it from the cleanup that follows.
+pub async fn previous_entry(
+    name: &str,
+    folder: &Path,
+    lockfile_path: &Path,
+    single: bool,
+) -> Option<VendorLock> {
+    let entry = |path: PathBuf| async move {
+        read_lockfile(&path)
+            .await
+            .ok()
+            .and_then(|mut lockfile| lockfile.shift_remove(name))
+    };
+    if let Some(found) = entry(lockfile_path.to_path_buf()).await {
+        return Some(found);
+    }
+    if !single {
+        return None;
+    }
+    entry(folder_lockfile(folder, lockfile_path).await?).await
+}
+
+/// Drops `name` from the dependency folder's own lockfile once `singleLockfile` has taken over
+/// its entry, deleting the file when
+/// nothing else is in it. Best-effort: by now the shared record is written.
+pub async fn retire_folder_entry(name: &str, folder: &Path, shared: &Path) {
+    let Some(path) = folder_lockfile(folder, shared).await else {
+        return;
+    };
+    let Ok(mut lockfile) = read_lockfile(&path).await else {
+        return;
+    };
+    if lockfile.shift_remove(name).is_none() {
+        return;
+    }
+    if lockfile.is_empty() {
+        let _ = tokio::fs::remove_file(&path).await;
+    } else if let Ok(json) = to_json(&lockfile) {
+        let _ = write_string(&path, &format!("{json}\n")).await;
+    }
+}
+
+/// The dependency folder's own lockfile, when it exists and is not the shared one itself.
+async fn folder_lockfile(folder: &Path, shared: &Path) -> Option<PathBuf> {
+    let folder_lock = folder.join(LOCKFILE_NAME);
+    let real = tokio::fs::canonicalize(&folder_lock).await.ok()?;
+    match tokio::fs::canonicalize(shared).await {
+        Ok(shared_real) if shared_real == real => None,
+        _ => Some(folder_lock),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{Lockfile, VendorLock, config_files_to_lock_files, flat_files, save_path, to_json};
+    use super::{
+        Lockfile, VendorLock, config_files_to_lock_files, flat_files, previous_entry,
+        read_lockfile, retire_folder_entry, save_path, to_json,
+    };
     use crate::model::{FileEntry, FileTarget};
+
+    #[tokio::test]
+    async fn a_per_folder_entry_is_found_and_retired_when_moving_to_a_shared_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("vendor/a");
+        std::fs::create_dir_all(&folder).unwrap();
+        let entry = |version: &str| VendorLock {
+            repository: "r".to_owned(),
+            version: version.to_owned(),
+            files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
+            save_path: None,
+        };
+        let mut folder_lock = Lockfile::new();
+        folder_lock.insert("a".to_owned(), entry("1"));
+        folder_lock.insert("b".to_owned(), entry("2"));
+        std::fs::write(
+            folder.join("vendor-lock.json"),
+            to_json(&folder_lock).unwrap(),
+        )
+        .unwrap();
+        let shared = dir.path().join("vendor-lock.json");
+
+        assert_eq!(
+            previous_entry("a", &folder, &shared, true).await,
+            Some(entry("1"))
+        );
+        assert_eq!(previous_entry("a", &folder, &shared, false).await, None);
+
+        retire_folder_entry("a", &folder, &shared).await;
+        let left = std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap();
+        assert!(!left.contains("\"a\"") && left.contains("\"b\""));
+        retire_folder_entry("b", &folder, &shared).await;
+        assert!(!folder.join("vendor-lock.json").exists());
+    }
+
+    #[tokio::test]
+    async fn retiring_never_touches_the_shared_lockfile_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("vendor-lock.json");
+        let mut lockfile = Lockfile::new();
+        lockfile.insert(
+            "a".to_owned(),
+            VendorLock {
+                repository: "r".to_owned(),
+                version: "1".to_owned(),
+                files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                save_path: Some(".".to_owned()),
+            },
+        );
+        std::fs::write(&shared, to_json(&lockfile).unwrap()).unwrap();
+
+        retire_folder_entry("a", dir.path(), &shared).await;
+        assert!(read_lockfile(&shared).await.unwrap().contains_key("a"));
+    }
 
     #[test]
     fn save_path_is_relative_when_inside_or_within_two_hops_else_absolute() {
