@@ -154,7 +154,10 @@ impl Workspace {
                     .path
                     .parent()
                     .unwrap_or_else(|| Path::new("."));
-                anchor(base, dir)
+                anchor(
+                    base,
+                    &replace_vendor_folder(dir, &self.config.vendor_folder),
+                )
             },
         );
         dir.join("vendor-lock.json")
@@ -373,6 +376,24 @@ mod tests {
         assert!(
             read_vendor_config(&value(r#"{"vendorConfig": {"singleLockfile": 5}}"#), "p").is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn single_lockfile_expands_vendor_folder_and_anchors_to_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("vendor.json");
+        let write = |body: &str| std::fs::write(&config, body).unwrap();
+        let lock = |ws: &super::Workspace| ws.lockfile_path(Path::new("ignored"));
+
+        write(
+            r#"{"vendorConfig": {"vendorFolder": "libs", "singleLockfile": "{vendorFolder}/locks"}}"#,
+        );
+        let ws = super::Workspace::load(config.to_str()).await.unwrap();
+        assert_eq!(lock(&ws), dir.path().join("libs/locks/vendor-lock.json"));
+
+        write(r#"{"vendorConfig": {"singleLockfile": true}}"#);
+        let ws = super::Workspace::load(config.to_str()).await.unwrap();
+        assert_eq!(lock(&ws), dir.path().join("vendor-lock.json"));
     }
 
     #[test]

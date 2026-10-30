@@ -1085,7 +1085,7 @@ recorded file is missing, or the `files` declaration changed.
 
 Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead:
 `true` puts it next to the config file, a string names the folder (relative to the config file,
-or absolute).
+or absolute); `{vendorFolder}` expands to the base vendor folder.
 
 ## JSON Schema
 
