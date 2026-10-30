@@ -3,9 +3,10 @@
 use crate::error::{Result, VendorError};
 use crate::fsx::delete_file_and_empty_folders;
 use crate::lockfile::{
-    config_files_to_lock_files, flat_files, read_lockfile, to_json, write_string,
+    config_files_to_lock_files, flat_files, read_lockfile, saved_folder, to_json, write_string,
 };
 use crate::ops::Session;
+use std::path::Path;
 
 impl Session {
     /// Removes a dependency entirely.
@@ -42,10 +43,19 @@ impl Session {
         let lockfile_path = self.workspace.lockfile_path(&folder);
 
         let lockfile = read_lockfile(&lockfile_path).await.ok();
-        let locked_files = lockfile
-            .as_ref()
-            .and_then(|locked| locked.get(name))
-            .map(|locked| flat_files(&locked.files))
+        let locked = lockfile.as_ref().and_then(|locked| locked.get(name));
+        // With `singleLockfile` the files may sit where the entry was installed, not where the
+        // config points today.
+        let locked_folder = locked
+            .and_then(|entry| {
+                saved_folder(
+                    lockfile_path.parent().unwrap_or_else(|| Path::new(".")),
+                    entry,
+                )
+            })
+            .unwrap_or_else(|| folder.clone());
+        let locked_files = locked
+            .map(|entry| flat_files(&entry.files))
             .unwrap_or_default();
         let declared = config_files_to_lock_files(
             dependency.files.as_deref().unwrap_or_default(),
@@ -53,12 +63,19 @@ impl Session {
         );
         let declared_files = flat_files(&declared);
 
-        for file in locked_files.iter().chain(declared_files.iter()) {
-            if let Err(error) = delete_file_and_empty_folders(&folder, file).await {
+        let to_delete = locked_files
+            .iter()
+            .map(|file| (&locked_folder, file))
+            .chain(declared_files.iter().map(|file| (&folder, file)));
+        for (root, file) in to_delete {
+            if let Err(error) = delete_file_and_empty_folders(root, file).await {
                 progress.failed(&error.brief());
                 self.progress.end();
                 return Err(error);
             }
+        }
+        if locked_folder != folder {
+            let _ = tokio::fs::remove_dir(&locked_folder).await;
         }
 
         if let Some(mut lockfile) = lockfile.filter(|l| l.contains_key(name)) {

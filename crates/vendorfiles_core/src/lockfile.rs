@@ -9,11 +9,15 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, VendorError};
+use crate::fsx::anchor;
 use crate::model::{FileEntry, FileTarget};
 use crate::template::{basename, replace_version};
 
 /// The `files` map of a single locked dependency: config input → what landed on disk.
 pub type LockFiles = IndexMap<String, FileTarget>;
+
+/// How many `..` a recorded `savePath` may climb before it is written as an absolute path.
+const MAX_PARENT_HOPS: usize = 2;
 
 /// One dependency's entry in the lockfile.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -21,6 +25,48 @@ pub struct VendorLock {
     pub repository: String,
     pub version: String,
     pub files: LockFiles,
+    /// Where the dependency was installed, recorded only with `singleLockfile` (otherwise the
+    /// lockfile's own folder is the dependency folder). Relative to the lockfile's folder when
+    /// close to it, absolute otherwise.
+    #[serde(rename = "savePath", default, skip_serializing_if = "Option::is_none")]
+    pub save_path: Option<String>,
+}
+
+/// The `savePath` to record for `folder`, given the folder holding the lockfile.
+///
+/// Relative (with `/` separators) when `folder` is inside `lock_dir` or at most
+/// [`MAX_PARENT_HOPS`] levels above-and-beside it; absolute otherwise. Both paths must already be
+/// normalised.
+#[must_use]
+pub fn save_path(lock_dir: &Path, folder: &Path) -> String {
+    let from: Vec<_> = lock_dir.components().collect();
+    let to: Vec<_> = folder.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let hops = from.len() - common;
+    // No shared root (another drive) can only be spelled absolutely.
+    if common == 0 || hops > MAX_PARENT_HOPS {
+        return folder.display().to_string();
+    }
+    let parts: Vec<_> = std::iter::repeat_n("..".to_owned(), hops)
+        .chain(
+            to[common..]
+                .iter()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+        )
+        .collect();
+    if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    }
+}
+
+/// The folder an entry was installed to, if it recorded one.
+#[must_use]
+pub fn saved_folder(lock_dir: &Path, lock: &VendorLock) -> Option<std::path::PathBuf> {
+    lock.save_path
+        .as_deref()
+        .map(|saved| anchor(lock_dir, saved))
 }
 
 /// The whole lockfile: dependency name → lock entry.
@@ -149,24 +195,24 @@ pub async fn write_string(path: &Path, data: &str) -> Result<()> {
         })
 }
 
-/// The files a dependency owns according to the lockfile, or an empty list if unreadable.
-pub async fn files_from_lockfile(path: &Path, name: &str) -> Vec<String> {
-    read_lockfile(path).await.map_or_else(
-        |_| Vec::new(),
-        |lockfile| {
-            lockfile
-                .get(name)
-                .map(|entry| flat_files(&entry.files))
-                .unwrap_or_default()
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Lockfile, VendorLock, config_files_to_lock_files, flat_files, to_json};
+    use std::path::Path;
+
+    use super::{Lockfile, VendorLock, config_files_to_lock_files, flat_files, save_path, to_json};
     use crate::model::{FileEntry, FileTarget};
 
+    #[test]
+    fn save_path_is_relative_when_inside_or_within_two_hops_else_absolute() {
+        let lock_dir = Path::new("/p/a/b");
+        let rel = |folder: &str| save_path(lock_dir, Path::new(folder));
+        assert_eq!(rel("/p/a/b"), ".");
+        assert_eq!(rel("/p/a/b/vendor/fzf"), "vendor/fzf");
+        assert_eq!(rel("/p/a/other"), "../other");
+        assert_eq!(rel("/p/a"), "..");
+        assert_eq!(rel("/p/x/y"), "../../x/y");
+        assert_eq!(Path::new(&rel("/x/y")), Path::new("/x/y"));
+    }
     fn files(json: &str) -> Vec<FileEntry> {
         serde_json::from_str(json).expect("valid files array")
     }
@@ -223,6 +269,7 @@ mod tests {
                 repository: "https://github.com/junegunn/fzf".to_owned(),
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
+                save_path: None,
             },
         );
         assert_eq!(

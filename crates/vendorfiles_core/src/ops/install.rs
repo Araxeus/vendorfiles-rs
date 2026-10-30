@@ -17,7 +17,8 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
+    VendorLock, config_files_to_lock_files, flat_files, read_lockfile, save_path, saved_folder,
+    write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
 use crate::ops::{OpResult, Session};
@@ -140,7 +141,7 @@ impl Session {
         let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
             || self
-                .needs_update(&dependency.name, &lockfile_path, &version)
+                .needs_update(&dependency.name, &lockfile_path, &folder, &version)
                 .await;
 
         Prepared {
@@ -170,7 +171,7 @@ impl Session {
             version,
             needs_update,
             progress,
-            folder: _,
+            folder,
         } = prepared;
 
         if options.show_outdated_only {
@@ -187,12 +188,19 @@ impl Session {
         }
 
         progress.committing("writing lockfile");
+        let save_path = self.workspace.config.single_lockfile.is_some().then(|| {
+            save_path(
+                lockfile_path.parent().unwrap_or_else(|| Path::new(".")),
+                &folder,
+            )
+        });
         write_lockfile(
             &dependency.name,
             VendorLock {
                 repository: dependency.repository.clone(),
                 version: version.clone(),
                 files: config_files_to_lock_files(&dependency.files, &version),
+                save_path,
             },
             &lockfile_path,
         )
@@ -340,13 +348,25 @@ fn blame(progress: &progress::Dependency, error: VendorError) -> VendorError {
 }
 
 /// Deletes whatever the previous install left behind, per the lockfile.
+///
+/// With `singleLockfile` the entry records where it was installed, which may no longer be
+/// `folder` (the dependency's `vendorFolder` changed); the old files are removed from there.
 async fn remove_previously_installed(
     name: &str,
     folder: &Path,
     lockfile_path: &Path,
 ) -> Result<()> {
-    for file in files_from_lockfile(lockfile_path, name).await {
-        let path = anchor(folder, file.as_str());
+    let Some(locked) = read_lockfile(lockfile_path)
+        .await
+        .ok()
+        .and_then(|mut lockfile| lockfile.shift_remove(name))
+    else {
+        return Ok(());
+    };
+    let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
+    let old_folder = saved_folder(lock_dir, &locked).unwrap_or_else(|| folder.to_path_buf());
+    for file in flat_files(&locked.files) {
+        let path = anchor(&old_folder, file.as_str());
         if !path.exists() {
             continue;
         }
@@ -355,7 +375,11 @@ async fn remove_previously_installed(
         if fsx::is_running_executable(&path) {
             continue;
         }
-        delete_file_and_empty_folders(folder, &file).await?;
+        delete_file_and_empty_folders(&old_folder, &file).await?;
+    }
+    if old_folder != folder {
+        // Best-effort: only removes the abandoned folder when nothing else is in it.
+        let _ = tokio::fs::remove_dir(&old_folder).await;
     }
     Ok(())
 }

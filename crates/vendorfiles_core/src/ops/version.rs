@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::error::{Result, VendorError};
-use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile};
+use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
 use crate::model::Dependency;
 use crate::ops::Session;
 
@@ -76,6 +76,7 @@ impl Session {
         &self,
         name: &str,
         lockfile_path: &Path,
+        folder: &Path,
         new_version: &str,
     ) -> bool {
         let Ok(lockfile) = read_lockfile(lockfile_path).await else {
@@ -86,6 +87,14 @@ impl Session {
         };
         if locked.version != new_version {
             return true;
+        }
+        // Only `singleLockfile` records a location; there it is what tells a moved dependency
+        // from an unchanged one.
+        if self.workspace.config.single_lockfile.is_some() {
+            let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
+            if saved_folder(lock_dir, locked).as_deref() != Some(folder) {
+                return true;
+            }
         }
         if self
             .files_from_config()
