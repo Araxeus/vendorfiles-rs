@@ -1083,6 +1083,10 @@ The keys are the inputs from your config (with `{version}` left un-expanded) and
 what landed on disk. `vendor sync` treats a dependency as stale when the version differs, a
 recorded file is missing, or the `files` declaration changed.
 
+Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead:
+`true` puts it next to the config file, a string names the folder (relative to the config file,
+or absolute); `{vendorFolder}` expands to the base vendor folder.
+
 ## JSON Schema
 
 [`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format, so editors

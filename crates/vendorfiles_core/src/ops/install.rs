@@ -4,7 +4,8 @@
 //! dependencies:
 //!
 //! 1. [`Session::prepare`] - decide the version and whether anything is stale. Read-only.
-//! 2. [`download`] - fetch and extract into the dependency folder, reporting to the
+//! 2. [`clear_previous`] then [`download`] - delete what the last install left, then fetch and
+//!    extract into the dependency folder, reporting to the
 //!    dependency's own progress line as it goes. Owns everything it needs, so it can run on
 //!    its own task.
 //! 3. [`Session::commit`] - write the lockfile, update the config, settle the line. Ordered.
@@ -17,7 +18,8 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, files_from_lockfile, write_lockfile,
+    VendorLock, config_files_to_lock_files, flat_files, previous_entry, retire_folder_entry,
+    save_path, saved_folder, write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
 use crate::ops::{OpResult, Session};
@@ -50,6 +52,9 @@ pub struct Prepared {
     pub lockfile_path: PathBuf,
     pub version: String,
     pub needs_update: bool,
+    /// The dependency's lock entry as it stood before this run, read before any download so a
+    /// concurrent commit to a shared lockfile cannot hide it from the cleanup.
+    pub previous: Option<VendorLock>,
     /// This dependency's line in the display. Shared because the download stage runs on its
     /// own task while `commit` waits to settle the same line.
     pub progress: Arc<progress::Dependency>,
@@ -92,7 +97,11 @@ impl Session {
             .prepare(dependency, options, version, Arc::clone(&progress))
             .await;
         // The two stages below report their own failures, so there is nothing to add here.
-        let outcome = match download(Arc::clone(&self.github), prepared).await {
+        let outcome = match clear_previous(&prepared).await {
+            Ok(()) => download(Arc::clone(&self.github), prepared).await,
+            Err(error) => Err(error),
+        };
+        let outcome = match outcome {
             Ok(prepared) => self.commit(prepared).await,
             Err(error) => Err(error),
         };
@@ -137,11 +146,18 @@ impl Session {
         let folder = self
             .workspace
             .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
-        let lockfile_path = Self::lockfile_path(&folder);
+        let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
             || self
-                .needs_update(&dependency.name, &lockfile_path, &version)
+                .needs_update(&dependency.name, &lockfile_path, &folder, &version)
                 .await;
+        let previous = previous_entry(
+            &dependency.name,
+            &folder,
+            &lockfile_path,
+            self.workspace.config.single_lockfile.is_some(),
+        )
+        .await;
 
         Prepared {
             dependency,
@@ -150,6 +166,7 @@ impl Session {
             lockfile_path,
             version,
             needs_update,
+            previous,
             progress,
         }
     }
@@ -170,7 +187,8 @@ impl Session {
             version,
             needs_update,
             progress,
-            folder: _,
+            folder,
+            previous: _,
         } = prepared;
 
         if options.show_outdated_only {
@@ -187,17 +205,34 @@ impl Session {
         }
 
         progress.committing("writing lockfile");
+        let save_path = self.workspace.config.single_lockfile.is_some().then(|| {
+            save_path(
+                lockfile_path.parent().unwrap_or_else(|| Path::new(".")),
+                self.workspace
+                    .file
+                    .settings
+                    .path
+                    .parent()
+                    .unwrap_or_else(|| Path::new(".")),
+                &folder,
+            )
+        });
         write_lockfile(
             &dependency.name,
             VendorLock {
                 repository: dependency.repository.clone(),
                 version: version.clone(),
                 files: config_files_to_lock_files(&dependency.files, &version),
+                save_path,
             },
             &lockfile_path,
         )
         .await
         .map_err(|error| blame(&progress, error))?;
+
+        if self.workspace.config.single_lockfile.is_some() {
+            retire_folder_entry(&dependency.name, &folder, &lockfile_path).await;
+        }
 
         let old_version = dependency.version.clone();
         if old_version.as_deref() != Some(version.as_str()) {
@@ -303,19 +338,35 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
     Ok(prepared)
 }
 
-/// Clears the folder and fetches every file into it.
+/// Deletes what the previous install left behind, per the lockfile.
+///
+/// Kept apart from [`download`] and run for every dependency *before* any download starts:
+/// dependencies can swap folders, and a cleanup that ran inside a download task could delete a
+/// file another task had already written into the folder it is clearing.
+///
+/// # Errors
+///
+/// Returns the error of the first file that could not be deleted.
+pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
+    if !prepared.has_work() {
+        return Ok(());
+    }
+    prepared.progress.status("clearing previous install");
+    remove_previously_installed(
+        &prepared.folder,
+        &prepared.lockfile_path,
+        prepared.previous.as_ref(),
+    )
+    .await
+    .map_err(|error| blame(&prepared.progress, error))
+}
+
+/// Fetches every file into the dependency folder.
 ///
 /// Split out of [`download`] only so that a failure of any part of it is reported once, in one
 /// place, against the right dependency.
 async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
     tokio::fs::create_dir_all(&prepared.folder).await?;
-    prepared.progress.status("clearing previous install");
-    remove_previously_installed(
-        &prepared.dependency.name,
-        &prepared.folder,
-        &prepared.lockfile_path,
-    )
-    .await?;
 
     download_all(
         github,
@@ -340,13 +391,21 @@ fn blame(progress: &progress::Dependency, error: VendorError) -> VendorError {
 }
 
 /// Deletes whatever the previous install left behind, per the lockfile.
+///
+/// With `singleLockfile` the entry records where it was installed, which may no longer be
+/// `folder` (the dependency's `vendorFolder` changed); the old files are removed from there.
 async fn remove_previously_installed(
-    name: &str,
     folder: &Path,
     lockfile_path: &Path,
+    previous: Option<&VendorLock>,
 ) -> Result<()> {
-    for file in files_from_lockfile(lockfile_path, name).await {
-        let path = anchor(folder, file.as_str());
+    let Some(locked) = previous else {
+        return Ok(());
+    };
+    let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
+    let old_folder = saved_folder(lock_dir, locked).unwrap_or_else(|| folder.to_path_buf());
+    for file in flat_files(&locked.files) {
+        let path = anchor(&old_folder, file.as_str());
         if !path.exists() {
             continue;
         }
@@ -355,7 +414,11 @@ async fn remove_previously_installed(
         if fsx::is_running_executable(&path) {
             continue;
         }
-        delete_file_and_empty_folders(folder, &file).await?;
+        delete_file_and_empty_folders(&old_folder, &file).await?;
+    }
+    if old_folder != folder {
+        // Best-effort: only removes the abandoned folder when nothing else is in it.
+        let _ = tokio::fs::remove_dir(&old_folder).await;
     }
     Ok(())
 }

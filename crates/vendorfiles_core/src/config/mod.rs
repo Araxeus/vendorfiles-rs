@@ -140,6 +140,28 @@ impl Workspace {
     pub fn dependency_folder(&self, vendor_folder: Option<&str>, name: &str) -> PathBuf {
         dependency_folder(&self.config, &self.file.settings.path, vendor_folder, name)
     }
+
+    /// The lockfile covering a dependency: the shared one with `singleLockfile`, else the
+    /// dependency folder's own.
+    #[must_use]
+    pub fn lockfile_path(&self, dependency_folder: &Path) -> PathBuf {
+        let dir = self.config.single_lockfile.as_deref().map_or_else(
+            || dependency_folder.to_path_buf(),
+            |dir| {
+                let base = self
+                    .file
+                    .settings
+                    .path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                anchor(
+                    base,
+                    &replace_vendor_folder(dir, &self.config.vendor_folder),
+                )
+            },
+        );
+        dir.join(crate::lockfile::LOCKFILE_NAME)
+    }
 }
 
 /// Runs the config search, returning the file that wins it and the text it holds.
@@ -218,14 +240,25 @@ fn read_vendor_config(canonical: &serde_json::Value, path: &str) -> Result<Vendo
     match canonical.get("vendorConfig") {
         None => Ok(VendorConfig::default()),
         Some(value) if is_falsy(value) => Ok(VendorConfig::default()),
-        Some(serde_json::Value::Object(map)) => match map.get("vendorFolder") {
-            None => Ok(VendorConfig::default()),
-            Some(v) if is_falsy(v) => Ok(VendorConfig::default()),
-            Some(serde_json::Value::String(folder)) => Ok(VendorConfig {
-                vendor_folder: folder.clone(),
-            }),
-            Some(_) => Err(invalid()),
-        },
+        Some(serde_json::Value::Object(map)) => {
+            let mut config = VendorConfig::default();
+            match map.get("vendorFolder") {
+                None => {}
+                Some(v) if is_falsy(v) => {}
+                Some(serde_json::Value::String(folder)) => config.vendor_folder.clone_from(folder),
+                Some(_) => return Err(invalid()),
+            }
+            match map.get("singleLockfile") {
+                None => {}
+                Some(v) if is_falsy(v) => {}
+                Some(serde_json::Value::Bool(_)) => config.single_lockfile = Some(".".to_owned()),
+                Some(serde_json::Value::String(folder)) => {
+                    config.single_lockfile = Some(folder.clone());
+                }
+                Some(_) => return Err(invalid()),
+            }
+            Ok(config)
+        }
         Some(_) => Err(invalid()),
     }
 }
@@ -324,6 +357,56 @@ mod tests {
     }
 
     #[test]
+    fn single_lockfile_accepts_true_or_a_path() {
+        let read = |json: &str| {
+            read_vendor_config(&value(json), "p")
+                .unwrap()
+                .single_lockfile
+        };
+        assert_eq!(read(r#"{"vendorConfig": {}}"#), None);
+        assert_eq!(read(r#"{"vendorConfig": {"singleLockfile": false}}"#), None);
+        assert_eq!(
+            read(r#"{"vendorConfig": {"singleLockfile": true}}"#).as_deref(),
+            Some(".")
+        );
+        assert_eq!(
+            read(r#"{"vendorConfig": {"singleLockfile": "locks"}}"#).as_deref(),
+            Some("locks")
+        );
+        assert!(
+            read_vendor_config(&value(r#"{"vendorConfig": {"singleLockfile": 5}}"#), "p").is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn single_lockfile_expands_vendor_folder_and_anchors_to_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("vendor.json");
+        let write = |body: &str| std::fs::write(&config, body).unwrap();
+        // Compared against the loaded config's own folder: discovery canonicalizes the path, so
+        // the temp dir's spelling (e.g. Windows 8.3 short names) can differ from `dir.path()`.
+        let lock = |ws: &super::Workspace| {
+            let base = ws.file.settings.path.parent().unwrap().to_path_buf();
+            (ws.lockfile_path(Path::new("ignored")), base)
+        };
+
+        write(
+            r#"{"vendorConfig": {"vendorFolder": "libs", "singleLockfile": "{vendorFolder}/locks"}}"#,
+        );
+        let ws = super::Workspace::load(config.to_str()).await.unwrap();
+        let (path, base) = lock(&ws);
+        assert_eq!(
+            path,
+            base.join("libs").join("locks").join("vendor-lock.json")
+        );
+
+        write(r#"{"vendorConfig": {"singleLockfile": true}}"#);
+        let ws = super::Workspace::load(config.to_str()).await.unwrap();
+        let (path, base) = lock(&ws);
+        assert_eq!(path, base.join("vendor-lock.json"));
+    }
+
+    #[test]
     fn vendor_config_of_the_wrong_type_is_reported_with_the_reference_message() {
         assert_eq!(
             read_vendor_config(&value(r#"{"vendorConfig": "nope"}"#), "vendor.json")
@@ -363,6 +446,7 @@ mod tests {
     fn dependency_folder_appends_the_name_only_without_an_override() {
         let config = VendorConfig {
             vendor_folder: "./vendor".to_owned(),
+            single_lockfile: None,
         };
         let config_path = Path::new("/proj/vendor.json");
         assert_eq!(
@@ -384,6 +468,7 @@ mod tests {
         // Joining this onto the config's directory would give /root/root/.local/bin.
         let config = VendorConfig {
             vendor_folder: "/root/.local/bin".to_owned(),
+            single_lockfile: None,
         };
         let config_path = Path::new("/root/vendor.yml");
         let expected = Path::new("/root").join(".local").join("bin");
@@ -419,6 +504,7 @@ mod tests {
     fn a_rooted_folder_is_still_normalised() {
         let config = VendorConfig {
             vendor_folder: "/opt/./tools/../bin".to_owned(),
+            single_lockfile: None,
         };
         assert_eq!(
             dependency_folder(
@@ -436,6 +522,7 @@ mod tests {
         // The common case must not move: everything relative stays relative to the config.
         let config = VendorConfig {
             vendor_folder: "./vendor".to_owned(),
+            single_lockfile: None,
         };
         for folder in ["./vendor", "vendor", "../shared", "sub/dir"] {
             let resolved = dependency_folder(

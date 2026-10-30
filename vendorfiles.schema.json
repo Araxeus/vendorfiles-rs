@@ -29,6 +29,11 @@
           "description": "Base folder where vendor files will be saved",
           "default": "./vendor",
           "examples": ["./vendor", "./my-vendors", "./libs"]
+        },
+        "singleLockfile": {
+          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+          "description": "Write every dependency to one vendor-lock.json instead of one per dependency folder. true places it next to the config file; a string names the folder (relative to the config file, or absolute). {vendorFolder} expands to the base vendor folder",
+          "examples": [true, "./locks"]
         }
       },
       "additionalProperties": false

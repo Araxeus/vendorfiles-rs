@@ -5,7 +5,6 @@ mod sync;
 mod uninstall;
 mod version;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::Workspace;
@@ -46,12 +45,6 @@ impl Session {
             workspace,
             progress: Arc::new(progress),
         }
-    }
-
-    /// The lockfile path for a dependency folder.
-    #[must_use]
-    pub fn lockfile_path(folder: &std::path::Path) -> PathBuf {
-        folder.join("vendor-lock.json")
     }
 }
 

@@ -31,12 +31,16 @@ impl std::fmt::Display for Repository {
 pub struct VendorConfig {
     #[serde(rename = "vendorFolder")]
     pub vendor_folder: String,
+    /// Folder holding the one `vendor-lock.json` shared by every dependency (`true` is `"."`).
+    #[serde(rename = "singleLockfile", default)]
+    pub single_lockfile: Option<String>,
 }
 
 impl Default for VendorConfig {
     fn default() -> Self {
         Self {
             vendor_folder: "./vendor".to_owned(),
+            single_lockfile: None,
         }
     }
 }
