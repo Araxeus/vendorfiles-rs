@@ -154,7 +154,8 @@ async fn from_override(source: &std::ffi::OsStr) -> Result<String> {
     if source.starts_with("http://") || source.starts_with("https://") {
         return get(&source, None).await.map(Fetched::into_text);
     }
-    let path = Path::new(&source);
+    let expanded = crate::fsx::expand_home(&source);
+    let path = Path::new(&expanded);
     tokio::fs::read_to_string(path)
         .await
         .map_err(|source| VendorError::ReadFile {

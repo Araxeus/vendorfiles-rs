@@ -78,6 +78,8 @@ pub fn join_normalized(base: &Path, parts: &[&str]) -> PathBuf {
 /// The one rule for *where things go*, so placing a file and deleting it later cannot disagree.
 #[must_use]
 pub fn anchor(folder: &Path, path: &str) -> PathBuf {
+    let path = expand_home(path);
+    let path = path.as_str();
     // `has_root` rather than `is_absolute` so a leading separator counts on Windows too;
     // `C:relative`, which has no root, stays relative on both.
     if Path::new(path).has_root() {
@@ -85,6 +87,32 @@ pub fn anchor(folder: &Path, path: &str) -> PathBuf {
     } else {
         join_normalized(folder, &[path])
     }
+}
+
+/// The user's home folder: `HOME`, or `USERPROFILE` where that is what Windows sets.
+fn home_dir() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+}
+
+/// Replaces a leading `~` (alone, or followed by `/` or `\`) with the home folder.
+///
+/// A shell does this for an unquoted argument, but not inside a config file, a quoted value, or
+/// `cmd.exe`. `~user` is left alone, as is everything when no home folder can be found.
+#[must_use]
+pub fn expand_home(path: &str) -> String {
+    let Some(rest) = path.strip_prefix('~') else {
+        return path.to_owned();
+    };
+    if !(rest.is_empty() || rest.starts_with(['/', '\\'])) {
+        return path.to_owned();
+    }
+    home_dir().map_or_else(
+        || path.to_owned(),
+        |home| format!("{}{rest}", home.display()),
+    )
 }
 
 /// Whether `text` begins with a plain drive root such as `C:\`.
@@ -379,8 +407,8 @@ async fn write_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        anchor, is_running_executable, join_normalized, normalize, simplify, staged_beside,
-        stream_to_file,
+        anchor, expand_home, home_dir, is_running_executable, join_normalized, normalize, simplify,
+        staged_beside, stream_to_file,
     };
     use std::path::{Path, PathBuf};
 
@@ -628,6 +656,28 @@ mod tests {
             anchor(&folder, "C:relative"),
             join_normalized(&folder, &["C:relative"])
         );
+    }
+
+    #[test]
+    fn a_leading_tilde_means_the_home_folder() {
+        let Some(home) = home_dir() else { return };
+        let home = home.display().to_string();
+        assert_eq!(expand_home("~"), home);
+        assert_eq!(expand_home("~/bin"), format!("{home}/bin"));
+        assert_eq!(expand_home(r"~\bin"), format!(r"{home}\bin"));
+
+        let folder = PathBuf::from("proj");
+        assert_eq!(
+            anchor(&folder, "~/bin/tool"),
+            normalize(Path::new(&format!("{home}/bin/tool")))
+        );
+    }
+
+    #[test]
+    fn only_a_bare_leading_tilde_is_expanded() {
+        for text in ["~user/bin", "a/~/b", "bin~", "~~", ".~"] {
+            assert_eq!(expand_home(text), text);
+        }
     }
 
     #[test]

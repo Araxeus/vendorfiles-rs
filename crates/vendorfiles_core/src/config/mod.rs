@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::error::{Result, VendorError};
-use crate::fsx::{anchor, join_normalized, normalize, real_path};
+use crate::fsx::{anchor, expand_home, join_normalized, normalize, real_path};
 use crate::model::{DefaultOptions, RawDependency, VendorConfig};
 use crate::template::replace_vendor_folder;
 
@@ -198,7 +198,7 @@ fn resolve_start_path(config_location: Option<&str>) -> PathBuf {
         .or_else(|| from_env("PWD"))
         .map_or_else(
             || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            PathBuf::from,
+            |start| PathBuf::from(expand_home(&start)),
         )
 }
 
@@ -213,7 +213,7 @@ async fn default_config_file() -> Result<Option<(PathBuf, String)>> {
     else {
         return Ok(None);
     };
-    let folder = real_path(Path::new(&location))?;
+    let folder = real_path(Path::new(&expand_home(&location)))?;
     Ok(find_config_file(&folder).await)
 }
 
