@@ -3954,7 +3954,7 @@ dependencies = [
 
 [[package]]
 name = "vendorfiles"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3969,7 +3969,7 @@ dependencies = [
 
 [[package]]
 name = "vendorfiles_core"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "apple-native-keyring-store",
  "fancy-regex 0.20.0",
@@ -4373,7 +4373,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "anyhow",
  "clap",
