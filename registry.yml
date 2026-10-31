@@ -681,3 +681,66 @@ programs:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Flat on Windows, nested under `usr/bin` elsewhere, so every host is spelled out. Windows also
+  # ships `lua55.dll`, which fastfetch loads only for Lua-scripted configs.
+  fastfetch:
+    description: "Neofetch-like system information tool"
+    repository: https://github.com/fastfetch-cli/fastfetch
+    targets:
+      windows-x86_64:
+        asset: "{release}/fastfetch-windows-amd64.zip"
+        member: "fastfetch.exe"
+      windows-aarch64:
+        asset: "{release}/fastfetch-windows-aarch64.zip"
+        member: "fastfetch.exe"
+      macos-x86_64:
+        asset: "{release}/fastfetch-macos-universal.tar.gz"
+        member: "fastfetch-macos-universal/usr/bin/fastfetch"
+      macos-aarch64:
+        asset: "{release}/fastfetch-macos-universal.tar.gz"
+        member: "fastfetch-macos-universal/usr/bin/fastfetch"
+      linux-x86_64:
+        asset: "{release}/fastfetch-linux-amd64.tar.gz"
+        member: "fastfetch-linux-amd64/usr/bin/fastfetch"
+      linux-aarch64:
+        asset: "{release}/fastfetch-linux-aarch64.tar.gz"
+        member: "fastfetch-linux-aarch64/usr/bin/fastfetch"
+
+  # `.zip` on Windows but `.tar.xz` on Linux, and no macOS or Windows arm64 builds.
+  upx:
+    description: "Executable packer that compresses binaries"
+    repository: https://github.com/upx/upx
+    targets:
+      windows-x86_64:
+        asset: "{release}/upx-{version}-win64.zip"
+        member: "upx-{version}-win64/upx.exe"
+      linux-x86_64:
+        asset: "{release}/upx-{version}-amd64_linux.tar.xz"
+        member: "upx-{version}-amd64_linux/upx"
+      linux-aarch64:
+        asset: "{release}/upx-{version}-arm64_linux.tar.xz"
+        member: "upx-{version}-arm64_linux/upx"
+
+  hide-console:
+    description: "Run a command with its console window hidden"
+    aliases: [hide]
+    repository: https://github.com/Araxeus/hide-console
+    targets:
+      windows-x86_64:
+        asset: "{release}/hide.exe"
+
+  # The CLI lives in `carapace-bin`; `carapace-sh/carapace` is the Go library behind it.
+  carapace:
+    description: "Multi-shell completion for hundreds of commands"
+    aliases: [carapace-bin]
+    repository: https://github.com/carapace-sh/carapace-bin
+    asset: "{release}/carapace-bin_{version}_{target}{ext}"
+    member: "carapace{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64

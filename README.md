@@ -947,7 +947,7 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (37)</summary>
+<summary>Programs you can add by name (41)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -956,10 +956,12 @@ asks whether you meant `ripgrep`.
 | [bat](https://github.com/sharkdp/bat) |  | cat with syntax highlighting and Git integration | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI | All |
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | Terminal system monitor for processes, CPU, memory, disks and network | All |
+| [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Multi-shell completion for hundreds of commands | All |
 | [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager for git, diff and grep output | Windows x64, macOS arm64, Linux |
 | [dust](https://github.com/bootandy/dust) |  | Disk usage viewer, a more intuitive du | All |
 | [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and their free space, a friendlier df | Windows x64, macOS, Linux |
 | [edit](https://github.com/microsoft/edit) | `msedit` | Microsoft's small terminal text editor | Windows, macOS arm64, Linux |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) |  | Neofetch-like system information tool | All |
 | [fd](https://github.com/sharkdp/fd) | `fdfind`, `fd-find` | Fast, user-friendly alternative to find | Windows, macOS arm64, Linux |
 | [file-pilot](https://github.com/Araxeus/fpilot-scraper) | `fpilot`, `filepilot` | Fast, lightweight file manager for Windows | Windows x64 |
 | [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
@@ -968,6 +970,7 @@ asks whether you meant `ripgrep`.
 | [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub on the command line | All |
 | [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing coding agents | Windows x64, macOS, Linux |
+| [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command with its console window hidden | Windows x64 |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool | All |
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks, like make without the build system | All |
@@ -983,6 +986,7 @@ asks whether you meant `ripgrep`.
 | [starship](https://github.com/starship/starship) |  | Fast, customizable prompt for any shell | All |
 | [surge](https://github.com/surge-downloader/surge) |  | Fast download manager with a terminal UI | All |
 | [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one | Windows x64, macOS, Linux |
+| [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries | Windows x64, Linux |
 | [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Windows notifications from inside WSL | Windows x64 |
 | [yamlfmt](https://github.com/google/yamlfmt) |  | YAML formatter | All |
 | [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON and XML processor | All |
