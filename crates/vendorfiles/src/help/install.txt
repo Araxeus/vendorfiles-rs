@@ -3,7 +3,7 @@ Usage: vendor install|add [options] <url/name...>
 Install dependencies. Each source can be a GitHub repo URL or owner/repo format
 or name of repo to search for, and may pin a version as source@version.
 A name in the program registry needs no files; otherwise provide them with -f or
---files <files...>
+--files <files...>. vendor search lists the names it knows.
 
 Arguments:
   url/name                GitHub repo URL or owner/repo format or name of repo
@@ -14,11 +14,13 @@ Options:
   -f, --files <files...>  Files to install
   --refresh             Re-check the program registry
   --dry-run             Print the entry, change nothing
+  --list                List programs installable by name
   -h, --help              display help for command
 
 Examples:
     vendor install React -n MyReact -f README.md
     vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
     vendor add rg fd
+    vendor add --list
     vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
 

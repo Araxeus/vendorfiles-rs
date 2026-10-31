@@ -78,7 +78,11 @@ pub enum Command {
         ///
         /// The reference took the version as a second operand; splitting it off the source is
         /// what lets every operand be a source. `crate::source` does that splitting.
-        #[arg(value_name = "url/name", num_args = 1.., required = true)]
+        #[arg(
+            value_name = "url/name",
+            num_args = 1..,
+            required_unless_present = "list"
+        )]
         sources: Vec<String>,
         #[arg(short = 'n', long = "name", num_args = 0..=1, value_name = "name")]
         name: Option<Option<String>>,
@@ -90,6 +94,21 @@ pub enum Command {
         /// Print the entry that would be added, without downloading or writing anything.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// List the programs installable by name instead, as `vendor search` does. Any sources
+        /// given become the search terms.
+        #[arg(long = "list")]
+        list: bool,
+    },
+
+    /// Search the programs `install` knows by name.
+    #[command(disable_help_flag = true)]
+    Search {
+        /// Words to match against names, aliases and descriptions. None lists every program.
+        #[arg(value_name = "terms")]
+        terms: Vec<String>,
+        /// Re-check the program registry rather than trusting the cached copy.
+        #[arg(long = "refresh")]
+        refresh: bool,
     },
 
     /// Uninstall all/selected dependencies.

@@ -1,0 +1,16 @@
+Usage: vendor search [options] [terms...]
+
+Find programs vendor install can add by name. Every term has to match a name,
+an alias, a word in the description or the repository. Names rank first.
+
+Arguments:
+  terms        Words to search for. None lists every program
+
+Options:
+  --refresh    Re-check the program registry
+  -h, --help   display help for command
+
+Examples:
+    vendor search
+    vendor search disk
+    vendor add --list

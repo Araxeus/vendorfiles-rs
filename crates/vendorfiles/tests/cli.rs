@@ -94,8 +94,12 @@ fn expected_help(name: &str) -> String {
             .replace(
                 "  install|add [options] <url/name> [version]  Install a dependency",
                 &format!(
-                    "{:<46}{}",
-                    "  install|add [options] <url/name...>", "Install dependencies"
+                    "{:<46}{}
+{:<46}{}",
+                    "  install|add [options] <url/name...>",
+                    "Install dependencies",
+                    "  search [options] [terms...]",
+                    "Find programs to install by name"
                 ),
             )
             .replace(
@@ -156,22 +160,26 @@ or name of repo to search for, and may pin a version as source@version.",
                 &format!(
                     "{:<24}{}
 {:<24}{}
+{:<24}{}
   -h, --help              display help for command",
                     "  --refresh",
                     "Re-check the program registry",
                     "  --dry-run",
-                    "Print the entry, change nothing"
+                    "Print the entry, change nothing",
+                    "  --list",
+                    "List programs installable by name"
                 ),
             )
             .replace(
                 "Files have to be provided with -f or --files <files...>",
                 "A name in the program registry needs no files; otherwise provide them with -f or
---files <files...>",
+--files <files...>. vendor search lists the names it knows.",
             )
             .replace(
                 "    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE",
                 "    vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
-    vendor add rg fd",
+    vendor add rg fd
+    vendor add --list",
             ),
         _ => reference,
     }
@@ -282,7 +290,7 @@ fn the_script_covers_the_help_and_version_surface() {
         r#"opts="-c -p -h -v --config --plain --help --version"#,
         // `help` is a command, and the arm that recognises it offers the topics.
         "vendor,help)",
-        r#"opts="-c -p --config --plain sync update outdated install uninstall list config login logout completions"#,
+        r#"opts="-c -p --config --plain sync update outdated install search uninstall list config login logout completions"#,
         // Each real subcommand takes `-h` too; `help` itself must not, `vendor help -h` fails.
         r#"opts="-f -h -c -p --force --help --config --plain"#,
     ] {
@@ -317,7 +325,7 @@ fn our_own_commands_serve_the_help_we_ship() {
     let dir = project("{}");
     // No reference fixture to diff against - the reference has no such command - so this checks
     // the binary serves the text we ship, through both routes.
-    for command in ["completions", "logout"] {
+    for command in ["completions", "logout", "search"] {
         let served = std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("src/help/{command}.txt")),
         )
@@ -1073,10 +1081,11 @@ fn registry(dir: &Path) -> std::path::PathBuf {
     std::fs::write(
         &path,
         r#"
-version: 1
+version: 2
 programs:
   fd:
     aliases: [fdfind]
+    description: "Fast, user-friendly alternative to find"
     repository: https://github.com/sharkdp/fd
     asset: "{release}/fd-v{version}-{target}{ext}"
     member: "fd-v{version}-{target}/fd{exe}"
@@ -1088,6 +1097,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
   ripgrep:
     aliases: [rg]
+    description: "Fast recursive search through file contents, like grep"
     repository: https://github.com/BurntSushi/ripgrep
     asset: "{release}/ripgrep-{version}-{target}{ext}"
     member: "ripgrep-{version}-{target}/rg{exe}"
@@ -1097,6 +1107,12 @@ programs:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
+  plan9-tool:
+    description: "Only built for a platform no test runs on"
+    repository: https://github.com/example/plan9-tool
+    targets:
+      plan9-x86_64:
+        asset: "{release}/plan9-tool"
 "#,
     )
     .expect("writing the registry");
@@ -1117,6 +1133,100 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
         .env("VENDOR_REGISTRY", &registry)
         .output()
         .expect("running the vendor binary")
+}
+
+// ---------------------------------------------------------------------------------------
+// `search` and `add --list`
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn search_lists_every_program_without_a_config() {
+    // The registry is not the project's, so there is no config here at all.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out = vendor_with_registry(dir.path(), &["search"]);
+    let printed = stdout(&out);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(printed.contains("NAME"), "{printed}");
+    assert!(printed.contains("fdfind"), "{printed}");
+    assert!(
+        printed.find("fd ") < printed.find("ripgrep"),
+        "listed by name: {printed}"
+    );
+}
+
+#[test]
+fn search_matches_aliases_and_descriptions() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    let by_alias = stdout(&vendor_with_registry(dir.path(), &["search", "rg"]));
+    assert!(by_alias.contains("ripgrep"), "{by_alias}");
+    assert!(!by_alias.contains("fdfind"), "{by_alias}");
+
+    let by_description = stdout(&vendor_with_registry(dir.path(), &["search", "GREP"]));
+    assert!(by_description.contains("ripgrep"), "{by_description}");
+
+    let by_two_words = stdout(&vendor_with_registry(
+        dir.path(),
+        &["search", "fast", "find"],
+    ));
+    assert!(by_two_words.contains("fdfind"), "{by_two_words}");
+    assert!(!by_two_words.contains("ripgrep"), "{by_two_words}");
+}
+
+#[test]
+fn search_marks_a_program_this_machine_cannot_install() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let printed = stdout(&vendor_with_registry(dir.path(), &["search", "plan9"]));
+    assert!(printed.contains("plan9-tool"), "{printed}");
+    assert!(
+        printed.contains("(no ") && printed.contains(" build)"),
+        "{printed}"
+    );
+
+    let available = stdout(&vendor_with_registry(dir.path(), &["search", "fd"]));
+    assert!(!available.contains("(no "), "{available}");
+}
+
+#[test]
+fn search_says_so_when_nothing_matches() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out = vendor_with_registry(dir.path(), &["search", "kubernetes"]);
+    assert_eq!(code(&out), 0);
+    assert!(
+        stdout(&out).contains("no program in the registry matches 'kubernetes'"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn add_list_is_search() {
+    // No source needed, and any given become the search terms.
+    let dir = tempfile::tempdir().expect("temp dir");
+    for (list, search) in [
+        (vec!["add", "--list"], vec!["search"]),
+        (vec!["install", "--list", "rg"], vec!["search", "rg"]),
+    ] {
+        let listed = vendor_with_registry(dir.path(), &list);
+        assert_eq!(code(&listed), 0, "stderr: {}", stderr(&listed));
+        assert_eq!(
+            stdout(&listed),
+            stdout(&vendor_with_registry(dir.path(), &search))
+        );
+    }
+}
+
+#[test]
+fn add_without_a_source_or_list_is_still_refused() {
+    let dir = project("{}");
+    let out = vendor_with_registry(dir.path(), &["add"]);
+    assert_eq!(code(&out), 1);
+    assert!(
+        stderr(&out).contains("missing required argument 'url/name'"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 // ---------------------------------------------------------------------------------------

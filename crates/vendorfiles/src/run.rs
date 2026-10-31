@@ -48,6 +48,15 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
         },
         Command::Logout => auth::logout().await.map_err(Into::into),
 
+        // The registry is not the project's, so finding a program to add needs no config.
+        Command::Search { terms, refresh } => search(&terms.join(" "), *refresh).await,
+        Command::Install {
+            list: true,
+            sources,
+            refresh,
+            ..
+        } => search(&sources.join(" "), *refresh).await,
+
         _ => return None,
     })
 }
@@ -148,6 +157,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
             files,
             refresh,
             dry_run,
+            list: _,
         } => {
             install_all(
                 session,
@@ -175,11 +185,70 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
         Command::Login { .. } | Command::Logout => {
             unreachable!("login and logout are dispatched without a workspace")
         }
-        Command::Completions { .. } => {
-            unreachable!("completions are dispatched without a workspace")
+        Command::Completions { .. } | Command::Search { .. } => {
+            unreachable!("completions and search are dispatched without a workspace")
         }
     }
 
+    Ok(())
+}
+
+/// `vendor search [terms]` / `vendor add --list` - the programs `install` knows by name.
+///
+/// One row per program, best match first. A program with no build for this machine stays in
+/// the list, marked, so a search never seems to come up short for no reason.
+async fn search(query: &str, refresh: bool) -> Result<()> {
+    const HEADERS: [&str; 3] = ["NAME", "ALIASES", "DESCRIPTION"];
+
+    let registry = registry::load(refresh).await?;
+    let found = registry::search::search(&registry, query);
+    if found.is_empty() {
+        ui::info(format!("no program in the registry matches '{query}'"));
+        return Ok(());
+    }
+
+    let host = registry::resolve::host();
+    let rows: Vec<[String; 3]> = found
+        .iter()
+        .map(|(name, program)| {
+            let aliases = if program.aliases.is_empty() {
+                "-".to_owned()
+            } else {
+                program.aliases.join(", ")
+            };
+            let description = program.description.as_deref().unwrap_or_default();
+            let description = if program.covers(&host) {
+                description.to_owned()
+            } else {
+                format!("{description} (no {host} build)")
+            };
+            [(*name).to_owned(), aliases, description]
+        })
+        .collect();
+
+    // Character counts, not bytes: a non-ASCII name would otherwise pad short.
+    let widths: [usize; 2] = std::array::from_fn(|column| {
+        rows.iter()
+            .map(|row| row[column].chars().count())
+            .chain(std::iter::once(HEADERS[column].chars().count()))
+            .max()
+            .unwrap_or(0)
+    });
+    let line = |cells: [&str; 3]| {
+        format!(
+            "{:<name$}  {:<aliases$}  {}",
+            cells[0],
+            cells[1],
+            cells[2],
+            name = widths[0],
+            aliases = widths[1]
+        )
+    };
+
+    vendorfiles_core::progress::print_out(&ui::cyan(&line(HEADERS)));
+    for row in &rows {
+        vendorfiles_core::progress::print_out(&line([&row[0], &row[1], &row[2]]));
+    }
     Ok(())
 }
 
