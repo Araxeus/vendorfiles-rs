@@ -101,7 +101,7 @@ pub enum Command {
     },
 
     /// Search the programs `install` knows by name.
-    #[command(disable_help_flag = true)]
+    #[command(alias = "find", disable_help_flag = true)]
     Search {
         /// Words to match against names, aliases and descriptions. None lists every program.
         #[arg(value_name = "terms")]
