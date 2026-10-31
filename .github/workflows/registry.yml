@@ -4,16 +4,17 @@ name: Registry
 # release, which is neither free nor deterministic enough to gate every pull request.
 on:
   pull_request:
-    paths:
+    paths: &registry
       - registry.yml
+      - registry.schema.json
       - crates/vendorfiles_core/src/registry/**
+      - .github/workflows/registry.yml
   push:
     branches: [main]
-    paths:
-      - registry.yml
-      - crates/vendorfiles_core/src/registry/**
+    paths: *registry
   # A release renaming its assets breaks an entry without anyone touching this repository.
   schedule:
+    # Runs at 06:00, only on Monday
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
@@ -26,18 +27,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      # Resolves every entry for every host it claims, then checks the asset it names is in the
-      # release GitHub actually publishes. Also downloads one asset per entry - this runner's own
-      # platform where the entry covers it - and checks the `member` really is inside it. Reading
-      # inside every asset for every platform would be gigabytes, so one platform per entry it is.
-      - name: Verify against live releases
+      # The offline tests parse `registry.yml` and validate it against `registry.schema.json`.
+      # The ignored tests resolve every entry for every host it claims, then check the asset it
+      # names is in the release GitHub actually publishes. They also download one asset per entry -
+      # this runner's own platform where the entry covers it - and check the `member` really is
+      # inside it. Reading inside every asset for every platform would be gigabytes, so one
+      # platform per entry it is.
+      - name: Verify the schema and live releases
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
-          cargo test -p vendorfiles_core --lib registry
-          -- --ignored --nocapture
+          cargo test -p vendorfiles_core --lib registry -- --include-ignored --nocapture

@@ -1,0 +1,29 @@
+name: README
+
+# The README's examples and program list are generated. Code changes run this check in the
+# Check workflow; this one covers edits to the README or the registry alone.
+on:
+  push:
+    paths: &sources
+      - README.md
+      - registry.yml
+      - .github/workflows/readme.yml
+  pull_request:
+    paths: *sources
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  readme:
+    name: README is generated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: README examples
+        run: cargo run -p xtask -- readme --check
