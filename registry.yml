@@ -57,7 +57,7 @@ programs:
   # Most Rust projects name assets by target triple and ship the binary inside a directory of
   # the same name, which the compact form covers in a few lines.
   fd:
-    description: "Fast, user-friendly alternative to find"
+    description: "Fast, user-friendly alternative to find for locating files and folders"
     aliases: [fdfind, fd-find]
     repository: https://github.com/sharkdp/fd
     asset: "{release}/fd-v{version}-{target}{ext}"
@@ -72,7 +72,7 @@ programs:
 
   # ripgrep tags releases without a leading `v`, so the asset carries {version} bare.
   ripgrep:
-    description: "Fast recursive search through file contents, like grep"
+    description: "Fast recursive regex search of file contents, like grep"
     aliases: [rg]
     repository: https://github.com/BurntSushi/ripgrep
     asset: "{release}/ripgrep-{version}-{target}{ext}"
@@ -87,7 +87,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   bat:
-    description: "cat with syntax highlighting and Git integration"
+    description: "cat clone and file viewer with syntax highlighting and a pager"
     repository: https://github.com/sharkdp/bat
     asset: "{release}/bat-v{version}-{target}{ext}"
     member: "bat-v{version}-{target}/bat{exe}"
@@ -100,7 +100,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   hyperfine:
-    description: "Command-line benchmarking tool"
+    description: "Command-line benchmarking tool that times and compares commands"
     repository: https://github.com/sharkdp/hyperfine
     asset: "{release}/hyperfine-v{version}-{target}{ext}"
     member: "hyperfine-v{version}-{target}/hyperfine{exe}"
@@ -113,7 +113,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   dust:
-    description: "Disk usage viewer, a more intuitive du"
+    description: "Disk usage viewer showing what takes up space, a more intuitive du"
     repository: https://github.com/bootandy/dust
     asset: "{release}/dust-v{version}-{target}{ext}"
     member: "dust-v{version}-{target}/dust{exe}"
@@ -127,7 +127,7 @@ programs:
 
   # The binary is `btm`. Tags carry no leading `v`.
   bottom:
-    description: "Terminal system monitor for processes, CPU, memory, disks and network"
+    description: "System monitor for processes, CPU, memory, disks and network, like htop"
     aliases: [btm]
     repository: https://github.com/ClementTsang/bottom
     asset: "{release}/bottom_{target}{ext}"
@@ -140,10 +140,20 @@ programs:
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
 
+  # Linux only, built against musl. Themes ship in the archive, but btop has a built-in default.
+  btop:
+    description: "Resource monitor for CPU, memory, disks, network and processes like htop"
+    repository: https://github.com/aristocratos/btop
+    asset: "{release}/btop-{target}.tar.gz"
+    member: "btop/bin/btop"
+    targets:
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
   # One zip holds every platform, each in a directory named by its triple. Windows is gnu only,
   # and there is no windows-aarch64 build.
   dysk:
-    description: "Lists mounted disks and their free space, a friendlier df"
+    description: "Lists mounted disks and filesystems with free space, a friendlier df"
     repository: https://github.com/Canop/dysk
     asset: "{release}/dysk_{version}.zip"
     member: "{target}/dysk{exe}"
@@ -156,7 +166,7 @@ programs:
 
   # delta tags without a leading `v`. No macos-x86_64 or windows-aarch64 builds upstream.
   delta:
-    description: "Syntax-highlighting pager for git, diff and grep output"
+    description: "Syntax-highlighting pager and diff viewer for git, diff, grep and blame"
     aliases: [git-delta]
     repository: https://github.com/dandavison/delta
     asset: "{release}/delta-{version}-{target}{ext}"
@@ -167,9 +177,23 @@ programs:
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
 
+  # Zips on every platform, Unix included, with the binary at the archive root.
+  ov:
+    description: "Feature-rich terminal pager and text viewer, a modern take on less"
+    repository: https://github.com/noborus/ov
+    asset: "{release}/ov_{version}_{target}.zip"
+    member: "ov{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
   # just and zoxide put the binary at the archive root and build Linux only against musl.
   just:
-    description: "Command runner for project tasks, like make without the build system"
+    description: "Command runner for project tasks and scripts, like make without builds"
     repository: https://github.com/casey/just
     asset: "{release}/just-{version}-{target}{ext}"
     member: "just{exe}"
@@ -182,7 +206,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-musl
 
   zoxide:
-    description: "Smarter cd that remembers the directories you use most"
+    description: "Smarter cd that jumps to the directories you use most"
     repository: https://github.com/ajeetdsouza/zoxide
     asset: "{release}/zoxide-{version}-{target}{ext}"
     member: "zoxide{exe}"
@@ -196,7 +220,7 @@ programs:
 
   # Asset names carry no version. Linux is musl because upstream builds aarch64 only that way.
   starship:
-    description: "Fast, customizable prompt for any shell"
+    description: "Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell"
     repository: https://github.com/starship/starship
     asset: "{release}/starship-{target}{ext}"
     member: "starship{exe}"
@@ -211,7 +235,7 @@ programs:
   # fzf names assets `os_arch` rather than by triple, and puts the binary at the archive root,
   # so each host is spelled out.
   fzf:
-    description: "Command-line fuzzy finder"
+    description: "Interactive command-line fuzzy finder for files, history and any list"
     repository: https://github.com/junegunn/fzf
     targets:
       windows-x86_64:
@@ -234,7 +258,7 @@ programs:
         member: "fzf"
 
   yamlfmt:
-    description: "YAML formatter"
+    description: "YAML file formatter"
     repository: https://github.com/google/yamlfmt
     # Ships .tar.gz on every platform, Windows included, so the extension is literal.
     asset: "{release}/yamlfmt_{version}_{target}.tar.gz"
@@ -248,7 +272,7 @@ programs:
       linux-aarch64: Linux_arm64
 
   micro:
-    description: "Terminal text editor with familiar keybindings and mouse support"
+    description: "Terminal text editor with familiar keys and mouse support, a modern nano"
     repository: https://github.com/zyedidia/micro
     asset: "{release}/micro-{version}-{target}{ext}"
     member: "micro-{version}/micro{exe}"
@@ -261,7 +285,7 @@ programs:
       linux-aarch64: linux-arm64
 
   surge:
-    description: "Fast download manager with a terminal UI"
+    description: "Fast file download manager with a terminal UI"
     repository: https://github.com/surge-downloader/surge
     asset: "{release}/Surge_{version}_{target}{ext}"
     member: "surge{exe}"
@@ -274,7 +298,7 @@ programs:
       linux-aarch64: linux_arm64
 
   lazygit:
-    description: "Terminal UI for git"
+    description: "Terminal UI for git that handles staging, commits, branches and rebases"
     repository: https://github.com/jesseduffield/lazygit
     asset: "{release}/lazygit_{version}_{target}{ext}"
     member: "lazygit{exe}"
@@ -288,7 +312,7 @@ programs:
 
   # Zips on every platform, so the extension is literal.
   rclone:
-    description: "Sync files to and from cloud storage"
+    description: "rsync-style sync to cloud storage like S3, Google Drive and Dropbox"
     repository: https://github.com/rclone/rclone
     asset: "{release}/rclone-v{version}-{target}.zip"
     member: "rclone-v{version}-{target}/rclone{exe}"
@@ -301,7 +325,7 @@ programs:
       linux-aarch64: linux-arm64
 
   ansi2txt:
-    description: "Strips ANSI color and control codes from text"
+    description: "Strips ANSI color and escape codes from text, leaving plain text"
     aliases: [ansi2text]
     repository: https://github.com/gabe565/ansi2txt
     asset: "{release}/ansi2txt_{version}_{target}{ext}"
@@ -328,7 +352,7 @@ programs:
       linux-aarch64: Linux_arm64
 
   ls-interactive:
-    description: "Interactive ls for browsing and changing directories"
+    description: "Interactive ls for browsing files and navigating directories"
     aliases: [lsi]
     repository: https://github.com/Araxeus/ls-interactive
     asset: "{release}/lsi_v{version}_{target}{ext}"
@@ -345,7 +369,7 @@ programs:
   # `edit` nests its binary inside a directory on Windows but not on Unix, so each host is
   # spelled out rather than sharing one `member`.
   edit:
-    description: "Microsoft's small terminal text editor"
+    description: "Microsoft's small terminal text editor, a modern MS-DOS Edit"
     aliases: [msedit]
     repository: https://github.com/microsoft/edit
     targets:
@@ -392,7 +416,7 @@ programs:
 
   # No windows-aarch64: upstream builds Windows only for x86_64.
   atuin:
-    description: "Searchable shell history, synced across machines"
+    description: "Searchable shell and command history, synced across machines"
     repository: https://github.com/atuinsh/atuin
     targets:
       windows-x86_64:
@@ -414,7 +438,7 @@ programs:
   # Flat on Windows, nested on Unix. The archives also hold optional `nu_plugin_*` binaries, and
   # on Windows a `less.exe`, which `nu` runs without.
   nushell:
-    description: "Shell that works with structured data"
+    description: "Cross-platform shell that treats command output as structured data"
     aliases: [nu]
     repository: https://github.com/nushell/nushell
     targets:
@@ -440,7 +464,7 @@ programs:
   # GitHub CLI ships a zip on macOS too, and nests the binary under `bin/` - inside a versioned
   # directory everywhere but Windows.
   gh:
-    description: "GitHub on the command line"
+    description: "GitHub's official CLI for pull requests, issues, releases and repos"
     aliases: [gh-cli, github-cli]
     repository: https://github.com/cli/cli
     targets:
@@ -496,7 +520,7 @@ programs:
   # Bare binaries: no `member`, so the asset is saved as it stands. `as` gives it the name you
   # would actually type.
   shfmt:
-    description: "Shell script formatter"
+    description: "Shell script formatter for bash, POSIX sh and mksh"
     repository: https://github.com/mvdan/sh
     asset: "{release}/shfmt_v{version}_{target}{exe}"
     as: "shfmt{exe}"
@@ -530,7 +554,7 @@ programs:
         as: "yt-dlp"
 
   ttt:
-    description: "Terminal text editor that feels like a GUI one"
+    description: "Terminal text editor that feels like a GUI one, such as VS Code"
     repository: https://github.com/eugenioenko/ttt
     targets:
       windows-x86_64:
@@ -551,7 +575,7 @@ programs:
 
   # jq tags releases `jq-1.8.2`. Asset names carry no version, so the tag shape never matters.
   jq:
-    description: "Command-line JSON processor"
+    description: "Command-line JSON processor for querying, filtering and transforming"
     repository: https://github.com/jqlang/jq
     asset: "{release}/jq-{target}{exe}"
     as: "jq{exe}"
@@ -565,7 +589,7 @@ programs:
 
   # yq also ships archives, but each holds only the same bare binary.
   yq:
-    description: "Command-line YAML, JSON and XML processor"
+    description: "Command-line YAML, JSON, XML, CSV and TOML processor, like jq"
     repository: https://github.com/mikefarah/yq
     asset: "{release}/yq_{target}{exe}"
     as: "yq{exe}"
@@ -583,7 +607,7 @@ programs:
   # one. The two `OpenConsole.exe` builds share a basename, which only the list form can keep
   # apart. THIRD-PARTY-NOTICES/ is left out: licence text, not something the program reads.
   herdr:
-    description: "Terminal runtime for running and managing coding agents"
+    description: "Terminal runtime for running and managing AI coding agents"
     repository: https://github.com/herdrdev/herdr
     targets:
       windows-x86_64:
@@ -609,7 +633,7 @@ programs:
 
   # Windows only by nature: it forwards notifications from WSL to the Windows host.
   wsl-notify-send:
-    description: "Windows notifications from inside WSL"
+    description: "Sends Windows desktop notifications from inside WSL, like notify-send"
     repository: https://github.com/stuartleeks/wsl-notify-send
     targets:
       windows-x86_64:
@@ -619,7 +643,7 @@ programs:
   # File Pilot ships only from its own website. fpilot-scraper mirrors each beta build as a GitHub
   # release, an x64 Windows binary under tags like `Beta-v0.8.5`.
   file-pilot:
-    description: "Fast, lightweight file manager for Windows"
+    description: "Fast, lightweight file manager and Explorer replacement for Windows"
     aliases: [fpilot, filepilot]
     repository: https://github.com/Araxeus/fpilot-scraper
     targets:
@@ -629,7 +653,7 @@ programs:
   # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
   fresh:
-    description: "Terminal text editor and IDE"
+    description: "Fast, easy terminal text editor and IDE"
     repository: https://github.com/sinelaw/fresh
     targets:
       windows-x86_64:
@@ -668,7 +692,7 @@ programs:
   # The SDK monorepo tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, and only the
   # first has the binaries. Without `releaseRegex` the newest release has no assets at all.
   bitwarden-secrets-cli:
-    description: "Bitwarden Secrets Manager CLI"
+    description: "Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI"
     aliases: [bws]
     repository: https://github.com/bitwarden/sdk
     releaseRegex: '^bws-v\d+\.\d+\.\d+$'
@@ -685,7 +709,7 @@ programs:
   # Flat on Windows, nested under `usr/bin` elsewhere, so every host is spelled out. Windows also
   # ships `lua55.dll`, which fastfetch loads only for Lua-scripted configs.
   fastfetch:
-    description: "Neofetch-like system information tool"
+    description: "Neofetch-like tool that shows system information in the terminal"
     repository: https://github.com/fastfetch-cli/fastfetch
     targets:
       windows-x86_64:
@@ -709,7 +733,7 @@ programs:
 
   # `.zip` on Windows but `.tar.xz` on Linux, and no macOS or Windows arm64 builds.
   upx:
-    description: "Executable packer that compresses binaries"
+    description: "Executable packer that compresses binaries to shrink their size"
     repository: https://github.com/upx/upx
     targets:
       windows-x86_64:
@@ -723,7 +747,7 @@ programs:
         member: "upx-{version}-arm64_linux/upx"
 
   hide-console:
-    description: "Run a command with its console window hidden"
+    description: "Run a command on Windows with its console window hidden"
     aliases: [hide]
     repository: https://github.com/Araxeus/hide-console
     targets:
@@ -732,7 +756,7 @@ programs:
 
   # The CLI lives in `carapace-bin`; `carapace-sh/carapace` is the Go library behind it.
   carapace:
-    description: "Multi-shell completion for hundreds of commands"
+    description: "Shell completion for hundreds of commands in bash, zsh, fish and more"
     aliases: [carapace-bin]
     repository: https://github.com/carapace-sh/carapace-bin
     asset: "{release}/carapace-bin_{version}_{target}{ext}"
