@@ -168,7 +168,7 @@ pub fn run(options: &Options) -> Result<()> {
         &root,
         &format!("Committing {tag}"),
         "git",
-        &["commit", "-m", &tag],
+        &["commit", "-m", &format!("chore(release): {tag}")],
     )?;
     sh::run(&root, &format!("Tagging {tag}"), "git", &["tag", &tag])?;
     println!("Committed and tagged version {tag} successfully.");
