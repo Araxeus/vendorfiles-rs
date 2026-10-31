@@ -31,12 +31,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # The offline tests parse `registry.yml` and validate it against `registry.schema.json`.
-      # The ignored tests resolve every entry for every host it claims, then check the asset it
-      # names is in the release GitHub actually publishes. They also download one asset per entry -
-      # this runner's own platform where the entry covers it - and check the `member` really is
-      # inside it. Reading inside every asset for every platform would be gigabytes, so one
-      # platform per entry it is.
+      # Ignored tests hit live GitHub releases; the rest check the schema offline.
       - name: Verify the schema and live releases
 
         env:
