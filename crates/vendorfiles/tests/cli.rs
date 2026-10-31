@@ -1653,3 +1653,70 @@ fn the_first_matching_config_name_wins() {
     assert_eq!(stderr(&out), "");
     assert_eq!(code(&out), 0);
 }
+
+/// A project in `vendor/` with one live dependency `A` and lock entries passed in as JSON.
+///
+/// `A` is locked and already installed, so `sync` and `outdated` both run offline.
+fn project_with_lock(lock: &str, files: &[&str]) -> tempfile::TempDir {
+    let dir = project(
+        r#"{
+  "vendorConfig": {"vendorFolder": "./vendor"},
+  "vendorDependencies": {
+    "A": {"version": "v1", "locked": true, "repository": "https://github.com/a/b", "files": ["one"], "vendorFolder": "{vendorFolder}"}
+  }
+}
+"#,
+    );
+    let folder = dir.path().join("vendor");
+    std::fs::create_dir_all(&folder).unwrap();
+    for file in files {
+        let path = folder.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+    std::fs::write(folder.join("vendor-lock.json"), lock).unwrap();
+    dir
+}
+
+const LIVE_ENTRY: &str =
+    r#""A": {"repository": "https://github.com/a/b", "version": "v1", "files": {"one": "one"}}"#;
+
+#[test]
+fn sync_drops_lock_entries_the_config_no_longer_lists() {
+    let dir = project_with_lock(
+        &format!(
+            r#"{{{LIVE_ENTRY}, "Gone": {{"repository": "https://github.com/c/d", "version": "v1", "files": {{"two": "nested/two"}}}}}}"#
+        ),
+        &["one", "nested/two"],
+    );
+    let folder = dir.path().join("vendor");
+
+    let out = vendor(dir.path(), &["sync"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(folder.join("one").exists());
+    assert!(
+        folder.join("nested/two").exists(),
+        "deleting files is left to `uninstall`"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap(),
+        "{\n  \"A\": {\n    \"repository\": \"https://github.com/a/b\",\n    \"version\": \"v1\",\n    \"files\": {\n      \"one\": \"one\"\n    }\n  }\n}\n"
+    );
+}
+
+#[test]
+fn outdated_leaves_stale_lock_entries_alone() {
+    let lock = format!(
+        r#"{{{LIVE_ENTRY}, "Gone": {{"repository": "https://github.com/c/d", "version": "v1", "files": {{"two": "two"}}}}}}"#
+    );
+    let dir = project_with_lock(&lock, &["one", "two"]);
+    let folder = dir.path().join("vendor");
+
+    let out = vendor(dir.path(), &["outdated"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(folder.join("two").exists());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap(),
+        lock
+    );
+}

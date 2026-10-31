@@ -74,6 +74,9 @@ impl Session {
     ///    dependency's line. Awaiting the tasks in order is what keeps piped output ordered
     ///    while later dependencies are still downloading.
     ///
+    /// Then, unless only reporting, lock entries the config no longer lists are dropped. Their
+    /// files stay on disk.
+    ///
     /// Errors from an earlier pass are held until the ordered pass reaches them, so the first
     /// failure reported is always the first failure in the file. When one is reached, the
     /// remaining downloads are cancelled.
@@ -167,6 +170,11 @@ impl Session {
         }
 
         self.progress.end();
+
+        if !options.show_outdated_only {
+            self.prune_lockfiles().await?;
+        }
+
         if ui::pr_mode() && !bumps.is_empty() {
             print_pull_request_body(&bumps);
         }
