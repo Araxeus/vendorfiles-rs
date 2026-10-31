@@ -738,10 +738,13 @@ async fn resolve_source(
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
     let listed = if bare_name {
-        match registry::load(refresh)
-            .await
-            .and_then(|registry| registry.entry(source))
-        {
+        match registry::load(refresh).await.and_then(|registry| {
+            let entry = registry.entry(source)?;
+            if entry.is_none() {
+                suggest(&registry, source);
+            }
+            Ok(entry)
+        }) {
             Ok(entry) => entry,
             Err(error) => {
                 ui::warning(error);
@@ -774,6 +777,24 @@ async fn resolve_source(
         known,
         listed,
     })
+}
+
+/// Names registry programs close to `typed`, which the registry does not know.
+///
+/// Only a hint: the GitHub search still runs afterwards, since `typed` may well be a repository.
+fn suggest(registry: &registry::Registry, typed: &str) {
+    let close = registry::search::suggest(registry, typed);
+    let Some((last, rest)) = close.split_last() else {
+        return;
+    };
+    let names = if rest.is_empty() {
+        (*last).to_owned()
+    } else {
+        format!("{} or {last}", rest.join(", "))
+    };
+    ui::info(format!(
+        "'{typed}' is not in the program registry - did you mean {names}? `vendor search` lists them all"
+    ));
 }
 
 /// How much of an install to actually perform.

@@ -1285,6 +1285,29 @@ fn a_dry_run_of_an_unknown_name_never_reaches_the_network() {
     assert!(!dir.path().join("vendor").exists());
 }
 
+#[test]
+fn a_near_miss_suggests_the_registry_name() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "ripgreb", "--dry-run"]);
+    assert!(
+        stdout(&out).contains("'ripgreb' is not in the program registry - did you mean ripgrep?"),
+        "{}",
+        stdout(&out)
+    );
+    // Only a hint: the name still goes on to the search, which offline cannot succeed.
+    assert_ne!(code(&out), 0);
+}
+
+#[test]
+fn a_name_nothing_like_the_registry_gets_no_suggestion() {
+    let dir = project(r#"{"vendorDependencies":{}}"#);
+    let out = vendor_with_registry(
+        dir.path(),
+        &["add", "definitely-not-a-program", "--dry-run"],
+    );
+    assert!(!stdout(&out).contains("did you mean"), "{}", stdout(&out));
+}
+
 // ---------------------------------------------------------------------------------------
 // Several sources at once, and the version that moved into `source@version`
 // ---------------------------------------------------------------------------------------
