@@ -22,7 +22,8 @@ struct Cli {
 enum Command {
     /// Run every check CI runs: cargo check, rustfmt, clippy and the tests.
     Ci,
-    /// Regenerate the YAML and TOML tabs of the README's config examples.
+    /// Regenerate the YAML and TOML tabs of the README's config examples, and its list of
+    /// programs installable by name.
     Readme {
         /// Fail instead of writing when the README is out of date.
         #[arg(long)]

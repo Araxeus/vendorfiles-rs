@@ -19,7 +19,7 @@ flate2.workspace = true
 futures-util.workspace = true
 indexmap.workspace = true
 keyring-core.workspace = true
-lzma-rs.workspace = true
+lzma-rust2.workspace = true
 octocrab.workspace = true
 open.workspace = true
 ratatui.workspace = true
@@ -53,6 +53,7 @@ linux-keyutils-keyring-store.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
+lzma-rust2 = { workspace = true, features = ["encoder"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]

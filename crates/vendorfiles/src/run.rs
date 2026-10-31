@@ -22,7 +22,7 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
     Some(match &cli.command {
         // A completion script has nothing to do with a project, so asking for one outside a
         // project should not fail.
-        Command::Completions { shell } => completions(shell),
+        Command::Completions { shell } => completions(shell).await,
 
         // A config that no longer loads is exactly when its path is worth asking for, and
         // `config edit` is how it gets repaired - so neither of these parses the file.
@@ -47,6 +47,15 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
             None => auth::login_with_device_flow().await.map_err(Into::into),
         },
         Command::Logout => auth::logout().await.map_err(Into::into),
+
+        // The registry is not the project's, so finding a program to add needs no config.
+        Command::Search { terms, refresh } => search(&terms.join(" "), *refresh).await,
+        Command::Install {
+            list: true,
+            sources,
+            refresh,
+            ..
+        } => search(&sources.join(" "), *refresh).await,
 
         _ => return None,
     })
@@ -148,6 +157,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
             files,
             refresh,
             dry_run,
+            list: _,
         } => {
             install_all(
                 session,
@@ -175,11 +185,70 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
         Command::Login { .. } | Command::Logout => {
             unreachable!("login and logout are dispatched without a workspace")
         }
-        Command::Completions { .. } => {
-            unreachable!("completions are dispatched without a workspace")
+        Command::Completions { .. } | Command::Search { .. } => {
+            unreachable!("completions and search are dispatched without a workspace")
         }
     }
 
+    Ok(())
+}
+
+/// `vendor search [terms]` / `vendor add --list` - the programs `install` knows by name.
+///
+/// One row per program, best match first. A program with no build for this machine stays in
+/// the list, marked, so a search never seems to come up short for no reason.
+async fn search(query: &str, refresh: bool) -> Result<()> {
+    const HEADERS: [&str; 3] = ["NAME", "ALIASES", "DESCRIPTION"];
+
+    let registry = registry::load(refresh).await?;
+    let found = registry::search::search(&registry, query);
+    if found.is_empty() {
+        ui::info(format!("no program in the registry matches '{query}'"));
+        return Ok(());
+    }
+
+    let host = registry::resolve::host();
+    let rows: Vec<[String; 3]> = found
+        .iter()
+        .map(|(name, program)| {
+            let aliases = if program.aliases.is_empty() {
+                "-".to_owned()
+            } else {
+                program.aliases.join(", ")
+            };
+            let description = program.description.as_deref().unwrap_or_default();
+            let description = if program.covers(&host) {
+                description.to_owned()
+            } else {
+                format!("{description} (no {host} build)")
+            };
+            [(*name).to_owned(), aliases, description]
+        })
+        .collect();
+
+    // Character counts, not bytes: a non-ASCII name would otherwise pad short.
+    let widths: [usize; 2] = std::array::from_fn(|column| {
+        rows.iter()
+            .map(|row| row[column].chars().count())
+            .chain(std::iter::once(HEADERS[column].chars().count()))
+            .max()
+            .unwrap_or(0)
+    });
+    let line = |cells: [&str; 3]| {
+        format!(
+            "{:<name$}  {:<aliases$}  {}",
+            cells[0],
+            cells[1],
+            cells[2],
+            name = widths[0],
+            aliases = widths[1]
+        )
+    };
+
+    vendorfiles_core::progress::print_out(&ui::cyan(&line(HEADERS)));
+    for row in &rows {
+        vendorfiles_core::progress::print_out(&line([&row[0], &row[1], &row[2]]));
+    }
     Ok(())
 }
 
@@ -547,7 +616,10 @@ const SHELLS: [(&str, clap_complete::Shell); 5] = [
 /// wording and exit codes survive. Generating from the parser alone would therefore promise less
 /// than the binary accepts, so those three go back on here. Nothing parses this command; only its
 /// shape is read.
-fn completion_command() -> clap::Command {
+///
+/// `programs` become the values offered for `install`'s operand. They are only suggestions to the
+/// shell: nothing parses with this command, so any other source is still accepted.
+fn completion_command(programs: &[String]) -> clap::Command {
     use clap::{Arg, ArgAction, Command as ClapCommand, CommandFactory};
 
     // Wording taken from the served help text, so what a shell shows is what `vendor --help`
@@ -594,6 +666,16 @@ fn completion_command() -> clap::Command {
         });
     }
 
+    if !programs.is_empty() {
+        command = command.mut_subcommand("install", |install| {
+            install.mut_arg("sources", |sources| {
+                sources.value_parser(clap::builder::PossibleValuesParser::new(
+                    programs.iter().cloned(),
+                ))
+            })
+        });
+    }
+
     command.subcommand(
         ClapCommand::new("help")
             .about("display help for command")
@@ -606,11 +688,30 @@ fn completion_command() -> clap::Command {
     )
 }
 
+/// Every name and alias in the registry, or none when it cannot be had.
+///
+/// Silent on failure: a completion script is still worth having without them, and stderr may be
+/// where the user is looking for nothing at all.
+async fn registry_names() -> Vec<String> {
+    registry::load(false).await.map_or_else(
+        |_| Vec::new(),
+        |registry| {
+            registry
+                .programs()
+                .flat_map(|(name, program)| {
+                    std::iter::once(name.to_owned()).chain(program.aliases.iter().cloned())
+                })
+                .collect()
+        },
+    )
+}
+
 /// Writes a completion script for `shell` to stdout.
 ///
 /// Generated from the parser itself, so it stays in step with the flags rather than being a second
-/// description of them that has to be maintained.
-fn completions(shell: &str) -> Result<()> {
+/// description of them that has to be maintained. Registry names are taken as they are now, so a
+/// script generated before a program joined the registry does not offer it.
+async fn completions(shell: &str) -> Result<()> {
     let wanted = shell.to_ascii_lowercase();
     let Some((_, generator)) = SHELLS.iter().find(|(name, _)| *name == wanted) else {
         let accepted = SHELLS
@@ -621,7 +722,7 @@ fn completions(shell: &str) -> Result<()> {
         bail!("unknown shell '{shell}'. Expected one of {accepted}");
     };
 
-    let mut command = completion_command();
+    let mut command = completion_command(&registry_names().await);
     clap_complete::generate(
         *generator,
         &mut command,
@@ -669,7 +770,13 @@ async fn resolve_source(
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
     let listed = if bare_name {
-        match registry::lookup(source, refresh).await {
+        match registry::load(refresh).await.and_then(|registry| {
+            let entry = registry.entry(source)?;
+            if entry.is_none() {
+                suggest(&registry, source);
+            }
+            Ok(entry)
+        }) {
             Ok(entry) => entry,
             Err(error) => {
                 ui::warning(error);
@@ -702,6 +809,24 @@ async fn resolve_source(
         known,
         listed,
     })
+}
+
+/// Names registry programs close to `typed`, which the registry does not know.
+///
+/// Only a hint: the GitHub search still runs afterwards, since `typed` may well be a repository.
+fn suggest(registry: &registry::Registry, typed: &str) {
+    let close = registry::search::suggest(registry, typed);
+    let Some((last, rest)) = close.split_last() else {
+        return;
+    };
+    let names = if rest.is_empty() {
+        (*last).to_owned()
+    } else {
+        format!("{} or {last}", rest.join(", "))
+    };
+    ui::info(format!(
+        "'{typed}' is not in the program registry - did you mean {names}? `vendor search` lists them all"
+    ));
 }
 
 /// How much of an install to actually perform.

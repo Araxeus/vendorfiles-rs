@@ -498,7 +498,8 @@ code and the complete resulting file tree (including binary payloads). Covered:
 12. **Programs installable by name.** `registry.yml` at the repository root maps a name or alias to
    a repository and a per-host release asset, fetched from `raw.githubusercontent.com` (no API rate
    limit, and an `ETag` for cheap revalidation) and cached for a day, so the usual `add` makes no
-   request. Only `install` reads it; an unreachable registry warns and falls through to the search.
+   request. `install`, `search` and `completions` read it; an unreachable registry warns and falls
+   through to the search in `install`, and `completions` leaves the names out.
    `{target}`/`{ext}`/`{exe}` are expanded from the *host key being resolved* rather than from
    `cfg!`, which is what lets one machine validate every platform's entry in CI. An entry describes
    either a release asset (extracted, or taken as-is when it names no `member`) or a repository

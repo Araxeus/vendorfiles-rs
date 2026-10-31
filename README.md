@@ -33,6 +33,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
   - [Default Options](#default-options)
 - [Commands](#commands)
 - [Installing by name](#installing-by-name)
+  - [Finding a program](#finding-a-program)
   - [Adding a program to the registry](#adding-a-program-to-the-registry)
 - [Keeping vendor updated](#keeping-vendor-updated)
 - [Authentication](#authentication)
@@ -786,6 +787,7 @@ Commands:
   update|upgrade [options] [names...]         Update outdated dependencies
   outdated|o                                  List outdated dependencies
   install|add [options] <url/name...>         Install dependencies
+  search [options] [terms...]                 Find programs to install by name
   uninstall|remove [names...]                 Uninstall dependencies
   list|ls                                     List dependencies in the config file
   config|cfg [command]                        Show or edit the config file
@@ -811,6 +813,9 @@ vendor completions fish > ~/.config/fish/completions/vendor.fish
 vendor completions powershell >> $PROFILE
 ```
 
+The bash and zsh scripts also offer the [registry's](#finding-a-program) program names after
+`vendor add`, as they stood when the script was generated.
+
 `-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead -
 the same output a redirected stdout gets. It works on either side of the subcommand
 (`vendor -p sync`, `vendor sync --plain`).
@@ -820,7 +825,8 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor sync` | Download everything the config declares. `-f`/`--force` re-downloads even when the lockfile agrees. |
 | `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
 | `vendor outdated` | List dependencies with a newer version available. |
-| `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. |
+| `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. `--list` lists the programs installable by name instead, like `vendor search`. |
+| `vendor search [terms...]` | List the programs installable by name, or those whose name, alias or description matches every term. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
 | `vendor list` | Print the config's dependencies as a `name` / `version` / `repository` table, in config order. Aliased `ls`, and also spelled `vendor config list`. |
 | `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |
@@ -841,6 +847,7 @@ vendor install React -n MyReact -f README.md
 vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
 vendor add rg fd
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
+vendor search disk
 vendor remove React youtube-music
 vendor list
 vendor config
@@ -923,9 +930,76 @@ files = [
 The asset picked is the one for your platform, and `{version}` stays symbolic so `vendor update`
 keeps working afterwards.
 
+### Finding a program
+
+`vendor search` lists every program the registry knows, and `vendor add --list` does the same.
+Words narrow the list. Each one has to match a name, an alias, a word in the description or the
+repository, and name matches rank first:
+
+```bash
+vendor search          # everything
+vendor search disk     # bottom, dust, dysk and gdu
+vendor search git      # delta, gh, lazygit and bat
+```
+
+A name the registry nearly knows gets a hint before the GitHub search runs, so `vendor add ripgreb`
+asks whether you meant `ripgrep`.
+
+<!-- registry -->
+<details>
+<summary>Programs you can add by name (41)</summary>
+
+| Program | Aliases | Description | Platforms |
+| --- | --- | --- | --- |
+| [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and control codes from text | All |
+| [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell history, synced across machines | Windows x64, macOS, Linux |
+| [bat](https://github.com/sharkdp/bat) |  | cat with syntax highlighting and Git integration | All |
+| [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI | All |
+| [bottom](https://github.com/ClementTsang/bottom) | `btm` | Terminal system monitor for processes, CPU, memory, disks and network | All |
+| [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Multi-shell completion for hundreds of commands | All |
+| [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager for git, diff and grep output | Windows x64, macOS arm64, Linux |
+| [dust](https://github.com/bootandy/dust) |  | Disk usage viewer, a more intuitive du | All |
+| [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and their free space, a friendlier df | Windows x64, macOS, Linux |
+| [edit](https://github.com/microsoft/edit) | `msedit` | Microsoft's small terminal text editor | Windows, macOS arm64, Linux |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) |  | Neofetch-like system information tool | All |
+| [fd](https://github.com/sharkdp/fd) | `fdfind`, `fd-find` | Fast, user-friendly alternative to find | Windows, macOS arm64, Linux |
+| [file-pilot](https://github.com/Araxeus/fpilot-scraper) | `fpilot`, `filepilot` | Fast, lightweight file manager for Windows | Windows x64 |
+| [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
+| [fresh](https://github.com/sinelaw/fresh) |  | Terminal text editor and IDE | All |
+| [fzf](https://github.com/junegunn/fzf) |  | Command-line fuzzy finder | All |
+| [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
+| [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub on the command line | All |
+| [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing coding agents | Windows x64, macOS, Linux |
+| [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command with its console window hidden | Windows x64 |
+| [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool | All |
+| [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor | All |
+| [just](https://github.com/casey/just) |  | Command runner for project tasks, like make without the build system | All |
+| [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git | All |
+| [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing and changing directories | All |
+| [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keybindings and mouse support | All |
+| [nushell](https://github.com/nushell/nushell) | `nu` | Shell that works with structured data | All |
+| [rclone](https://github.com/rclone/rclone) |  | Sync files to and from cloud storage | All |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive search through file contents, like grep | All |
+| [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
+| [shfmt](https://github.com/mvdan/sh) |  | Shell script formatter | Windows x64, macOS, Linux |
+| [sshm](https://github.com/Gu1llaum-3/sshm) |  | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
+| [starship](https://github.com/starship/starship) |  | Fast, customizable prompt for any shell | All |
+| [surge](https://github.com/surge-downloader/surge) |  | Fast download manager with a terminal UI | All |
+| [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one | Windows x64, macOS, Linux |
+| [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries | Windows x64, Linux |
+| [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Windows notifications from inside WSL | Windows x64 |
+| [yamlfmt](https://github.com/google/yamlfmt) |  | YAML formatter | All |
+| [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON and XML processor | All |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) |  | Download video and audio from YouTube and many other sites | All |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) |  | Smarter cd that remembers the directories you use most | All |
+
+</details>
+<!-- /registry -->
+
 ### Adding a program to the registry
 
-see [`docs/add_to_registry.md`](./docs/add_to_registry.md).
+See [`docs/add_to_registry.md`](./docs/add_to_registry.md). After changing `registry.yml`, run
+`cargo xtask readme` to regenerate the list above. CI fails while it is out of date.
 
 ## Keeping vendor updated
 

@@ -11,8 +11,10 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-/// The only schema version this build understands.
-pub const SUPPORTED_VERSION: u32 = 1;
+/// The newest schema version this build understands.
+///
+/// Version 2 added `description`. A version 1 file is still read, since it is a subset.
+pub const SUPPORTED_VERSION: u32 = 2;
 
 /// The whole file.
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +34,9 @@ pub struct Program {
     /// Other names that resolve here.
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// One line on what the program does, which `vendor search` matches and prints.
+    #[serde(default)]
+    pub description: Option<String>,
     /// The GitHub repository releases come from.
     pub repository: String,
     /// Which tags count, for repositories that publish more than one train of releases.
@@ -65,6 +70,14 @@ pub struct Program {
     /// What to fetch per host, keyed `{os}-{arch}`. Absent for a repository file.
     #[serde(default)]
     pub targets: IndexMap<String, Target>,
+}
+
+impl Program {
+    /// Whether it can be installed on `host`. A repository file is the same everywhere.
+    #[must_use]
+    pub fn covers(&self, host: &str) -> bool {
+        self.path.is_some() || self.targets.contains_key(host)
+    }
 }
 
 /// What to take out of an asset: one path, the several a program needs together, or those
@@ -136,7 +149,7 @@ mod tests {
     use super::{Document, Member, SUPPORTED_VERSION, Target};
 
     const COMPACT: &str = r#"
-version: 1
+version: 2
 programs:
   fd:
     aliases: [fdfind]
@@ -167,7 +180,7 @@ programs:
     fn the_explicit_form_parses() {
         let document = parse(
             r#"
-version: 1
+version: 2
 programs:
   fzf:
     repository: https://github.com/junegunn/fzf
@@ -192,7 +205,7 @@ programs:
         // The form that lets one target take a whole layout out of an archive.
         let document = parse(
             r#"
-version: 1
+version: 2
 programs:
   herdr:
     repository: https://github.com/herdrdev/herdr
@@ -222,7 +235,7 @@ programs:
         // The form that renames as it extracts, for a file buried in a subdirectory.
         let document = parse(
             r#"
-version: 1
+version: 2
 programs:
   programz:
     repository: https://github.com/example/programz
@@ -249,7 +262,7 @@ programs:
         // A release that splits what one host needs: an archive, and a loose file beside it.
         let document = parse(
             r#"
-version: 1
+version: 2
 programs:
   split:
     repository: https://github.com/example/split
@@ -287,7 +300,7 @@ programs:
         // binary would ignore. `vendorFolder` is the one that would matter.
         let refused = parse(
             r#"
-version: 1
+version: 2
 programs:
   sneaky:
     repository: https://github.com/example/sneaky
@@ -303,7 +316,7 @@ programs:
     fn a_missing_repository_is_refused() {
         let refused = parse(
             r"
-version: 1
+version: 2
 programs:
   nameless:
     targets:
@@ -397,7 +410,7 @@ programs:
         for (what, probe, pointer) in [
             (
                 "Document",
-                "version: 1
+                "version: 2
 nope: 1
 ",
                 "/properties",
@@ -475,7 +488,7 @@ nope: 1
         (
             "a repository file, which takes no targets",
             r"
-version: 1
+version: 2
 programs:
   starship-preset:
     repository: https://github.com/starship/starship
@@ -487,7 +500,7 @@ programs:
         (
             "a release entry saying outright that it is not tracked by commit",
             r#"
-version: 1
+version: 2
 programs:
   untracked:
     repository: https://github.com/example/untracked
@@ -500,7 +513,7 @@ programs:
         (
             "a shared member naming every file the executable needs beside it",
             r#"
-version: 1
+version: 2
 programs:
   layout:
     repository: https://github.com/example/layout
@@ -515,7 +528,7 @@ programs:
         (
             "a host naming several assets, renaming out of one of them",
             r#"
-version: 1
+version: 2
 programs:
   programz:
     repository: https://github.com/example/programz
@@ -555,7 +568,7 @@ programs:
         (
             "a repository file that also names an asset",
             r#"
-version: 1
+version: 2
 programs:
   both:
     repository: https://github.com/example/both
@@ -566,7 +579,7 @@ programs:
         (
             "a repository file that also names a member",
             r"
-version: 1
+version: 2
 programs:
   both:
     repository: https://github.com/example/both
@@ -577,7 +590,7 @@ programs:
         (
             "a repository file that also lists targets",
             r"
-version: 1
+version: 2
 programs:
   both:
     repository: https://github.com/example/both
@@ -589,7 +602,7 @@ programs:
         (
             "a release entry with no targets at all",
             r"
-version: 1
+version: 2
 programs:
   nowhere:
     repository: https://github.com/example/nowhere
@@ -598,7 +611,7 @@ programs:
         (
             "an empty targets map",
             r"
-version: 1
+version: 2
 programs:
   nowhere:
     repository: https://github.com/example/nowhere
@@ -608,7 +621,7 @@ programs:
         (
             "a host key that is not `{os}-{arch}`",
             r"
-version: 1
+version: 2
 programs:
   shouty:
     repository: https://github.com/example/shouty
@@ -619,7 +632,7 @@ programs:
         (
             "a repository that is not a GitHub URL",
             r"
-version: 1
+version: 2
 programs:
   elsewhere:
     repository: https://gitlab.com/example/elsewhere
@@ -630,7 +643,7 @@ programs:
         (
             "an explicit target with no asset",
             r"
-version: 1
+version: 2
 programs:
   assetless:
     repository: https://github.com/example/assetless
@@ -642,7 +655,7 @@ programs:
         (
             "a field this build does not know",
             r#"
-version: 1
+version: 2
 programs:
   sneaky:
     repository: https://github.com/example/sneaky
@@ -654,7 +667,7 @@ programs:
         (
             "a program name `add` could not write to a config",
             r"
-version: 1
+version: 2
 programs:
   -dashed:
     repository: https://github.com/example/dashed
@@ -665,7 +678,7 @@ programs:
         (
             "a triple with no shared asset to substitute it into",
             r"
-version: 1
+version: 2
 programs:
   patternless:
     repository: https://github.com/example/patternless
@@ -676,7 +689,7 @@ programs:
         (
             "one triple among targets that otherwise name their assets outright",
             r#"
-version: 1
+version: 2
 programs:
   mixed:
     repository: https://github.com/example/mixed
@@ -689,7 +702,7 @@ programs:
         (
             "a shared member with no shared asset to point into",
             r#"
-version: 1
+version: 2
 programs:
   memberful:
     repository: https://github.com/example/memberful
@@ -702,7 +715,7 @@ programs:
         (
             "a release entry tracked by commit, which has none",
             r#"
-version: 1
+version: 2
 programs:
   tracked:
     repository: https://github.com/example/tracked
@@ -721,7 +734,7 @@ programs: {}
         (
             "a top-level key that is not part of the format",
             r#"
-version: 1
+version: 2
 vendorFolder: "C:/Windows/System32"
 programs: {}
 "#,
@@ -729,7 +742,7 @@ programs: {}
         (
             "a program with no repository to install from",
             r#"
-version: 1
+version: 2
 programs:
   nameless:
     asset: "{release}/nameless-{target}{ext}"
@@ -740,7 +753,7 @@ programs:
         (
             "an explicit target with a key of its own invention",
             r#"
-version: 1
+version: 2
 programs:
   inventive:
     repository: https://github.com/example/inventive
@@ -753,14 +766,14 @@ programs:
         (
             "a format version this build does not support",
             r"
-version: 2
+version: 3
 programs: {}
 ",
         ),
         (
             "a member list beside an `as` with no single file to rename",
             r#"
-version: 1
+version: 2
 programs:
   renamed:
     repository: https://github.com/example/renamed
@@ -776,7 +789,7 @@ programs:
         (
             "a target whose member list is paired with an `as`",
             r#"
-version: 1
+version: 2
 programs:
   renamed:
     repository: https://github.com/example/renamed
@@ -792,7 +805,7 @@ programs:
         (
             "a member list with nothing in it",
             r#"
-version: 1
+version: 2
 programs:
   empty:
     repository: https://github.com/example/empty
@@ -805,7 +818,7 @@ programs:
         (
             "a member list naming the same file twice",
             r#"
-version: 1
+version: 2
 programs:
   twice:
     repository: https://github.com/example/twice
@@ -820,7 +833,7 @@ programs:
         (
             "a member map beside an `as` with no single file to rename",
             r#"
-version: 1
+version: 2
 programs:
   renamed:
     repository: https://github.com/example/renamed
@@ -835,7 +848,7 @@ programs:
         (
             "a member map with nothing in it",
             r#"
-version: 1
+version: 2
 programs:
   empty:
     repository: https://github.com/example/empty
@@ -848,7 +861,7 @@ programs:
         (
             "a host naming no asset at all",
             r"
-version: 1
+version: 2
 programs:
   nothing:
     repository: https://github.com/example/nothing
@@ -859,7 +872,7 @@ programs:
         (
             "a host naming the same asset twice",
             r#"
-version: 1
+version: 2
 programs:
   twice:
     repository: https://github.com/example/twice
@@ -894,7 +907,7 @@ programs:
         let validator = compiled_schema();
         for url in REPOSITORY_URLS {
             let document = as_json(&format!(
-                r#"version: 1
+                r#"version: 2
 programs:
   under-test:
     repository: {url}

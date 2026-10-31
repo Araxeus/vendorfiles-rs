@@ -69,8 +69,8 @@ pub fn extract(archive: &Path, dest: &Path) -> Result<()> {
         Some(ArchiveKind::Zip) | None => unzip(file, dest),
         Some(ArchiveKind::Crx) => unzip_crx(archive, dest),
         Some(ArchiveKind::Tar) => untar(file, dest),
-        Some(ArchiveKind::Gzip) => ungzip(archive, file, dest),
-        Some(ArchiveKind::Xz) => unxz(archive, file, dest),
+        Some(ArchiveKind::Gzip) => uncompress(archive, Compression::Gzip, file, dest),
+        Some(ArchiveKind::Xz) => uncompress(archive, Compression::Xz, file, dest),
     }
 }
 
@@ -117,8 +117,12 @@ pub fn extract_members(archive: &Path, dest: &Path, wanted: &[String]) -> Result
             unzip_selected(std::io::Cursor::new(&bytes[start..]), dest, &mut selection)?;
         }
         Some(ArchiveKind::Tar) => untar_selected(BufReader::new(file), dest, &mut selection)?,
-        Some(ArchiveKind::Gzip) => ungzip_selected(archive, file, dest, &mut selection)?,
-        Some(ArchiveKind::Xz) => unxz_selected(archive, file, dest, &mut selection)?,
+        Some(ArchiveKind::Gzip) => {
+            uncompress_selected(archive, Compression::Gzip, file, dest, &mut selection)?;
+        }
+        Some(ArchiveKind::Xz) => {
+            uncompress_selected(archive, Compression::Xz, file, dest, &mut selection)?;
+        }
     }
 
     if selection.satisfied() {
@@ -271,28 +275,24 @@ fn untar_selected(reader: impl Read, dest: &Path, selection: &mut Selection) -> 
     Ok(())
 }
 
-/// [`ungzip`], writing out only the selected members.
-fn ungzip_selected(
+/// [`uncompress`], writing out only the selected members.
+fn uncompress_selected(
     archive: &Path,
+    compression: Compression,
     file: File,
     dest: &Path,
     selection: &mut Selection,
 ) -> Result<()> {
-    let mut decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-    let mut head = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut decoder, &mut head)?;
-    head.truncate(read);
+    let mut decoder = compression.decoder(file);
+    let head = read_head(&mut decoder)?;
 
     if is_tar(&head) {
-        // Restart from the beginning: the tar reader needs the header bytes back.
-        let file = File::open(archive)?;
-        let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-        return untar_selected(decoder, dest, selection);
+        return untar_selected(std::io::Cursor::new(head).chain(decoder), dest, selection);
     }
 
     // A lone compressed file: one member, under the archive's own name. If that is not what was
     // asked for, nothing in here is - and not decompressing it is the whole point.
-    let Some(out) = selection.target(dest, &lone_file_name(archive, ".gz")) else {
+    let Some(out) = selection.target(dest, &lone_file_name(archive, compression.suffix())) else {
         return Ok(());
     };
     let mut sink = File::create(&out)?;
@@ -302,43 +302,20 @@ fn ungzip_selected(
     Ok(())
 }
 
-/// [`unxz`], writing out only the selected members.
-///
-/// The payload still passes through a temporary file, for the reason [`unxz`] gives: `lzma-rs`
-/// decodes into a writer, so there is no reader to stop early against. What is saved here is the
-/// unpacking, not the decompression.
-fn unxz_selected(archive: &Path, file: File, dest: &Path, selection: &mut Selection) -> Result<()> {
-    let mut decoded = tempfile::Builder::new()
-        .prefix("vendorfiles-xz-")
-        .tempfile()?;
-    {
-        let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
-        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
-            .map_err(|source| VendorError::Http(source.to_string()))?;
-        writer.flush()?;
-    }
-
-    if decompresses_to_a_tar(&mut decoded.reopen()?)? {
-        return untar_selected(BufReader::new(decoded.reopen()?), dest, selection);
-    }
-
-    let Some(out) = selection.target(dest, &lone_file_name(archive, ".xz")) else {
-        return Ok(());
-    };
-    let mut sink = File::create(&out)?;
-    std::io::copy(&mut decoded.reopen()?, &mut sink)?;
-    selection.claim(&out);
-    Ok(())
-}
-
 /// Opens `archive` and identifies it, leaving the handle at the start.
 fn open_sniffed(archive: &Path) -> Result<(File, Option<ArchiveKind>)> {
     let mut file = File::open(archive)?;
-    let mut header = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut file, &mut header)?;
-    header.truncate(read);
+    let header = read_head(&mut file)?;
     file.seek(SeekFrom::Start(0))?;
     Ok((file, sniff(&header)))
+}
+
+/// Up to one tar header's worth of a stream's leading bytes, which is enough to identify it.
+fn read_head(reader: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let mut head = vec![0u8; TAR_HEADER_LEN];
+    let read = read_up_to(reader, &mut head)?;
+    head.truncate(read);
+    Ok(head)
 }
 
 fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -377,50 +354,19 @@ fn untar(file: File, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A gzip stream is a `.tar.gz` when it decompresses to a tar; otherwise it is a lone file.
-fn ungzip(archive: &Path, file: File, dest: &Path) -> Result<()> {
-    let mut decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-    let mut head = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut decoder, &mut head)?;
-    head.truncate(read);
+/// A compressed stream is a tarball when it decompresses to a tar; otherwise it is a lone file.
+fn uncompress(archive: &Path, compression: Compression, file: File, dest: &Path) -> Result<()> {
+    let mut decoder = compression.decoder(file);
+    let head = read_head(&mut decoder)?;
 
     if is_tar(&head) {
-        // Restart from the beginning: the tar reader needs the header bytes back.
-        let file = File::open(archive)?;
-        let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-        tar::Archive::new(decoder).unpack(dest)?;
+        tar::Archive::new(std::io::Cursor::new(head).chain(decoder)).unpack(dest)?;
         return Ok(());
     }
 
-    let mut out = File::create(dest.join(lone_file_name(archive, ".gz")))?;
+    let mut out = File::create(dest.join(lone_file_name(archive, compression.suffix())))?;
     out.write_all(&head)?;
     std::io::copy(&mut decoder, &mut out)?;
-    Ok(())
-}
-
-/// An xz stream is a `.tar.xz` when it decompresses to a tar; otherwise it is a lone file.
-///
-/// `lzma-rs` decodes into a writer rather than offering a reader, so unlike the gzip path this
-/// cannot be a pure stream. It decodes to a **temporary file** instead of a buffer: compression
-/// ratios are unbounded, so a modest asset can hold a payload far larger than memory.
-fn unxz(archive: &Path, file: File, dest: &Path) -> Result<()> {
-    let mut decoded = tempfile::Builder::new()
-        .prefix("vendorfiles-xz-")
-        .tempfile()?;
-    {
-        let mut writer = std::io::BufWriter::new(decoded.as_file_mut());
-        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
-            .map_err(|source| VendorError::Http(source.to_string()))?;
-        writer.flush()?;
-    }
-
-    if decompresses_to_a_tar(&mut decoded.reopen()?)? {
-        tar::Archive::new(BufReader::new(decoded.reopen()?)).unpack(dest)?;
-        return Ok(());
-    }
-
-    let mut out = File::create(dest.join(lone_file_name(archive, ".xz")))?;
-    std::io::copy(&mut decoded.reopen()?, &mut out)?;
     Ok(())
 }
 
@@ -448,85 +394,81 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
             zip_names(std::io::Cursor::new(&bytes[start..]))
         }
         Some(ArchiveKind::Tar) => tar_names(BufReader::new(file)),
-        Some(ArchiveKind::Gzip) => {
-            let mut decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-            if decompresses_to_a_tar(&mut decoder)? {
-                // Restart from the beginning: the tar reader needs the header bytes back.
-                let file = File::open(archive)?;
-                tar_names(flate2::read::GzDecoder::new(BufReader::new(file)))
-            } else {
-                // A lone compressed file, which extraction writes out under this one name. None of
-                // the payload is needed to say that, but read it through anyway, as the xz branch
-                // does: a stream that stops decoding - or whose checksum does not match, which
-                // only shows up at the very end - should be an error here rather than a surprise
-                // at install time.
-                std::io::copy(&mut decoder, &mut std::io::sink())?;
-                Ok(vec![lone_file_name(archive, ".gz")])
-            }
-        }
-        Some(ArchiveKind::Xz) => xz_names(archive, file),
+        Some(ArchiveKind::Gzip) => compressed_names(archive, Compression::Gzip, file),
+        Some(ArchiveKind::Xz) => compressed_names(archive, Compression::Xz, file),
     }
 }
 
-/// The names inside an xz payload, without ever storing the payload.
+/// The names inside a compressed stream, decoded on the fly and never stored.
 ///
-/// `lzma-rs` decodes into a writer rather than offering a reader, which is why [`unxz`] decodes to
-/// a temporary file. Listing cannot afford that: it exists to avoid paying for an archive's
-/// contents. So a thread pushes the decompressed stream down a pipe and the tar reader pulls it
-/// out here - the bytes pass through memory a pipe buffer at a time and are never kept.
-fn xz_names(archive: &Path, file: File) -> Result<Vec<String>> {
-    let (mut reader, writer) = std::io::pipe()?;
-    let decoding = std::thread::spawn(move || -> Result<()> {
-        let mut writer = std::io::BufWriter::new(writer);
-        lzma_rs::xz_decompress(&mut BufReader::new(file), &mut writer)
-            .map_err(|source| VendorError::Http(source.to_string()))?;
-        writer.flush()?;
-        Ok(())
-    });
-
-    let mut head = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(&mut reader, &mut head)?;
-    head.truncate(read);
+/// The stream is always read to its end, past the tar's end-of-archive marker or through a lone
+/// file whose name needs none of the payload. A gzip CRC or an xz check sits in the trailer, so
+/// stopping early would let a damaged archive list cleanly here and fail at install time instead.
+fn compressed_names(archive: &Path, compression: Compression, file: File) -> Result<Vec<String>> {
+    let mut decoder = compression.decoder(file);
+    let head = read_head(&mut decoder)?;
 
     if !is_tar(&head) {
-        // A lone compressed file: its name comes from the archive's own, so none of the payload is
-        // needed. Drain it anyway - a stream that does not decode should be an error here rather
-        // than a surprise at install time - which costs time but still no disk.
-        std::io::copy(&mut reader, &mut std::io::sink())?;
-        finish_decoding(decoding)?;
-        return Ok(vec![lone_file_name(archive, ".xz")]);
+        std::io::copy(&mut decoder, &mut std::io::sink())?;
+        return Ok(vec![lone_file_name(archive, compression.suffix())]);
     }
 
-    // The header is already out of the pipe and the tar reader needs it back.
-    let mut tarball = tar::Archive::new(std::io::Cursor::new(head).chain(reader));
+    let mut tarball = tar::Archive::new(std::io::Cursor::new(head).chain(decoder));
     let names = names_in(&mut tarball)?;
-    // A tar reader stops at the end-of-archive marker, but archives are padded well past it and
-    // the decoding thread is still pushing those blocks. Read them out so it can finish: closing
-    // the pipe under it would turn a sound archive into a broken-pipe error.
     std::io::copy(&mut tarball.into_inner(), &mut std::io::sink())?;
-    // Only now is the decode's own verdict worth having. The whole stream was pulled through, so a
-    // failure here is the archive's rather than this reader having stopped early. A listing that
-    // failed instead reports its own error, which is what a half-decoded stream looks like from
-    // the tar side.
-    finish_decoding(decoding)?;
     Ok(names)
 }
 
-/// The decoding thread's own result, once the stream has been read to the end.
-fn finish_decoding(decoding: std::thread::JoinHandle<Result<()>>) -> Result<()> {
-    decoding
-        .join()
-        .map_err(|_| VendorError::Http("xz decoding panicked".to_owned()))?
+/// The stream compressors a release wraps a tar, or a lone file, in.
+#[derive(Debug, Clone, Copy)]
+enum Compression {
+    Gzip,
+    Xz,
 }
 
-/// Whether a decompressed stream is a tar, read from its leading bytes.
+impl Compression {
+    /// The suffix a lone compressed file loses when it is extracted.
+    const fn suffix(self) -> &'static str {
+        match self {
+            Self::Gzip => ".gz",
+            Self::Xz => ".xz",
+        }
+    }
+
+    /// A reader that decompresses `file`.
+    fn decoder(self, file: File) -> Decoder {
+        let file = BufReader::new(file);
+        match self {
+            Self::Gzip => Decoder {
+                inner: Box::new(flate2::read::GzDecoder::new(file)),
+                format: "gzip",
+            },
+            Self::Xz => Decoder {
+                inner: Box::new(lzma_rust2::XzReader::new(file, true)),
+                format: "xz",
+            },
+        }
+    }
+}
+
+/// A decompressing reader whose errors say which format failed.
 ///
-/// Consumes the header it inspects, so callers that go on to read the tar restart the stream.
-fn decompresses_to_a_tar(reader: &mut impl Read) -> Result<bool> {
-    let mut head = vec![0u8; TAR_HEADER_LEN];
-    let read = read_up_to(reader, &mut head)?;
-    head.truncate(read);
-    Ok(is_tar(&head))
+/// A tar reader passes its source's errors up unchanged, so without the label a damaged `.tar.xz`
+/// reports only "invalid block checksum".
+struct Decoder {
+    inner: Box<dyn Read>,
+    format: &'static str,
+}
+
+impl Read for Decoder {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("cannot decompress the {} data: {error}", self.format),
+            )
+        })
+    }
 }
 
 fn zip_names(reader: impl Read + Seek) -> Result<Vec<String>> {
@@ -681,7 +623,7 @@ mod tests {
             builder.finish().unwrap();
         }
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        xz_compress(&tarred, &mut compressed);
         std::fs::write(&archive_path, &compressed).unwrap();
 
         // Sniffed from its magic bytes, like every other container.
@@ -692,11 +634,74 @@ mod tests {
     }
 
     #[test]
+    fn every_xz_check_type_extracts_and_lists() {
+        // `upx` ships SHA-256-checked `.tar.xz`; xz itself defaults to CRC64.
+        use lzma_rust2::CheckType;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(2);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, "upx", &b"hi"[..]).unwrap();
+            builder.finish().unwrap();
+        }
+        for check in [
+            CheckType::None,
+            CheckType::Crc32,
+            CheckType::Crc64,
+            CheckType::Sha256,
+        ] {
+            let mut compressed = Vec::new();
+            xz_compress_checked(&tarred, &mut compressed, check);
+            let path = dir.path().join(format!("{check:?}.tar.xz"));
+            std::fs::write(&path, compressed).unwrap();
+
+            assert_eq!(super::members(&path).unwrap(), ["upx"], "{check:?}");
+            let out = dir.path().join(format!("out-{check:?}"));
+            super::extract_members(&path, &out, &["upx".to_owned()]).unwrap();
+            assert_eq!(std::fs::read_to_string(out.join("upx")).unwrap(), "hi");
+        }
+    }
+
+    #[test]
+    fn a_damaged_stream_names_the_format_that_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut compressed = Vec::new();
+        xz_compress_checked(
+            &vec![b'q'; 4096],
+            &mut compressed,
+            lzma_rust2::CheckType::Sha256,
+        );
+        // The SHA-256 sits just before the 12-byte index and the 12-byte stream footer.
+        let check = compressed.len() - 40;
+        compressed[check] ^= 0xff;
+        let path = dir.path().join("notes.txt.xz");
+        std::fs::write(&path, compressed).unwrap();
+
+        let error = super::members(&path).unwrap_err().to_string();
+        assert!(
+            error.starts_with("cannot decompress the xz data: "),
+            "{error}"
+        );
+        let error = extract(&path, &dir.path().join("out"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("cannot decompress the xz data: "),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn plain_xz_becomes_a_single_file_named_without_the_suffix() {
         let dir = tempfile::tempdir().unwrap();
         let archive_path = dir.path().join("notes.txt.xz");
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(b"plain content"), &mut compressed).unwrap();
+        xz_compress(b"plain content", &mut compressed);
         std::fs::write(&archive_path, compressed).unwrap();
 
         let out = dir.path().join("out");
@@ -840,7 +845,7 @@ mod tests {
             builder.finish().unwrap();
         }
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        xz_compress(&tarred, &mut compressed);
         std::fs::write(&archive_path, &compressed).unwrap();
 
         let out = dir.path().join("out");
@@ -933,7 +938,7 @@ mod tests {
             builder.finish().unwrap();
         }
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        xz_compress(&tarred, &mut compressed);
         std::fs::write(&txz, compressed).unwrap();
         assert_eq!(super::members(&txz).unwrap(), ["nested/fresh"]);
     }
@@ -979,6 +984,19 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 
+    /// Appends `input`, xz-compressed with xz's default CRC64 check, to `out`.
+    fn xz_compress(input: &[u8], out: &mut Vec<u8>) {
+        xz_compress_checked(input, out, lzma_rust2::CheckType::Crc64);
+    }
+
+    fn xz_compress_checked(input: &[u8], out: &mut Vec<u8>, check: lzma_rust2::CheckType) {
+        let mut options = lzma_rust2::XzOptions::with_preset(1);
+        options.set_check_sum_type(check);
+        let mut writer = lzma_rust2::XzWriter::new(out, options).unwrap();
+        writer.write_all(input).unwrap();
+        writer.finish().unwrap();
+    }
+
     /// A tar of `count` files of `size` bytes each, xz-compressed.
     fn tar_xz(count: usize, size: usize) -> Vec<u8> {
         let mut tarred = Vec::new();
@@ -997,15 +1015,12 @@ mod tests {
             builder.finish().unwrap();
         }
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+        xz_compress(&tarred, &mut compressed);
         compressed
     }
 
     #[test]
-    fn a_tar_xz_far_larger_than_a_pipe_buffer_is_listed_without_stalling() {
-        // The payload passes from the decoding thread to the tar reader a pipe buffer at a time -
-        // tens of kilobytes - so a payload thousands of times that size proves the two really do
-        // hand off rather than one waiting for the other to finish.
+    fn a_large_tar_xz_is_listed_without_storing_its_payload() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("big.tar.xz");
         std::fs::write(&path, tar_xz(4, 2 * 1024 * 1024)).unwrap();
@@ -1027,11 +1042,7 @@ mod tests {
 
         // Truncated before anything decodes at all.
         let mut nothing = Vec::new();
-        lzma_rs::xz_compress(
-            &mut std::io::Cursor::new(&vec![b'z'; 400_000]),
-            &mut nothing,
-        )
-        .unwrap();
+        xz_compress(&vec![b'z'; 400_000], &mut nothing);
         nothing.truncate(nothing.len() / 2);
         let nothing_path = dir.path().join("notes.txt.xz");
         std::fs::write(&nothing_path, nothing).unwrap();
@@ -1048,9 +1059,7 @@ mod tests {
     #[test]
     fn a_tar_xz_padded_past_its_end_marker_still_lists() {
         // What GNU tar really ships: zero blocks after the end-of-archive marker. A tar reader
-        // stops at the marker and never reads them, so the decoder feeding it is still mid-write -
-        // and a listing that walked away at that point would report a broken pipe on a sound
-        // archive. Every padding here is larger than a pipe buffer.
+        // stops at the marker, and the listing reads on through the padding to reach the xz check.
         let dir = tempfile::tempdir().unwrap();
         for pad in [0usize, 8 * 1024, 64 * 1024, 1024 * 1024] {
             let mut tarred = Vec::new();
@@ -1067,7 +1076,7 @@ mod tests {
             }
             tarred.extend(std::iter::repeat_n(0u8, pad));
             let mut compressed = Vec::new();
-            lzma_rs::xz_compress(&mut std::io::Cursor::new(&tarred), &mut compressed).unwrap();
+            xz_compress(&tarred, &mut compressed);
             let path = dir.path().join(format!("pad-{pad}.tar.xz"));
             std::fs::write(&path, compressed).unwrap();
             assert_eq!(
@@ -1171,7 +1180,7 @@ mod tests {
 
         let xzed = dir.path().join("yamlfmt.xz");
         let mut compressed = Vec::new();
-        lzma_rs::xz_compress(&mut std::io::Cursor::new(b"not a tar"), &mut compressed).unwrap();
+        xz_compress(b"not a tar", &mut compressed);
         std::fs::write(&xzed, compressed).unwrap();
         assert_eq!(super::members(&xzed).unwrap(), ["yamlfmt"]);
 

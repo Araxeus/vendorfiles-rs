@@ -1,6 +1,7 @@
 Usage: vendor completions <shell>
 
-Print a completion script for a shell to stdout.
+Print a completion script for a shell to stdout. The bash and zsh scripts also
+offer the program registry's names after vendor add, as of when they were made.
 
 Arguments:
   shell       bash, elvish, fish, powershell or zsh

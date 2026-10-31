@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/registry.schema.json",
   "title": "vendorfiles program registry",
-  "description": "Programs `vendor add <name>` can install without being told a repository or its asset names. Describes version 1 of the format; a later version bumps the number and this file with it.",
+  "description": "Programs `vendor add <name>` can install without being told a repository or its asset names. Describes version 2 of the format; a later version bumps the number and this file with it.",
   "type": "object",
   "required": ["version"],
   "additionalProperties": false,
   "properties": {
     "version": {
       "description": "Schema version. A vendor that does not understand the number refuses the file rather than misreading it.",
-      "const": 1
+      "const": 2
     },
     "programs": {
       "description": "Programs by canonical name, which is also the config key `add` writes.",
@@ -29,6 +29,11 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
           "uniqueItems": true
+        },
+        "description": {
+          "description": "One line on what the program does. `vendor search` matches it and prints it, and the README table shows it.",
+          "type": "string",
+          "minLength": 1
         },
         "repository": {
           "description": "The GitHub repository releases come from. The same shape `vendor add <url>` takes, `www.` and plain `http` included.",

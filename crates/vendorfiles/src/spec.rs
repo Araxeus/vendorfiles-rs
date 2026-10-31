@@ -196,8 +196,26 @@ pub const COMMANDS: &[CommandSpec] = &[
                 arity: Arity::None,
                 display: "--dry-run",
             },
+            OptionSpec {
+                short: None,
+                long: "--list",
+                arity: Arity::None,
+                display: "--list",
+            },
         ],
         help: include_str!("help/install.txt"),
+    },
+    CommandSpec {
+        name: "search",
+        aliases: &[],
+        max_operands: None,
+        options: &[OptionSpec {
+            short: None,
+            long: "--refresh",
+            arity: Arity::None,
+            display: "--refresh",
+        }],
+        help: include_str!("help/search.txt"),
     },
     CommandSpec {
         name: "uninstall",

@@ -1,11 +1,15 @@
-//! `cargo xtask readme` - regenerates the YAML and TOML tab of every marked config example.
+//! `cargo xtask readme` - regenerates the YAML and TOML tab of every marked config example, and
+//! the list of programs installable by name.
 //!
-//! The README is the source of truth: each example is written once, in JSON, inside a
+//! The README is the source of truth for the examples: each is written once, in JSON, inside a
 //! `<!-- formats -->` region, and the other two renderings are derived from it. GitHub strips
 //! `<style>` and `class` from a README, so three stacked `<details>` is as close to a tab strip
 //! as the page can get, and keeping three hand-written renderings in step is what this avoids.
+//!
+//! `registry.yml` is the source of truth for the program list. See [`registry`].
 
 mod jsonc;
+mod registry;
 mod render;
 mod toml;
 mod yaml;
@@ -84,10 +88,11 @@ fn source_block(region: &[&str]) -> Result<(String, String)> {
 
 /// Regenerates `README.md`, or with `check` reports that it needs regenerating.
 pub fn run(check: bool) -> Result<()> {
-    let path = sh::workspace_root()?.join("README.md");
+    let root = sh::workspace_root()?;
+    let path = root.join("README.md");
     let current =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let wanted = regenerate(&current)?;
+    let wanted = registry::regenerate(&regenerate(&current)?, &read_registry(&root)?)?;
 
     if current == wanted {
         println!("README.md is up to date.");
@@ -102,6 +107,12 @@ pub fn run(check: bool) -> Result<()> {
     std::fs::write(&path, &wanted).with_context(|| format!("writing {}", path.display()))?;
     println!("README.md regenerated.");
     Ok(())
+}
+
+/// The registry the README lists.
+fn read_registry(root: &std::path::Path) -> Result<String> {
+    let path = root.join("registry.yml");
+    std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))
 }
 
 /// The 1-based line the two texts start to disagree on, so `--check` points at the section
@@ -171,10 +182,11 @@ Outro.
 
     #[test]
     fn the_committed_readme_is_up_to_date() {
-        let path = crate::sh::workspace_root().unwrap().join("README.md");
-        let source = std::fs::read_to_string(&path).unwrap();
+        let root = crate::sh::workspace_root().unwrap();
+        let source = std::fs::read_to_string(root.join("README.md")).unwrap();
+        let registry = super::read_registry(&root).unwrap();
         assert_eq!(
-            regenerate(&source).unwrap(),
+            super::registry::regenerate(&regenerate(&source).unwrap(), &registry).unwrap(),
             source,
             "run `cargo xtask readme`"
         );

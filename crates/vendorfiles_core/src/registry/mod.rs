@@ -4,13 +4,15 @@
 //! inside a directory named after the target triple. A hosted file records that once, and a pull
 //! request against it is how a program becomes installable by name.
 //!
-//! Only `install` ever reads it. The file is fetched from `raw.githubusercontent.com` rather than
-//! the GitHub API - no anonymous rate limit - and cached, so the usual case makes no request at
-//! all. See [`cache`] for the freshness rules and [`schema`] for the trust boundary.
+//! `install`, `search` and `completions` read it. The file is fetched from
+//! `raw.githubusercontent.com` rather than the GitHub API - no anonymous rate limit - and cached,
+//! so the usual case makes no request at all. See [`cache`] for the freshness rules and [`schema`]
+//! for the trust boundary.
 
 pub mod cache;
 pub mod resolve;
 pub mod schema;
+pub mod search;
 
 use std::path::Path;
 
@@ -77,18 +79,25 @@ impl Registry {
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.document.programs.keys().map(String::as_str)
     }
+
+    /// Every program with its canonical name, in file order.
+    pub fn programs(&self) -> impl Iterator<Item = (&str, &schema::Program)> {
+        self.document
+            .programs
+            .iter()
+            .map(|(name, program)| (name.as_str(), program))
+    }
 }
 
-/// Loads the registry and resolves `name`, or `None` if it names nothing.
+/// Loads the registry from the override, the cache or the network.
 ///
 /// # Errors
 ///
-/// Returns an error when the registry cannot be obtained at all, or when it covers `name` but not
-/// this platform. Callers treat the former as a miss - being offline should not stop
-/// `vendor add owner/repo` from working - so the message is theirs to report.
-pub async fn lookup(name: &str, refresh: bool) -> Result<Option<Entry>> {
-    let registry = Registry::parse(&fetch(refresh).await?)?;
-    registry.entry(name)
+/// Returns an error when the registry cannot be obtained or read. `install` treats that as a
+/// miss - being offline should not stop `vendor add owner/repo` from working - so the message is
+/// the caller's to report.
+pub async fn load(refresh: bool) -> Result<Registry> {
+    Registry::parse(&fetch(refresh).await?)
 }
 
 /// The registry text, from the override, the cache, or the network.
@@ -366,7 +375,10 @@ programs:
         let error = Registry::parse("version: 99\nprograms: {}\n").unwrap_err();
         let message = error.to_string();
         assert!(message.contains("99"), "{message}");
-        assert!(message.contains('1'), "{message}");
+        assert!(
+            message.contains(&super::schema::SUPPORTED_VERSION.to_string()),
+            "{message}"
+        );
     }
 
     #[test]
@@ -670,7 +682,7 @@ programs:
                     Ok(held) => held,
                     Err(error) => {
                         problems.push(format!(
-                            "{canonical} for {host}: unreadable archive: {error}"
+                            "{canonical} for {host}: cannot read {asset_name}: {error}"
                         ));
                         continue;
                     }
@@ -727,6 +739,34 @@ programs:
                     "{canonical}: alias '{alias}' is already taken"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_version_1_registry_still_parses() {
+        // A cached copy from before descriptions existed has to keep working.
+        let registry = Registry::parse(REGISTRY).unwrap();
+        assert!(registry.find("fd").is_some());
+    }
+
+    #[test]
+    fn every_shipped_entry_says_what_it_does_in_one_short_line() {
+        // `vendor search` prints it in a table and matches against it, and the README lists it.
+        const LONGEST: usize = 72;
+        let registry = Registry::parse(&shipped()).unwrap();
+        for (name, program) in registry.programs() {
+            let description = program
+                .description
+                .as_deref()
+                .unwrap_or_else(|| panic!("{name}: needs a description"));
+            assert!(
+                !description.trim().is_empty() && !description.contains('\n'),
+                "{name}: the description should be one non-empty line"
+            );
+            assert!(
+                description.chars().count() <= LONGEST,
+                "{name}: keep the description within {LONGEST} characters"
+            );
         }
     }
 

@@ -11,6 +11,7 @@ Commands:
   update|upgrade [options] [names...]         Update outdated dependencies
   outdated|o                                  List outdated dependencies
   install|add [options] <url/name...>         Install dependencies
+  search [options] [terms...]                 Find programs to install by name
   uninstall|remove [names...]                 Uninstall dependencies
   list|ls                                     List dependencies in the config file
   config|cfg [command]                        Show or edit the config file
