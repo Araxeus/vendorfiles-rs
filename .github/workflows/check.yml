@@ -1,8 +1,18 @@
 name: Check
 
+# Only for changes that reach the build. `registry.yml` is fetched at runtime, so the registry
+# and README workflows cover it, and docs need no checks at all.
 on:
   push:
+    paths: &code
+      - crates/**
+      - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/**
+      - .github/workflows/check.yml
   pull_request:
+    paths: *code
 
 env:
   CARGO_TERM_COLOR: always
