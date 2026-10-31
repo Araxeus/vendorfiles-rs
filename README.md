@@ -947,7 +947,7 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (43)</summary>
+<summary>Programs you can add by name (44)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -980,6 +980,7 @@ asks whether you meant `ripgrep`.
 | [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
 | [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [psmux](https://github.com/psmux/psmux) | `tmux`, `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
 | [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
 | [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |

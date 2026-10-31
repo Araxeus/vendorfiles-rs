@@ -631,6 +631,18 @@ programs:
         asset: "{release}/herdr-linux-aarch64"
         as: herdr
 
+  # Windows only. The zip holds `psmux.exe`, `pmux.exe` and `tmux.exe`, three copies of one
+  # binary, so only `tmux.exe` is taken. Upstream tmux ships source alone, hence the alias.
+  psmux:
+    description: "Native tmux for Windows, a terminal multiplexer for PowerShell and cmd"
+    aliases: [tmux, pmux]
+    repository: https://github.com/psmux/psmux
+    asset: "{release}/psmux-v{version}-windows-{target}.zip"
+    member: "tmux.exe"
+    targets:
+      windows-x86_64: x64
+      windows-aarch64: arm64
+
   # Windows only by nature: it forwards notifications from WSL to the Windows host.
   wsl-notify-send:
     description: "Sends Windows desktop notifications from inside WSL, like notify-send"
