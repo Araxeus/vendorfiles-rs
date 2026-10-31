@@ -682,7 +682,7 @@ programs:
                     Ok(held) => held,
                     Err(error) => {
                         problems.push(format!(
-                            "{canonical} for {host}: unreadable archive: {error}"
+                            "{canonical} for {host}: cannot read {asset_name}: {error}"
                         ));
                         continue;
                     }
