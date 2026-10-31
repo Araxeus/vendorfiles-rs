@@ -631,11 +631,24 @@ programs:
         asset: "{release}/herdr-linux-aarch64"
         as: herdr
 
+  # `tmux/tmux` releases ship source alone. The official static builds live in `tmux-builds`,
+  # a bare `tmux` in each archive. Tags like `v3.7c` give `{version}` as `3.7c`.
+  tmux:
+    description: "Terminal multiplexer with split panes and sessions that outlive detach"
+    repository: https://github.com/tmux/tmux-builds
+    asset: "{release}/tmux-{version}-{target}.tar.gz"
+    member: "tmux"
+    targets:
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-arm64
+
   # Windows only. The zip holds `psmux.exe`, `pmux.exe` and `tmux.exe`, three copies of one
-  # binary, so only `tmux.exe` is taken. Upstream tmux ships source alone, hence the alias.
+  # binary, so only `tmux.exe` is taken.
   psmux:
     description: "Native tmux for Windows, a terminal multiplexer for PowerShell and cmd"
-    aliases: [tmux, pmux]
+    aliases: [pmux]
     repository: https://github.com/psmux/psmux
     asset: "{release}/psmux-v{version}-windows-{target}.zip"
     member: "tmux.exe"
