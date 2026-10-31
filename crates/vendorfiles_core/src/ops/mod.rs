@@ -1,6 +1,7 @@
 //! The commands: `sync`, `install`, `uninstall`, and the version logic they share.
 
 pub mod install;
+mod prune;
 mod sync;
 mod uninstall;
 mod version;
