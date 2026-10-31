@@ -12,6 +12,13 @@
 #
 #     VENDOR_REGISTRY=./registry.yml vendor add <name>
 #
+# Every entry needs a `description`: one short line on what the program does. `vendor search`
+# matches it, so use the words someone would search for ("disk usage", "git", "editor").
+#
+# Then refresh the README's list of programs, which CI checks is current:
+#
+#     cargo xtask readme
+#
 # Placeholders
 #   {release}  marks a release asset (config syntax, left as-is in the entry that gets written)
 #   {version}  the semver core of the tag: `v10.4.2` and `10.4.2` both give `10.4.2`
@@ -44,12 +51,13 @@
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
 
-version: 1
+version: 2
 
 programs:
   # Most Rust projects name assets by target triple and ship the binary inside a directory of
   # the same name, which the compact form covers in a few lines.
   fd:
+    description: "Fast, user-friendly alternative to find"
     aliases: [fdfind, fd-find]
     repository: https://github.com/sharkdp/fd
     asset: "{release}/fd-v{version}-{target}{ext}"
@@ -64,6 +72,7 @@ programs:
 
   # ripgrep tags releases without a leading `v`, so the asset carries {version} bare.
   ripgrep:
+    description: "Fast recursive search through file contents, like grep"
     aliases: [rg]
     repository: https://github.com/BurntSushi/ripgrep
     asset: "{release}/ripgrep-{version}-{target}{ext}"
@@ -78,6 +87,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   bat:
+    description: "cat with syntax highlighting and Git integration"
     repository: https://github.com/sharkdp/bat
     asset: "{release}/bat-v{version}-{target}{ext}"
     member: "bat-v{version}-{target}/bat{exe}"
@@ -90,6 +100,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   hyperfine:
+    description: "Command-line benchmarking tool"
     repository: https://github.com/sharkdp/hyperfine
     asset: "{release}/hyperfine-v{version}-{target}{ext}"
     member: "hyperfine-v{version}-{target}/hyperfine{exe}"
@@ -102,6 +113,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-gnu
 
   dust:
+    description: "Disk usage viewer, a more intuitive du"
     repository: https://github.com/bootandy/dust
     asset: "{release}/dust-v{version}-{target}{ext}"
     member: "dust-v{version}-{target}/dust{exe}"
@@ -115,6 +127,7 @@ programs:
 
   # The binary is `btm`. Tags carry no leading `v`.
   bottom:
+    description: "Terminal system monitor for processes, CPU, memory, disks and network"
     aliases: [btm]
     repository: https://github.com/ClementTsang/bottom
     asset: "{release}/bottom_{target}{ext}"
@@ -130,6 +143,7 @@ programs:
   # One zip holds every platform, each in a directory named by its triple. Windows is gnu only,
   # and there is no windows-aarch64 build.
   dysk:
+    description: "Lists mounted disks and their free space, a friendlier df"
     repository: https://github.com/Canop/dysk
     asset: "{release}/dysk_{version}.zip"
     member: "{target}/dysk{exe}"
@@ -142,6 +156,7 @@ programs:
 
   # delta tags without a leading `v`. No macos-x86_64 or windows-aarch64 builds upstream.
   delta:
+    description: "Syntax-highlighting pager for git, diff and grep output"
     aliases: [git-delta]
     repository: https://github.com/dandavison/delta
     asset: "{release}/delta-{version}-{target}{ext}"
@@ -154,6 +169,7 @@ programs:
 
   # just and zoxide put the binary at the archive root and build Linux only against musl.
   just:
+    description: "Command runner for project tasks, like make without the build system"
     repository: https://github.com/casey/just
     asset: "{release}/just-{version}-{target}{ext}"
     member: "just{exe}"
@@ -166,6 +182,7 @@ programs:
       linux-aarch64: aarch64-unknown-linux-musl
 
   zoxide:
+    description: "Smarter cd that remembers the directories you use most"
     repository: https://github.com/ajeetdsouza/zoxide
     asset: "{release}/zoxide-{version}-{target}{ext}"
     member: "zoxide{exe}"
@@ -179,6 +196,7 @@ programs:
 
   # Asset names carry no version. Linux is musl because upstream builds aarch64 only that way.
   starship:
+    description: "Fast, customizable prompt for any shell"
     repository: https://github.com/starship/starship
     asset: "{release}/starship-{target}{ext}"
     member: "starship{exe}"
@@ -193,6 +211,7 @@ programs:
   # fzf names assets `os_arch` rather than by triple, and puts the binary at the archive root,
   # so each host is spelled out.
   fzf:
+    description: "Command-line fuzzy finder"
     repository: https://github.com/junegunn/fzf
     targets:
       windows-x86_64:
@@ -215,6 +234,7 @@ programs:
         member: "fzf"
 
   yamlfmt:
+    description: "YAML formatter"
     repository: https://github.com/google/yamlfmt
     # Ships .tar.gz on every platform, Windows included, so the extension is literal.
     asset: "{release}/yamlfmt_{version}_{target}.tar.gz"
@@ -228,6 +248,7 @@ programs:
       linux-aarch64: Linux_arm64
 
   micro:
+    description: "Terminal text editor with familiar keybindings and mouse support"
     repository: https://github.com/zyedidia/micro
     asset: "{release}/micro-{version}-{target}{ext}"
     member: "micro-{version}/micro{exe}"
@@ -240,6 +261,7 @@ programs:
       linux-aarch64: linux-arm64
 
   surge:
+    description: "Fast download manager with a terminal UI"
     repository: https://github.com/surge-downloader/surge
     asset: "{release}/Surge_{version}_{target}{ext}"
     member: "surge{exe}"
@@ -252,6 +274,7 @@ programs:
       linux-aarch64: linux_arm64
 
   lazygit:
+    description: "Terminal UI for git"
     repository: https://github.com/jesseduffield/lazygit
     asset: "{release}/lazygit_{version}_{target}{ext}"
     member: "lazygit{exe}"
@@ -265,6 +288,7 @@ programs:
 
   # Zips on every platform, so the extension is literal.
   rclone:
+    description: "Sync files to and from cloud storage"
     repository: https://github.com/rclone/rclone
     asset: "{release}/rclone-v{version}-{target}.zip"
     member: "rclone-v{version}-{target}/rclone{exe}"
@@ -277,6 +301,7 @@ programs:
       linux-aarch64: linux-arm64
 
   ansi2txt:
+    description: "Strips ANSI color and control codes from text"
     aliases: [ansi2text]
     repository: https://github.com/gabe565/ansi2txt
     asset: "{release}/ansi2txt_{version}_{target}{ext}"
@@ -291,6 +316,7 @@ programs:
 
   # No windows-aarch64: upstream builds only i386 and x86_64 for Windows.
   sshm:
+    description: "Terminal UI for managing and connecting to SSH hosts"
     repository: https://github.com/Gu1llaum-3/sshm
     asset: "{release}/sshm_{target}{ext}"
     member: "sshm{exe}"
@@ -302,6 +328,7 @@ programs:
       linux-aarch64: Linux_arm64
 
   ls-interactive:
+    description: "Interactive ls for browsing and changing directories"
     aliases: [lsi]
     repository: https://github.com/Araxeus/ls-interactive
     asset: "{release}/lsi_v{version}_{target}{ext}"
@@ -318,6 +345,7 @@ programs:
   # `edit` nests its binary inside a directory on Windows but not on Unix, so each host is
   # spelled out rather than sharing one `member`.
   edit:
+    description: "Microsoft's small terminal text editor"
     aliases: [msedit]
     repository: https://github.com/microsoft/edit
     targets:
@@ -340,6 +368,7 @@ programs:
   # ruff and atuin put the binary at the root on Windows but in a `{target}/` directory on Unix,
   # so each host is spelled out. Their asset names carry no version.
   ruff:
+    description: "Fast Python linter and code formatter"
     repository: https://github.com/astral-sh/ruff
     targets:
       windows-x86_64:
@@ -363,6 +392,7 @@ programs:
 
   # No windows-aarch64: upstream builds Windows only for x86_64.
   atuin:
+    description: "Searchable shell history, synced across machines"
     repository: https://github.com/atuinsh/atuin
     targets:
       windows-x86_64:
@@ -384,6 +414,7 @@ programs:
   # Flat on Windows, nested on Unix. The archives also hold optional `nu_plugin_*` binaries, and
   # on Windows a `less.exe`, which `nu` runs without.
   nushell:
+    description: "Shell that works with structured data"
     aliases: [nu]
     repository: https://github.com/nushell/nushell
     targets:
@@ -409,6 +440,7 @@ programs:
   # GitHub CLI ships a zip on macOS too, and nests the binary under `bin/` - inside a versioned
   # directory everywhere but Windows.
   gh:
+    description: "GitHub on the command line"
     aliases: [gh-cli, github-cli]
     repository: https://github.com/cli/cli
     targets:
@@ -433,6 +465,7 @@ programs:
 
   # gdu archives hold a single binary named after the platform, so `as` gives it the real name.
   gdu:
+    description: "Fast disk usage analyzer with a terminal UI"
     repository: https://github.com/dundee/gdu
     targets:
       windows-x86_64:
@@ -463,6 +496,7 @@ programs:
   # Bare binaries: no `member`, so the asset is saved as it stands. `as` gives it the name you
   # would actually type.
   shfmt:
+    description: "Shell script formatter"
     repository: https://github.com/mvdan/sh
     asset: "{release}/shfmt_v{version}_{target}{exe}"
     as: "shfmt{exe}"
@@ -474,6 +508,7 @@ programs:
       linux-aarch64: linux_arm64
 
   yt-dlp:
+    description: "Download video and audio from YouTube and many other sites"
     repository: https://github.com/yt-dlp/yt-dlp
     targets:
       windows-x86_64:
@@ -495,6 +530,7 @@ programs:
         as: "yt-dlp"
 
   ttt:
+    description: "Terminal text editor that feels like a GUI one"
     repository: https://github.com/eugenioenko/ttt
     targets:
       windows-x86_64:
@@ -515,6 +551,7 @@ programs:
 
   # jq tags releases `jq-1.8.2`. Asset names carry no version, so the tag shape never matters.
   jq:
+    description: "Command-line JSON processor"
     repository: https://github.com/jqlang/jq
     asset: "{release}/jq-{target}{exe}"
     as: "jq{exe}"
@@ -528,6 +565,7 @@ programs:
 
   # yq also ships archives, but each holds only the same bare binary.
   yq:
+    description: "Command-line YAML, JSON and XML processor"
     repository: https://github.com/mikefarah/yq
     asset: "{release}/yq_{target}{exe}"
     as: "yq{exe}"
@@ -545,6 +583,7 @@ programs:
   # one. The two `OpenConsole.exe` builds share a basename, which only the list form can keep
   # apart. THIRD-PARTY-NOTICES/ is left out: licence text, not something the program reads.
   herdr:
+    description: "Terminal runtime for running and managing coding agents"
     repository: https://github.com/herdrdev/herdr
     targets:
       windows-x86_64:
@@ -570,6 +609,7 @@ programs:
 
   # Windows only by nature: it forwards notifications from WSL to the Windows host.
   wsl-notify-send:
+    description: "Windows notifications from inside WSL"
     repository: https://github.com/stuartleeks/wsl-notify-send
     targets:
       windows-x86_64:
@@ -579,6 +619,7 @@ programs:
   # File Pilot ships only from its own website. fpilot-scraper mirrors each beta build as a GitHub
   # release, an x64 Windows binary under tags like `Beta-v0.8.5`.
   file-pilot:
+    description: "Fast, lightweight file manager for Windows"
     aliases: [fpilot, filepilot]
     repository: https://github.com/Araxeus/fpilot-scraper
     targets:
@@ -588,6 +629,7 @@ programs:
   # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
   fresh:
+    description: "Terminal text editor and IDE"
     repository: https://github.com/sinelaw/fresh
     targets:
       windows-x86_64:
@@ -610,6 +652,7 @@ programs:
         member: "fresh-editor-aarch64-unknown-linux-gnu/fresh"
 
   flow:
+    description: "Flow Control, a programmer's text editor for the terminal"
     repository: https://github.com/neurocyte/flow
     # Its assets are named by the host key itself.
     asset: "{release}/flow-v{version}-{target}{ext}"
@@ -625,6 +668,7 @@ programs:
   # The SDK monorepo tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, and only the
   # first has the binaries. Without `releaseRegex` the newest release has no assets at all.
   bitwarden-secrets-cli:
+    description: "Bitwarden Secrets Manager CLI"
     aliases: [bws]
     repository: https://github.com/bitwarden/sdk
     releaseRegex: '^bws-v\d+\.\d+\.\d+$'

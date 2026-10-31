@@ -669,7 +669,10 @@ async fn resolve_source(
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
     let listed = if bare_name {
-        match registry::lookup(source, refresh).await {
+        match registry::load(refresh)
+            .await
+            .and_then(|registry| registry.entry(source))
+        {
             Ok(entry) => entry,
             Err(error) => {
                 ui::warning(error);
