@@ -163,6 +163,18 @@ programs:
       linux-x86_64: linux_amd64
       linux-aarch64: linux_arm64
 
+  # No windows-aarch64: upstream builds only i386 and x86_64 for Windows.
+  sshm:
+    repository: https://github.com/Gu1llaum-3/sshm
+    asset: "{release}/sshm_{target}{ext}"
+    member: "sshm{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
   ls-interactive:
     aliases: [lsi]
     repository: https://github.com/Araxeus/ls-interactive
@@ -249,6 +261,19 @@ programs:
         asset: "{release}/ttt-linux-arm64"
         as: "ttt"
 
+  # jq tags releases `jq-1.8.2`. Asset names carry no version, so the tag shape never matters.
+  jq:
+    repository: https://github.com/jqlang/jq
+    asset: "{release}/jq-{target}{exe}"
+    as: "jq{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: macos-amd64
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
 
   # Bare binaries everywhere but Windows, where the release is a zip and `herdr.exe` loads the
   # `conpty/` directory shipped beside it - so that target lists every file it needs rather than
@@ -285,6 +310,15 @@ programs:
       windows-x86_64:
         asset: "{release}/wsl-notify-send_windows_amd64.zip"
         member: "wsl-notify-send.exe"
+
+  # File Pilot ships only from its own website. fpilot-scraper mirrors each beta build as a GitHub
+  # release, an x64 Windows binary under tags like `Beta-v0.8.5`.
+  file-pilot:
+    aliases: [fpilot, filepilot]
+    repository: https://github.com/Araxeus/fpilot-scraper
+    targets:
+      windows-x86_64:
+        asset: "{release}/FPilot.exe"
 
   # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
