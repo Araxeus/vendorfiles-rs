@@ -6,6 +6,7 @@ needed. Most projects need a few lines:
 
 ```yaml
   fd:
+    description: "Fast, user-friendly alternative to find"
     aliases: [fdfind, fd-find]
     repository: https://github.com/sharkdp/fd
     asset: "{release}/fd-v{version}-{target}{ext}"
@@ -15,6 +16,10 @@ needed. Most projects need a few lines:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
 ```
+
+`description` is one short line on what the program does. `vendor search` matches its words, so
+use the ones someone would search for: `gdu` says "disk usage", which is how `vendor search disk`
+finds it.
 
 `{target}` is the triple your host maps to, `{ext}` is `.zip` on Windows and `.tar.gz` elsewhere,
 and `{exe}` is `.exe` on Windows. Projects that name assets some other way spell each host out
@@ -104,6 +109,12 @@ VENDOR_REGISTRY=./registry.yml vendor add <name> --dry-run   # what it resolves 
 VENDOR_REGISTRY=./registry.yml vendor add <name>             # the real thing
 ```
 
+Then regenerate the README's list of programs, which CI checks is current:
+
+```bash
+cargo xtask readme
+```
+
 `--dry-run` answers "what would this put in my config" without contacting GitHub or touching a
 file, which makes it the quickest way to check an entry:
 
@@ -138,8 +149,8 @@ downloading every asset - so an entry whose layout differs *between* platforms s
 manual look. `microsoft/edit` and `sinelaw/fresh` both nest their binary on one platform and not
 another.
 
-A few notes on how it behaves. The registry is only read by `install`/`add`, never by `sync` or
-`update`. It is cached for a day, so the usual install makes no request at all; after that the
+A few notes on how it behaves. The registry is read by `install`/`add`, `search` and
+`completions`, never by `sync` or `update`. It is cached for a day, so the usual install makes no request at all; after that the
 check is conditional, and `--refresh` forces it. If it cannot be reached, `vendor` says so and
 carries on with its normal search, so being offline costs you nothing but the shorthand. And an
 entry can only say *what* to fetch - there is no `vendorFolder` in the format, and unknown keys are
