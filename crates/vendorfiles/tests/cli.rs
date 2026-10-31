@@ -248,7 +248,7 @@ fn every_supported_shell_gets_a_script() {
     // No config anywhere: a completion script has nothing to do with a project.
     let dir = tempfile::tempdir().expect("temp dir");
     for shell in ["bash", "elvish", "fish", "powershell", "zsh"] {
-        let out = vendor(dir.path(), &["completions", shell]);
+        let out = vendor_with_registry(dir.path(), &["completions", shell]);
         assert_eq!(code(&out), 0, "exit code for {shell}: {}", stderr(&out));
         assert_eq!(stderr(&out), "", "stderr for {shell}");
         let script = stdout(&out);
@@ -264,7 +264,7 @@ fn every_supported_shell_gets_a_script() {
 fn the_script_covers_the_flags_it_was_generated_from() {
     // Generated from the parser, so our own additions appear without being listed twice.
     let dir = tempfile::tempdir().expect("temp dir");
-    let script = stdout(&vendor(dir.path(), &["completions", "bash"]));
+    let script = stdout(&vendor_with_registry(dir.path(), &["completions", "bash"]));
     for expected in [
         "--plain",
         "--refresh",
@@ -284,7 +284,7 @@ fn the_script_covers_the_help_and_version_surface() {
     // `Cli` disables clap's help and version handling because `help::intercept` answers them, so
     // a script generated from the parser alone would promise less than the binary accepts.
     let dir = tempfile::tempdir().expect("temp dir");
-    let script = stdout(&vendor(dir.path(), &["completions", "bash"]));
+    let script = stdout(&vendor_with_registry(dir.path(), &["completions", "bash"]));
     for expected in [
         // Root flags, offered before any command.
         r#"opts="-c -p -h -v --config --plain --help --version"#,
@@ -302,9 +302,24 @@ fn the_script_covers_the_help_and_version_surface() {
 }
 
 #[test]
+fn bash_and_zsh_offer_registry_names_to_install() {
+    // fish, PowerShell and elvish scripts from clap_complete do not complete operands at all.
+    let dir = tempfile::tempdir().expect("temp dir");
+    for shell in ["bash", "zsh"] {
+        let script = stdout(&vendor_with_registry(dir.path(), &["completions", shell]));
+        let words: Vec<&str> = script
+            .split(|c: char| !(c.is_alphanumeric() || c == '-'))
+            .collect();
+        for name in ["fd", "fdfind", "ripgrep", "rg", "plan9-tool"] {
+            assert!(words.contains(&name), "{shell} does not offer {name}");
+        }
+    }
+}
+
+#[test]
 fn an_unknown_shell_names_the_ones_that_work() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let out = vendor(dir.path(), &["completions", "tcsh"]);
+    let out = vendor_with_registry(dir.path(), &["completions", "tcsh"]);
     assert_eq!(code(&out), 1);
     let message = stderr(&out);
     assert!(message.contains("tcsh"), "{message}");
@@ -316,8 +331,17 @@ fn an_unknown_shell_names_the_ones_that_work() {
 #[test]
 fn the_shell_name_is_case_insensitive() {
     let dir = tempfile::tempdir().expect("temp dir");
-    assert_eq!(code(&vendor(dir.path(), &["completions", "Bash"])), 0);
-    assert_eq!(code(&vendor(dir.path(), &["completions", "PowerShell"])), 0);
+    assert_eq!(
+        code(&vendor_with_registry(dir.path(), &["completions", "Bash"])),
+        0
+    );
+    assert_eq!(
+        code(&vendor_with_registry(
+            dir.path(),
+            &["completions", "PowerShell"]
+        )),
+        0
+    );
 }
 
 #[test]

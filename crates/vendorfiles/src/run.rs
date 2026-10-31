@@ -22,7 +22,7 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
     Some(match &cli.command {
         // A completion script has nothing to do with a project, so asking for one outside a
         // project should not fail.
-        Command::Completions { shell } => completions(shell),
+        Command::Completions { shell } => completions(shell).await,
 
         // A config that no longer loads is exactly when its path is worth asking for, and
         // `config edit` is how it gets repaired - so neither of these parses the file.
@@ -616,7 +616,10 @@ const SHELLS: [(&str, clap_complete::Shell); 5] = [
 /// wording and exit codes survive. Generating from the parser alone would therefore promise less
 /// than the binary accepts, so those three go back on here. Nothing parses this command; only its
 /// shape is read.
-fn completion_command() -> clap::Command {
+///
+/// `programs` become the values offered for `install`'s operand. They are only suggestions to the
+/// shell: nothing parses with this command, so any other source is still accepted.
+fn completion_command(programs: &[String]) -> clap::Command {
     use clap::{Arg, ArgAction, Command as ClapCommand, CommandFactory};
 
     // Wording taken from the served help text, so what a shell shows is what `vendor --help`
@@ -663,6 +666,16 @@ fn completion_command() -> clap::Command {
         });
     }
 
+    if !programs.is_empty() {
+        command = command.mut_subcommand("install", |install| {
+            install.mut_arg("sources", |sources| {
+                sources.value_parser(clap::builder::PossibleValuesParser::new(
+                    programs.iter().cloned(),
+                ))
+            })
+        });
+    }
+
     command.subcommand(
         ClapCommand::new("help")
             .about("display help for command")
@@ -675,11 +688,30 @@ fn completion_command() -> clap::Command {
     )
 }
 
+/// Every name and alias in the registry, or none when it cannot be had.
+///
+/// Silent on failure: a completion script is still worth having without them, and stderr may be
+/// where the user is looking for nothing at all.
+async fn registry_names() -> Vec<String> {
+    registry::load(false).await.map_or_else(
+        |_| Vec::new(),
+        |registry| {
+            registry
+                .programs()
+                .flat_map(|(name, program)| {
+                    std::iter::once(name.to_owned()).chain(program.aliases.iter().cloned())
+                })
+                .collect()
+        },
+    )
+}
+
 /// Writes a completion script for `shell` to stdout.
 ///
 /// Generated from the parser itself, so it stays in step with the flags rather than being a second
-/// description of them that has to be maintained.
-fn completions(shell: &str) -> Result<()> {
+/// description of them that has to be maintained. Registry names are taken as they are now, so a
+/// script generated before a program joined the registry does not offer it.
+async fn completions(shell: &str) -> Result<()> {
     let wanted = shell.to_ascii_lowercase();
     let Some((_, generator)) = SHELLS.iter().find(|(name, _)| *name == wanted) else {
         let accepted = SHELLS
@@ -690,7 +722,7 @@ fn completions(shell: &str) -> Result<()> {
         bail!("unknown shell '{shell}'. Expected one of {accepted}");
     };
 
-    let mut command = completion_command();
+    let mut command = completion_command(&registry_names().await);
     clap_complete::generate(
         *generator,
         &mut command,
