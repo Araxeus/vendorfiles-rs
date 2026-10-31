@@ -98,7 +98,7 @@ fn expected_help(name: &str) -> String {
 {:<46}{}",
                     "  install|add [options] <url/name...>",
                     "Install dependencies",
-                    "  search [options] [terms...]",
+                    "  search|find [options] [terms...]",
                     "Find programs to install by name"
                 ),
             )

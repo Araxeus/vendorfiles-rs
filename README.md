@@ -787,7 +787,7 @@ Commands:
   update|upgrade [options] [names...]         Update outdated dependencies
   outdated|o                                  List outdated dependencies
   install|add [options] <url/name...>         Install dependencies
-  search [options] [terms...]                 Find programs to install by name
+  search|find [options] [terms...]            Find programs to install by name
   uninstall|remove [names...]                 Uninstall dependencies
   list|ls                                     List dependencies in the config file
   config|cfg [command]                        Show or edit the config file
@@ -826,7 +826,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
 | `vendor outdated` | List dependencies with a newer version available. |
 | `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. `--list` lists the programs installable by name instead, like `vendor search`. |
-| `vendor search [terms...]` | List the programs installable by name, or those whose name, alias or description matches every term. |
+| `vendor search [terms...]` | List the programs installable by name, or those whose name, alias or description matches every term. Aliased `find`. |
 | `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
 | `vendor list` | Print the config's dependencies as a `name` / `version` / `repository` table, in config order. Aliased `ls`, and also spelled `vendor config list`. |
 | `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |

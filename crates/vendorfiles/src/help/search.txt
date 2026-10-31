@@ -1,4 +1,4 @@
-Usage: vendor search [options] [terms...]
+Usage: vendor search|find [options] [terms...]
 
 Find programs vendor install can add by name. Every term has to match a name,
 an alias, a word in the description or the repository. Names rank first.

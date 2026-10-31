@@ -207,7 +207,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "search",
-        aliases: &[],
+        aliases: &["find"],
         max_operands: None,
         options: &[OptionSpec {
             short: None,
@@ -295,6 +295,7 @@ mod tests {
         assert_eq!(find("auth").unwrap().name, "login");
         assert_eq!(find("ls").unwrap().name, "list");
         assert_eq!(find("cfg").unwrap().name, "config");
+        assert_eq!(find("find").unwrap().name, "search");
         assert!(find("nope").is_none());
     }
 
