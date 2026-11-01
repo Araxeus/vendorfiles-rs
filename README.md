@@ -947,7 +947,7 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (45)</summary>
+<summary>Programs you can add by name (46)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -970,6 +970,7 @@ asks whether you meant `ripgrep`.
 | [fzf](https://github.com/junegunn/fzf) |  | Interactive command-line fuzzy finder for files, history and any list | All |
 | [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub's official CLI for pull requests, issues, releases and repos | All |
+| [gum](https://github.com/charmbracelet/gum) |  | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
 | [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |

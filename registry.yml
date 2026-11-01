@@ -779,6 +779,19 @@ programs:
       windows-x86_64:
         asset: "{release}/hide.exe"
 
+  # The binary sits in a directory named like the archive. No windows-aarch64 build.
+  gum:
+    description: "Prompts, menus, spinners and styled text for glamorous shell scripts"
+    repository: https://github.com/charmbracelet/gum
+    asset: "{release}/gum_{version}_{target}{ext}"
+    member: "gum_{version}_{target}/gum{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
   # The CLI lives in `carapace-bin`; `carapace-sh/carapace` is the Go library behind it.
   carapace:
     description: "Shell completion for hundreds of commands in bash, zsh, fish and more"
