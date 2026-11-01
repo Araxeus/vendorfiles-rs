@@ -1,7 +1,8 @@
 //! String templating and URL helpers.
 //!
-//! Every substitution here replaces the **first** occurrence only, because the reference
-//! implementation uses JavaScript's `String.prototype.replace` with a string pattern.
+//! `{version}` substitution replaces every occurrence. `{vendorFolder}` and `{release}/` replace
+//! the **first** occurrence only, because the reference implementation uses JavaScript's
+//! `String.prototype.replace` with a string pattern.
 
 // `{version}`, `{release}/` and `{vendorFolder}` are config placeholders, not format arguments.
 // `expect` rather than `allow`: if the last placeholder literal ever leaves this module, the
@@ -88,10 +89,10 @@ pub fn version_token(version: &str) -> &str {
         .map_or_else(|| trim_start_matches_str(version, "v"), |m| m.as_str())
 }
 
-/// Replaces the first `{version}` placeholder in `path`.
+/// Replaces every `{version}` placeholder in `path`.
 #[must_use]
 pub fn replace_version(path: &str, version: &str) -> String {
-    path.replacen("{version}", version_token(version), 1)
+    path.replace("{version}", version_token(version))
 }
 
 /// Replaces the first `{vendorFolder}` placeholder in `path`.
@@ -161,11 +162,15 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_placeholder_is_replaced() {
+    fn every_version_placeholder_is_replaced() {
         assert_eq!(
             replace_version("a-{version}/b-{version}.zip", "v1.2.3"),
-            "a-1.2.3/b-{version}.zip"
+            "a-1.2.3/b-1.2.3.zip"
         );
+    }
+
+    #[test]
+    fn only_the_first_release_prefix_is_stripped() {
         assert_eq!(
             strip_release_prefix("{release}/x-{release}/y"),
             "x-{release}/y"

@@ -57,6 +57,15 @@ pub enum VendorError {
     #[error("you must provide files to install with -f or --files <files...>")]
     MissingFilesOption,
 
+    #[error(
+        "'{typed}' {why}, so vendor searched GitHub and found {repository}. Name the release files to download from it with -f or --files <files...>"
+    )]
+    SearchedRepositoryNeedsFiles {
+        typed: String,
+        why: &'static str,
+        repository: String,
+    },
+
     #[error("No package names provided")]
     NoPackageNames,
 
@@ -214,6 +223,18 @@ pub enum VendorError {
 
     #[error("No results found for \"{name}\"\nDid you mean {suggestion}?")]
     NoSearchResultsDidYouMean { name: String, suggestion: String },
+
+    #[error("'{typed}' {why}, and GitHub search found no repository by that name")]
+    NotFoundAnywhere { typed: String, why: &'static str },
+
+    #[error(
+        "'{typed}' {why}, and GitHub search found no repository by that name - did you mean {suggestion}?"
+    )]
+    NotFoundAnywhereDidYouMean {
+        typed: String,
+        why: &'static str,
+        suggestion: String,
+    },
 
     #[error("Invalid token")]
     InvalidToken,
