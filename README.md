@@ -938,7 +938,7 @@ repository, and name matches rank first:
 
 ```bash
 vendor search          # everything
-vendor search disk     # bottom, dust, dysk and gdu
+vendor search disk     # bottom, btop, dust, dysk and gdu
 vendor search git      # delta, gh, lazygit and bat
 ```
 
@@ -947,13 +947,14 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (46)</summary>
+<summary>Programs you can add by name (47)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
 | [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
 | [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
+| [biome](https://github.com/biomejs/biome) |  | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI | All |
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | System monitor for processes, CPU, memory, disks and network, like htop | All |
 | [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
