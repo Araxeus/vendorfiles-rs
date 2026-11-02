@@ -427,8 +427,8 @@ Verified against the installed `vendor@1.4.2` binary in isolated fixtures:
   **no** trailing newline when rewritten by `uninstall`.
 * Config write-back: original indentation and final newline preserved; JSON via
   `serde_json` with detected indent; YAML via block style; TOML via `toml_edit`.
-* `{version}` substitution replaces only the **first** occurrence and uses the first
-  `\d+\.\d+\.\d+` match in the tag, else the tag with leading `v`s stripped.
+* `{version}` substitution uses the first `\d+\.\d+\.\d+` match in the tag, else the tag with
+  leading `v`s stripped.
 
 ### 5.1 How it was verified
 
@@ -605,3 +605,6 @@ code and the complete resulting file tree (including binary payloads). Covered:
    line naming the likely cause when Windows reports `os error 5` or `32`. And the version clause
    of `FileDownloadFailed` is omitted when there is no version, rather than ending the sentence
    on "with version " and nothing else.
+23. **`{version}` expands everywhere in a path.** The reference replaces only the first occurrence,
+   so `a-{version}/b-{version}.zip` kept a literal `{version}` in its second half and could never
+   match a real file. `{vendorFolder}` and `{release}/` still replace the first occurrence only.

@@ -745,6 +745,8 @@ struct Source {
     known: Option<known::Known>,
     /// A name the hosted registry describes.
     listed: Option<registry::Entry>,
+    /// Why the repository came from a GitHub search, when it did.
+    searched: Option<&'static str>,
 }
 
 /// Works out which repository `source` means, and what is already known about it.
@@ -765,27 +767,41 @@ async fn resolve_source(
     // Then the hosted registry, which is what makes `vendor add fd` work without a repository or
     // a `--files` list. A registry that cannot be reached is a miss, not a failure: the search
     // still works, and so does `vendor add owner/repo`.
+    //
+    // A name the registry knows but cannot install here fails outright. Searching GitHub for it
+    // would find the same project, with no files to take from it.
     let bare_name = !files_given
         && known.is_none()
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
+    let mut unlisted = "is not in the program registry";
     let listed = if bare_name {
-        match registry::load(refresh).await.and_then(|registry| {
-            let entry = registry.entry(source)?;
-            if entry.is_none() {
-                suggest(&registry, source);
-            }
-            Ok(entry)
-        }) {
-            Ok(entry) => entry,
+        match registry::load(refresh).await {
+            Ok(registry) => match registry.entry(source) {
+                Ok(entry) => {
+                    if entry.is_none() {
+                        suggest(&registry, source);
+                    }
+                    entry
+                }
+                Err(error) => {
+                    return Err(match instead(&registry, source) {
+                        Some(others) => anyhow::anyhow!("{error} - try {others} instead"),
+                        None => error.into(),
+                    });
+                }
+            },
             Err(error) => {
                 ui::warning(error);
+                unlisted = "could not be looked up in the program registry";
                 None
             }
         }
     } else {
         None
     };
+
+    let mut searched = None;
 
     let (lookup, stored) = if let Some(known) = known.as_ref() {
         (known.repository.to_owned(), known.repository.to_owned())
@@ -799,7 +815,26 @@ async fn resolve_source(
             format!("https://github.com/{source}"),
         )
     } else {
-        let found = session.github.find_repo_url(source).await?;
+        // The search is the last resort, so its miss also says the registry missed first.
+        let found = session
+            .github
+            .find_repo_url(source)
+            .await
+            .map_err(|error| match error {
+                VendorError::NoSearchResults(_) => VendorError::NotFoundAnywhere {
+                    typed: source.to_owned(),
+                    why: unlisted,
+                },
+                VendorError::NoSearchResultsDidYouMean { suggestion, .. } => {
+                    VendorError::NotFoundAnywhereDidYouMean {
+                        typed: source.to_owned(),
+                        why: unlisted,
+                        suggestion,
+                    }
+                }
+                other => other,
+            })?;
+        searched = Some(unlisted);
         (found.clone(), found)
     };
 
@@ -808,6 +843,7 @@ async fn resolve_source(
         stored,
         known,
         listed,
+        searched,
     })
 }
 
@@ -827,6 +863,21 @@ fn suggest(registry: &registry::Registry, typed: &str) {
     ui::info(format!(
         "'{typed}' is not in the program registry - did you mean {names}? `vendor search` lists them all"
     ));
+}
+
+/// Registry programs that do the job of `typed` and install on this host, joined for a hint.
+///
+/// `tmux` has no Windows build, but `psmux` mentions tmux and has one.
+fn instead(registry: &registry::Registry, typed: &str) -> Option<String> {
+    let (canonical, _) = registry.find(typed)?;
+    let host = registry::resolve::host();
+    let others: Vec<&str> = registry::search::search(registry, canonical)
+        .into_iter()
+        .filter(|(name, program)| *name != canonical && program.covers(&host))
+        .map(|(name, _)| name)
+        .take(3)
+        .collect();
+    (!others.is_empty()).then(|| others.join(" or "))
 }
 
 /// How much of an install to actually perform.
@@ -908,6 +959,7 @@ async fn install(
         stored,
         known,
         listed,
+        searched,
     } = resolve_source(session, source, files.is_some(), preview.refresh).await?;
 
     if !is_github_url(&lookup) {
@@ -962,6 +1014,14 @@ async fn install(
             .or_else(|| listed.as_ref().map(|listed| listed.files.clone())),
     };
     if files.as_ref().is_none_or(Vec::is_empty) {
+        // A searched repository is a guess, so say how it was reached before asking for files.
+        if let Some(why) = searched {
+            bail!(VendorError::SearchedRepositoryNeedsFiles {
+                typed: source.to_owned(),
+                why,
+                repository: lookup.clone(),
+            });
+        }
         bail!(VendorError::MissingFilesOption);
     }
 

@@ -16,6 +16,8 @@ pub mod search;
 
 use std::path::Path;
 
+use serde::Deserialize;
+
 pub use resolve::Entry;
 use schema::{Document, SUPPORTED_VERSION};
 
@@ -35,14 +37,23 @@ impl Registry {
     /// Returns [`VendorError::RegistryUnreadable`] if the text is not a registry, and
     /// [`VendorError::RegistryTooNew`] if it declares a version this build does not understand.
     pub fn parse(text: &str) -> Result<Self> {
-        let document: Document = serde_yaml_ng::from_str(text)
-            .map_err(|source| VendorError::RegistryUnreadable(source.to_string()))?;
-        if document.version > SUPPORTED_VERSION {
+        // The version is read on its own first. A newer registry has fields this build refuses,
+        // and the strict parse would report one of those instead of saying to update.
+        #[derive(Deserialize)]
+        struct Header {
+            version: u32,
+        }
+        if let Ok(Header { version }) = serde_yaml_ng::from_str(text)
+            && version > SUPPORTED_VERSION
+        {
             return Err(VendorError::RegistryTooNew {
-                found: document.version,
+                found: version,
                 supported: SUPPORTED_VERSION,
             });
         }
+
+        let document: Document = serde_yaml_ng::from_str(text)
+            .map_err(|source| VendorError::RegistryUnreadable(source.to_string()))?;
         Ok(Self { document })
     }
 
@@ -298,6 +309,24 @@ programs:
       macos-aarch64: aarch64-apple-darwin
       linux-x86_64: x86_64-unknown-linux-gnu
 "#;
+
+    #[test]
+    fn a_newer_registry_says_to_update_even_with_unknown_fields() {
+        let text = "version: 99
+programs:
+  x:
+    newField: 1
+    repository: https://github.com/a/b
+";
+        let error = Registry::parse(text).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                crate::error::VendorError::RegistryTooNew { found: 99, .. }
+            ),
+            "{error}"
+        );
+    }
 
     #[tokio::test]
     async fn storing_the_cache_leaves_no_half_written_file() {
