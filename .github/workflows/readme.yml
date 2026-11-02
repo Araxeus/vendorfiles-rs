@@ -4,6 +4,7 @@ name: README
 # Check workflow; this one covers edits to the README or the registry alone.
 on:
   push:
+    branches: [main]
     paths: &sources
       - README.md
       - registry.yml
