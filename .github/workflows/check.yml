@@ -4,6 +4,7 @@ name: Check
 # and README workflows cover it, and docs need no checks at all.
 on:
   push:
+    branches: [main]
     paths: &code
       - crates/**
       - xtask/**
