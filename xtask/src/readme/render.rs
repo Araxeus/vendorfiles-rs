@@ -17,6 +17,14 @@ pub struct Labels {
     pub toml: &'static str,
 }
 
+/// A config format, used to choose the tab a region opens on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Json,
+    Yaml,
+    Toml,
+}
+
 pub const NAMES: Labels = Labels {
     json: "JSON",
     yaml: "YAML",
@@ -33,11 +41,11 @@ pub const FILES: Labels = Labels {
 /// The key that is a language-server directive rather than config in YAML and TOML.
 const SCHEMA: &str = "$schema";
 
-/// Renders the region body: three `<details>`, JSON first and open.
+/// Renders the region body: three `<details>`, with `first` at the top and open.
 ///
 /// `fence` is the info string of the source block, reused verbatim so a `jsonc` example keeps
 /// its comment-aware highlighting.
-pub fn group(json_source: &str, fence: &str, labels: Labels) -> Result<String> {
+pub fn group(json_source: &str, fence: &str, labels: Labels, first: Format) -> Result<String> {
     let node = jsonc::parse(json_source)?;
     let (body, schema) = split_schema(node);
 
@@ -52,12 +60,18 @@ pub fn group(json_source: &str, fence: &str, labels: Labels) -> Result<String> {
         .context("the generated YAML and TOML do not round-trip to the source example")?;
     check_comments(&body, &yaml_text, &toml_text)?;
 
-    Ok([
-        block(labels.json, fence, json_source.trim_end(), true),
-        block(labels.yaml, "yml", yaml_text.trim_end(), false),
-        block(labels.toml, "toml", toml_text.trim_end(), false),
-    ]
-    .join("\n"))
+    let mut tabs = [
+        (Format::Json, labels.json, fence, json_source.trim_end()),
+        (Format::Yaml, labels.yaml, "yml", yaml_text.trim_end()),
+        (Format::Toml, labels.toml, "toml", toml_text.trim_end()),
+    ];
+
+    // The sort is stable, so the other two tabs keep their order.
+    tabs.sort_by_key(|(format, ..)| *format != first);
+
+    Ok(tabs
+        .map(|(format, summary, fence, body)| block(summary, fence, body, format == first))
+        .join("\n"))
 }
 
 /// One `<details>`. The blank line after `</summary>` is required: without it GitHub renders the
@@ -222,13 +236,13 @@ fn normalize(value: Json) -> Json {
 #[cfg(test)]
 mod tests {
     use super::super::jsonc;
-    use super::{FILES, NAMES, check_comments, comments_in, group, verify};
+    use super::{FILES, Format, NAMES, check_comments, comments_in, group, verify};
 
     #[test]
     fn a_control_character_round_trips_through_both_formats() {
         // Before the TOML escaper covered them, this failed the round-trip check with a parse
         // error rather than rendering: the backspace went into the basic string raw.
-        let out = group(r#"{ "a": "x\by" }"#, "json", NAMES).unwrap();
+        let out = group(r#"{ "a": "x\by" }"#, "json", NAMES, Format::Json).unwrap();
         assert!(out.contains("a = \"x\\by\""), "{out}");
     }
 
@@ -250,14 +264,14 @@ mod tests {
 
     #[test]
     fn a_value_holding_both_a_quote_and_a_hash_survives() {
-        let out = group(r#"{ "a": "don't #1" }"#, "json", NAMES).unwrap();
+        let out = group(r#"{ "a": "don't #1" }"#, "json", NAMES, Format::Json).unwrap();
         assert!(out.contains("a: 'don''t #1'"), "{out}");
         assert!(out.contains("a = \"don't #1\""), "{out}");
     }
 
     #[test]
     fn renders_three_details_with_json_open() {
-        let out = group(r#"{ "a": "x" }"#, "json", NAMES).unwrap();
+        let out = group(r#"{ "a": "x" }"#, "json", NAMES, Format::Json).unwrap();
         assert!(
             out.starts_with("<details open>\n<summary>JSON</summary>\n\n```json\n"),
             "{out}"
@@ -278,9 +292,29 @@ mod tests {
 
     #[test]
     fn file_labels_are_selectable() {
-        let out = group(r#"{ "a": "x" }"#, "json", FILES).unwrap();
+        let out = group(r#"{ "a": "x" }"#, "json", FILES, Format::Json).unwrap();
         assert!(out.contains("<summary>vendor.json</summary>"), "{out}");
         assert!(out.contains("<summary>vendor.toml</summary>"), "{out}");
+    }
+
+    #[test]
+    fn the_chosen_format_comes_first_and_is_the_only_open_tab() {
+        let source = r#"{ "a": "x" }"#;
+        for (first, summaries) in [
+            (Format::Json, ["JSON", "YAML", "TOML"]),
+            (Format::Yaml, ["YAML", "JSON", "TOML"]),
+            (Format::Toml, ["TOML", "JSON", "YAML"]),
+        ] {
+            let out = group(source, "json", NAMES, first).unwrap();
+            let order: Vec<&str> = out
+                .split("<summary>")
+                .skip(1)
+                .filter_map(|tab| tab.split("</summary>").next())
+                .collect();
+            assert_eq!(order, summaries, "{out}");
+            assert!(out.starts_with("<details open>\n"), "{out}");
+            assert_eq!(out.matches("<details open>").count(), 1, "{out}");
+        }
     }
 
     #[test]
@@ -290,7 +324,7 @@ mod tests {
     "vendorDependencies": { //...
     }
 }"#;
-        let out = group(source, "jsonc", NAMES).unwrap();
+        let out = group(source, "jsonc", NAMES, Format::Json).unwrap();
         assert!(
             out.contains("# yaml-language-server: $schema=https://example.com/s.json"),
             "{out}"
@@ -302,7 +336,7 @@ mod tests {
 
     #[test]
     fn the_source_fence_tag_is_preserved() {
-        let out = group("{ \"a\": 1 // n\n}", "jsonc", NAMES).unwrap();
+        let out = group("{ \"a\": 1 // n\n}", "jsonc", NAMES, Format::Json).unwrap();
         assert!(out.contains("```jsonc\n"), "{out}");
     }
 
@@ -318,7 +352,10 @@ mod tests {
         }
     ]
 }"#;
-        let error = format!("{:#}", group(source, "jsonc", NAMES).unwrap_err());
+        let error = format!(
+            "{:#}",
+            group(source, "jsonc", NAMES, Format::Json).unwrap_err()
+        );
         assert!(
             error.contains("has no place in the generated TOML"),
             "{error}"
@@ -332,7 +369,7 @@ mod tests {
     "$schema": "https://example.com/s.json",
     "a": 1
 }"#;
-        let out = group(source, "jsonc", NAMES).unwrap();
+        let out = group(source, "jsonc", NAMES, Format::Json).unwrap();
         assert!(
             out.contains("```yml\n# yaml-language-server: $schema=https://example.com/s.json\n# editors pick this up\n"),
             "{out}"
@@ -377,7 +414,7 @@ y: 2
 
     #[test]
     fn a_wrong_translation_is_rejected() {
-        let out = group(r#"{ "a": 1 }"#, "json", NAMES).unwrap();
+        let out = group(r#"{ "a": 1 }"#, "json", NAMES, Format::Json).unwrap();
         assert!(out.contains("a = 1"), "{out}");
         assert!(verify(r#"{ "a": 1 }"#, "a: 2\n", "a = 1\n").is_err());
     }

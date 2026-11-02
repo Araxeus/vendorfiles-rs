@@ -22,6 +22,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [Global Programs](#global-programs)
 - [Configuration](#configuration)
   - [Basic Setup](#basic-setup)
   - [Custom Output Paths](#custom-output-paths)
@@ -131,6 +132,68 @@ vendor sync
 ```
 
 Your files are now in `./vendor/Coloris/`.
+
+### Global Programs
+
+To install programs for your whole machine instead of files for one project, create a config file
+such as `~/vendor.yml`:
+
+<!-- formats: files, yml first -->
+<details open>
+<summary>vendor.yml</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: /usr/local/bin
+default:
+  vendorFolder: '{vendorFolder}'
+  locked: false
+```
+
+</details>
+
+<details>
+<summary>vendor.json</summary>
+
+```json
+{
+    "vendorConfig": {
+        "vendorFolder": "/usr/local/bin"
+    },
+    "default": {
+        "vendorFolder": "{vendorFolder}",
+        "locked": false
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>vendor.toml</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = '/usr/local/bin'
+
+[default]
+vendorFolder = '{vendorFolder}'
+locked = false
+```
+
+</details>
+<!-- /formats -->
+
+`vendorFolder` must be on your `PATH`. Then set the `DEFAULT_VENDOR_CONFIG` environment variable
+to `~/vendor.yml` or the folder containing it, so `vendor` finds the config from any directory.
+
+Run:
+
+```bash
+vendor add vendorfiles rg fd
+```
+
+`vendor`, `rg` and `fd` are now in `/usr/local/bin`. `vendor update` upgrades all of them.
 
 ## Configuration
 
