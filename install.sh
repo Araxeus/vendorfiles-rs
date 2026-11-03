@@ -61,21 +61,16 @@ config_value() {
 decode_scalar() {
     local raw="$1" value
     local single="^'(([^']|'')*)'[[:space:]]*(#.*)?\$"
-    local double='^"(([^"\\]|\\.)*)"[[:space:]]*(#.*)?$'
+    local double='^"([^"\\]*)"[[:space:]]*(#.*)?$'
 
     if [[ $raw =~ $single ]]; then
         printf '%s' "${BASH_REMATCH[1]}" | sed "s/''/'/g"
     elif [[ $raw =~ $double ]]; then
-        value=${BASH_REMATCH[1]}
-        case "$(printf '%s' "$value" | sed -E 's/\\[\\"]//g')" in
-            *\\*) return 1 ;;
-        esac
-        printf '%s' "$value" | sed -E 's/\\(.)/\1/g'
+        printf '%s' "${BASH_REMATCH[1]}"
     else
         value=$(printf '%s' "$raw" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//')
         case "$value" in
-            "" | \~ | null | Null | NULL | false | False | FALSE | 0) return 1 ;;
-            [\#\[\{\&\*\!\|\>%\@\`\'\"]*) return 1 ;;
+            "" | \~ | null | false | [\#\'\"\[\{]*) return 1 ;;
         esac
         printf '%s' "$value"
     fi
@@ -185,32 +180,19 @@ profile_path() {
     esac
 }
 
-# Writes a path for a double-quoted profile line. $HOME stays a variable so the line survives a
-# copy to another machine, and $2 lists the characters to escape in the rest of the path.
-profile_text() {
-    local path="$1"
-    case "$path" in
-        "$HOME"/*)
-            # shellcheck disable=SC2016
-            printf '$HOME/'
-            path=${path#"$HOME"/}
-            ;;
+# Writes a path with a literal $HOME, so the profile line survives a copy to another machine.
+with_home_variable() {
+    case "$1" in
+        "$HOME"/*) printf '%s' "\$HOME/${1#"$HOME"/}" ;;
+        *) printf '%s' "$1" ;;
     esac
-    printf '%s' "$path" | sed "s/$2/\\\\&/g"
 }
 
 # Prints the lines the profile needs, one per line.
 profile_lines() {
-    local profile="$1" folder="$2" config="$3" special config_text folder_text
-
-    # fish treats a backtick as a plain character inside double quotes.
-    if [ "${profile##*/}" = config.fish ]; then
-        special='[\\"$]'
-    else
-        special='[\\"$`]'
-    fi
-    config_text=$(profile_text "$config" "$special")
-    folder_text=$(profile_text "$folder" "$special")
+    local profile="$1" folder="$2" config="$3" config_text folder_text
+    config_text=$(with_home_variable "$config")
+    folder_text=$(with_home_variable "$folder")
 
     if [ "${profile##*/}" = config.fish ]; then
         printf 'set -gx DEFAULT_VENDOR_CONFIG "%s"\n' "$config_text"

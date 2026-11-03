@@ -84,13 +84,11 @@ function ConvertFrom-Scalar($raw) {
     if ($raw -match "^'((?:[^']|'')*)'\s*(#.*)?$") {
         return $Matches[1] -replace "''", "'"
     }
-    if ($raw -match '^"((?:[^"\\]|\\.)*)"\s*(#.*)?$') {
-        $value = $Matches[1]
-        if (($value -replace '\\[\\"]', '') -match '\\') { return $null }
-        return [regex]::Replace($value, '\\(.)', '$1')
+    if ($raw -match '^"([^"\\]*)"\s*(#.*)?$') {
+        return $Matches[1]
     }
     $value = ($raw -replace '\s+#.*$', '').Trim()
-    if ($value -match '^(~|null|false|0)?$' -or $value -match '^[#\[{&*!|>%@`''"]') { return $null }
+    if ($value -match '^(~|null|false)?$' -or $value -match '^[#''"\[{]') { return $null }
     return $value
 }
 
