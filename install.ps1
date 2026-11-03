@@ -25,7 +25,7 @@ function Install-Vendor {
     if (Test-Path -LiteralPath $config) {
         $folder = Get-ConfiguredFolder $config
         if (-not $folder) {
-            throw "$config exists but sets no vendorConfig.vendorFolder. Set one, then run this again."
+            throw "could not read vendorConfig.vendorFolder from $config. Set it to a plain or quoted path, then run this again."
         }
     } else {
         $folder = Join-Path $env:USERPROFILE '.local\bin'
@@ -56,28 +56,81 @@ function Install-Vendor {
     Write-Host "Its config is $config"
     Write-Host ''
     Update-Environment $folder $config
+    if (-not (Test-InstallsIntoFolder $config $folder)) {
+        Write-DefaultsWarning $config $folder
+    }
     Write-Host ''
     Write-Host 'Then install programs with: vendor add <name>'
 }
 
-# Returns vendorConfig.vendorFolder from the config, with ~ and relative paths resolved.
-function Get-ConfiguredFolder($config) {
+# Returns the raw text after `vendorFolder:` in a top-level section of the config.
+function Get-ConfigValue($config, $section) {
     $inside = $false
     foreach ($line in [IO.File]::ReadAllLines($config)) {
-        if ($line -match '^vendorConfig:') {
+        if ($line.StartsWith("${section}:")) {
             $inside = $true
         } elseif ($line -match '^[^\s#]') {
             $inside = $false
-        } elseif ($inside -and $line -match '^\s+vendorFolder:\s*(.*)$') {
-            $folder = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'")
-            if (-not $folder) { return $null }
-            if ($folder -eq '~') { return $env:USERPROFILE }
-            if ($folder -match '^~[/\\](.*)$') { return Join-Path $env:USERPROFILE $Matches[1] }
-            if ([IO.Path]::IsPathRooted($folder)) { return $folder }
-            return Join-Path (Split-Path -Parent $config) ($folder -replace '^\.[/\\]', '')
+        } elseif ($inside -and $line -cmatch '^\s+vendorFolder:\s*(.*)$') {
+            return $Matches[1]
         }
     }
-    return $null
+    return ''
+}
+
+# Decodes a YAML scalar. Returns $null for a null value or a form this script does not read,
+# because guessing could send the install somewhere other than where vendor will look.
+function ConvertFrom-Scalar($raw) {
+    if ($raw -match "^'((?:[^']|'')*)'\s*(#.*)?$") {
+        return $Matches[1] -replace "''", "'"
+    }
+    if ($raw -match '^"((?:[^"\\]|\\.)*)"\s*(#.*)?$') {
+        $value = $Matches[1]
+        if (($value -replace '\\[\\"]', '') -match '\\') { return $null }
+        return [regex]::Replace($value, '\\(.)', '$1')
+    }
+    $value = ($raw -replace '\s+#.*$', '').Trim()
+    if ($value -match '^(~|null|false|0)?$' -or $value -match '^[#\[{&*!|>%@`''"]') { return $null }
+    return $value
+}
+
+# Resolves ~ and relative paths in a vendorFolder value the way vendor does.
+function Resolve-Folder($config, $value) {
+    $userHome = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+    if ($value -eq '~') { return $userHome }
+    if ($value -match '^~[/\\](.*)$') { return Join-Path $userHome $Matches[1] }
+    if ([IO.Path]::IsPathRooted($value)) { return $value }
+    return Join-Path (Split-Path -Parent $config) ($value -replace '^\.[/\\]', '')
+}
+
+function Get-ConfiguredFolder($config) {
+    $value = ConvertFrom-Scalar (Get-ConfigValue $config 'vendorConfig')
+    if (-not $value) { return $null }
+    return Resolve-Folder $config $value
+}
+
+# vendor reads defaultVendorOptions when the config has one, and default otherwise.
+function Get-DefaultSection($config) {
+    foreach ($line in [IO.File]::ReadAllLines($config)) {
+        if ($line.StartsWith('defaultVendorOptions:')) { return 'defaultVendorOptions' }
+    }
+    return 'default'
+}
+
+# Returns whether `vendor add` puts programs straight into the folder, not a subfolder of it.
+function Test-InstallsIntoFolder($config, $folder) {
+    $value = ConvertFrom-Scalar (Get-ConfigValue $config (Get-DefaultSection $config))
+    if ($value -eq '{vendorFolder}') { return $true }
+    if (-not $value) { return $false }
+    return [IO.Path]::GetFullPath((Resolve-Folder $config $value)).TrimEnd('\') -ieq $folder.TrimEnd('\')
+}
+
+function Write-DefaultsWarning($config, $folder) {
+    Write-Host ''
+    Write-Host "warning: $config sets no default vendorFolder, so vendor add will put each program in"
+    Write-Host "its own subfolder of $folder, which is not on your Path. To keep programs on Path, add:"
+    Write-Host "  $(Get-DefaultSection $config):"
+    Write-Host "    vendorFolder: '{vendorFolder}'"
 }
 
 function Install-Binary($repository, $folder) {
@@ -105,7 +158,7 @@ function Install-Binary($repository, $folder) {
 }
 
 function Write-Config($config, $folder) {
-    $path = $folder -replace '\\', '/'
+    $path = ($folder -replace '\\', '/') -replace "'", "''"
     $text = "vendorConfig:`n  vendorFolder: '$path'`ndefault:`n  vendorFolder: '{vendorFolder}'`n  locked: false`n"
 
     # Set-Content on Windows PowerShell 5.1 would add a byte order mark.
@@ -138,8 +191,9 @@ function Update-Environment($folder, $config) {
         $key.Close()
     }
 
-    if ([Environment]::GetEnvironmentVariable('DEFAULT_VENDOR_CONFIG', 'User') -ne $config) {
-        $changed += "DEFAULT_VENDOR_CONFIG: $config"
+    $previous = [Environment]::GetEnvironmentVariable('DEFAULT_VENDOR_CONFIG', 'User')
+    if ($previous -ne $config) {
+        $changed += if ($previous) { "DEFAULT_VENDOR_CONFIG: $config (was $previous)" } else { "DEFAULT_VENDOR_CONFIG: $config" }
     }
 
     # This call also tells open programs that the environment changed, which covers Path too.

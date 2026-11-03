@@ -42,29 +42,83 @@ latest_tag() {
     esac
 }
 
-# Prints vendorConfig.vendorFolder from the config, with ~ and relative paths resolved.
-configured_folder() {
-    local folder
-    folder=$(awk '
+# Prints the raw text after `vendorFolder:` in a top-level section of the config.
+config_value() {
+    awk -v section="$2:" '
         { sub(/\r$/, "") }
-        /^vendorConfig:/ { inside = 1; next }
+        index($0, section) == 1 { inside = 1; next }
         /^[^ \t#]/ { inside = 0 }
         inside && /^[ \t]+vendorFolder:/ {
             sub(/^[ \t]+vendorFolder:[ \t]*/, "")
-            sub(/[ \t]+#.*$/, "")
-            gsub(/^["\047]|["\047]$/, "")
             print
             exit
         }
-    ' "$1")
+    ' "$1"
+}
 
-    case "$folder" in
-        "") return 1 ;;
+# Decodes a YAML scalar. Fails on a null value or a form this script does not read, because
+# guessing could send the install somewhere other than where vendor will look.
+decode_scalar() {
+    local raw="$1" value
+    local single="^'(([^']|'')*)'[[:space:]]*(#.*)?\$"
+    local double='^"(([^"\\]|\\.)*)"[[:space:]]*(#.*)?$'
+
+    if [[ $raw =~ $single ]]; then
+        printf '%s' "${BASH_REMATCH[1]}" | sed "s/''/'/g"
+    elif [[ $raw =~ $double ]]; then
+        value=${BASH_REMATCH[1]}
+        case "$(printf '%s' "$value" | sed -E 's/\\[\\"]//g')" in
+            *\\*) return 1 ;;
+        esac
+        printf '%s' "$value" | sed -E 's/\\(.)/\1/g'
+    else
+        value=$(printf '%s' "$raw" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//')
+        case "$value" in
+            "" | \~ | null | Null | NULL | false | False | FALSE | 0) return 1 ;;
+            [\#\[\{\&\*\!\|\>%\@\`\'\"]*) return 1 ;;
+        esac
+        printf '%s' "$value"
+    fi
+}
+
+# Resolves ~ and relative paths in a vendorFolder value the way vendor does.
+resolve_folder() {
+    case "$2" in
         \~) echo "$HOME" ;;
-        \~/*) echo "$HOME/${folder#\~/}" ;;
-        /*) echo "$folder" ;;
-        *) echo "$(dirname "$1")/${folder#./}" ;;
+        \~/*) echo "$HOME/${2#\~/}" ;;
+        /*) echo "$2" ;;
+        *) echo "$(dirname "$1")/${2#./}" ;;
     esac
+}
+
+configured_folder() {
+    local folder
+    folder=$(decode_scalar "$(config_value "$1" vendorConfig)") || return 1
+    [ -n "$folder" ] || return 1
+    resolve_folder "$1" "$folder"
+}
+
+# vendor reads defaultVendorOptions when the config has one, and default otherwise.
+default_section() {
+    if grep -q '^defaultVendorOptions:' "$1"; then
+        echo defaultVendorOptions
+    else
+        echo default
+    fi
+}
+
+# Succeeds when `vendor add` puts programs straight into the folder, not a subfolder of it.
+installs_into_folder() {
+    local value
+    value=$(decode_scalar "$(config_value "$1" "$(default_section "$1")")") || return 1
+    [ "$value" = '{vendorFolder}' ] && return 0
+    [ -n "$value" ] && [ "$(resolve_folder "$1" "$value")" = "$2" ]
+}
+
+warn_about_defaults() {
+    printf '\nwarning: %s sets no default vendorFolder, so vendor add will put each program in\n' "$1"
+    printf 'its own subfolder of %s, which is not on your PATH. To keep programs on PATH, add:\n' "$2"
+    printf "  %s:\n    vendorFolder: '{vendorFolder}'\n" "$(default_section "$1")"
 }
 
 default_folder() {
@@ -93,20 +147,34 @@ install_binary() {
 }
 
 write_config() {
+    local folder
+    folder=$(printf '%s' "$2" | sed "s/'/''/g")
     cat >"$1" <<EOF
 vendorConfig:
-  vendorFolder: '$2'
+  vendorFolder: '$folder'
 default:
   vendorFolder: '{vendorFolder}'
   locked: false
 EOF
 }
 
+# bash reads only the first of these that exists, so creating .bash_profile would hide the others.
+bash_login_file() {
+    local name
+    for name in .bash_profile .bash_login .profile; do
+        if [ -e "$HOME/$name" ]; then
+            echo "$HOME/$name"
+            return
+        fi
+    done
+    echo "$HOME/.bash_profile"
+}
+
 profile_path() {
     case "${SHELL##*/}" in
         bash)
             if [ "$(uname -s)" = Darwin ]; then
-                echo "$HOME/.bash_profile"
+                bash_login_file
             else
                 echo "$HOME/.bashrc"
             fi
@@ -117,19 +185,32 @@ profile_path() {
     esac
 }
 
-# Writes a path with a literal $HOME, so the profile line survives a copy to another machine.
-with_home_variable() {
-    case "$1" in
-        "$HOME"/*) printf '%s' "\$HOME/${1#"$HOME"/}" ;;
-        *) printf '%s' "$1" ;;
+# Writes a path for a double-quoted profile line. $HOME stays a variable so the line survives a
+# copy to another machine, and $2 lists the characters to escape in the rest of the path.
+profile_text() {
+    local path="$1"
+    case "$path" in
+        "$HOME"/*)
+            # shellcheck disable=SC2016
+            printf '$HOME/'
+            path=${path#"$HOME"/}
+            ;;
     esac
+    printf '%s' "$path" | sed "s/$2/\\\\&/g"
 }
 
 # Prints the lines the profile needs, one per line.
 profile_lines() {
-    local profile="$1" folder="$2" config="$3" config_text folder_text
-    config_text=$(with_home_variable "$config")
-    folder_text=$(with_home_variable "$folder")
+    local profile="$1" folder="$2" config="$3" special config_text folder_text
+
+    # fish treats a backtick as a plain character inside double quotes.
+    if [ "${profile##*/}" = config.fish ]; then
+        special='[\\"$]'
+    else
+        special='[\\"$`]'
+    fi
+    config_text=$(profile_text "$config" "$special")
+    folder_text=$(profile_text "$folder" "$special")
 
     if [ "${profile##*/}" = config.fish ]; then
         printf 'set -gx DEFAULT_VENDOR_CONFIG "%s"\n' "$config_text"
@@ -191,7 +272,7 @@ main() {
     config="$HOME/vendor.yml"
     if [ -e "$config" ]; then
         folder=$(configured_folder "$config") ||
-            die "$config exists but sets no vendorConfig.vendorFolder. Set one, then run this again."
+            die "could not read vendorConfig.vendorFolder from $config. Set it to a plain or quoted path, then run this again."
     else
         folder=$(default_folder)
     fi
@@ -215,6 +296,10 @@ main() {
 
     printf '\nvendor is in %s\nIts config is %s\n\n' "$folder" "$config"
     update_profile "$profile" "$lines"
+    if [ -n "${DEFAULT_VENDOR_CONFIG:-}" ] && [ "$DEFAULT_VENDOR_CONFIG" != "$config" ]; then
+        printf '\nDEFAULT_VENDOR_CONFIG was %s and now points to %s\n' "$DEFAULT_VENDOR_CONFIG" "$config"
+    fi
+    installs_into_folder "$config" "$folder" || warn_about_defaults "$config" "$folder"
     printf '\nThen install programs with: vendor add <name>\n'
 }
 
