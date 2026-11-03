@@ -46,6 +46,22 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 
 ## Installation
 
+**With the install script:**
+
+```bash
+# Linux (x86_64) and macOS (Apple Silicon)
+curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.sh | bash
+```
+
+```powershell
+# Windows (x86_64)
+irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
+```
+
+This sets up [Global Programs](#global-programs) for you and lists every change it makes to your
+shell or user environment. It never uses `sudo`. On Linux and macOS it installs to `/usr/local/bin`
+if that is writable and to `~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
+
 **From [GitHub Releases](https://github.com/Araxeus/vendorfiles-rs/releases):**
 
 download the archive for your platform from the
@@ -135,8 +151,8 @@ Your files are now in `./vendor/Coloris/`.
 
 ### Global Programs
 
-To install programs for your whole machine instead of files for one project, create a config file
-such as `~/vendor.yml`:
+To install programs for your whole machine instead of files for one project, run the
+[install script](#installation), or set it up by hand. Create a config file such as `~/vendor.yml`:
 
 <!-- formats: files, yml first -->
 <details open>
