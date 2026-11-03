@@ -22,6 +22,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [Global Programs](#global-programs)
 - [Configuration](#configuration)
   - [Basic Setup](#basic-setup)
   - [Custom Output Paths](#custom-output-paths)
@@ -44,6 +45,22 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 - [License](#license)
 
 ## Installation
+
+**With the install script:**
+
+```bash
+# Linux (x86_64) and macOS (Apple Silicon)
+curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.sh | bash
+```
+
+```powershell
+# Windows (x86_64)
+irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
+```
+
+This sets up [Global Programs](#global-programs) for you and lists every change it makes to your
+shell or user environment. It never uses `sudo`. On Linux and macOS it installs to `/usr/local/bin`
+if that is writable and to `~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
 
 **From [GitHub Releases](https://github.com/Araxeus/vendorfiles-rs/releases):**
 
@@ -131,6 +148,68 @@ vendor sync
 ```
 
 Your files are now in `./vendor/Coloris/`.
+
+### Global Programs
+
+To install programs for your whole machine instead of files for one project, run the
+[install script](#installation), or set it up by hand. Create a config file such as `~/vendor.yml`:
+
+<!-- formats: files, yml first -->
+<details open>
+<summary>vendor.yml</summary>
+
+```yml
+vendorConfig:
+  vendorFolder: /usr/local/bin
+default:
+  vendorFolder: '{vendorFolder}'
+  locked: false
+```
+
+</details>
+
+<details>
+<summary>vendor.json</summary>
+
+```json
+{
+    "vendorConfig": {
+        "vendorFolder": "/usr/local/bin"
+    },
+    "default": {
+        "vendorFolder": "{vendorFolder}",
+        "locked": false
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>vendor.toml</summary>
+
+```toml
+[vendorConfig]
+vendorFolder = '/usr/local/bin'
+
+[default]
+vendorFolder = '{vendorFolder}'
+locked = false
+```
+
+</details>
+<!-- /formats -->
+
+`vendorFolder` must be on your `PATH`. Then set the `DEFAULT_VENDOR_CONFIG` environment variable
+to `~/vendor.yml` or the folder containing it, so `vendor` finds the config from any directory.
+
+Run:
+
+```bash
+vendor add vendorfiles rg fd
+```
+
+`vendor`, `rg` and `fd` are now in `/usr/local/bin`. `vendor update` upgrades all of them.
 
 ## Configuration
 

@@ -18,11 +18,41 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use crate::sh;
 
-/// Opens a region whose tabs are labelled by format name.
-const OPEN: &str = "<!-- formats -->";
-/// Opens a region whose tabs are labelled by file name, for an example about creating the file.
-const OPEN_FILES: &str = "<!-- formats: files -->";
+const OPEN_PREFIX: &str = "<!-- formats";
+const OPEN_SUFFIX: &str = "-->";
 const CLOSE: &str = "<!-- /formats -->";
+
+/// Reads a region's opening marker, or returns `None` for any other line.
+///
+/// A marker is `<!-- formats -->` or `<!-- formats: options -->`, with comma-separated options:
+///
+/// - `files` labels the tabs by file name, for an example about creating the file
+/// - `json first` (the default), `yml first` or `toml first` picks the tab that leads and is open
+fn parse_open(line: &str) -> Result<Option<(render::Labels, render::Format)>> {
+    let marker = line
+        .trim()
+        .strip_prefix(OPEN_PREFIX)
+        .and_then(|rest| rest.strip_suffix(OPEN_SUFFIX));
+    let Some(marker) = marker else {
+        return Ok(None);
+    };
+
+    let mut labels = render::NAMES;
+    let mut first = render::Format::Json;
+
+    let options = marker.trim().strip_prefix(':').unwrap_or(marker);
+    for option in options.split(',').map(str::trim) {
+        match option {
+            "" => {}
+            "files" => labels = render::FILES,
+            "json first" => first = render::Format::Json,
+            "yml first" => first = render::Format::Yaml,
+            "toml first" => first = render::Format::Toml,
+            other => bail!("unknown option `{other}`"),
+        }
+    }
+    Ok(Some((labels, first)))
+}
 
 /// Rewrites every marked region from the JSON inside it, leaving the rest of the file alone.
 pub fn regenerate(markdown: &str) -> Result<String> {
@@ -32,14 +62,11 @@ pub fn regenerate(markdown: &str) -> Result<String> {
     let mut at = 0;
     while at < source.len() {
         let line = source[at];
-        let labels = match line.trim() {
-            OPEN => render::NAMES,
-            OPEN_FILES => render::FILES,
-            _ => {
-                out.push(line.to_owned());
-                at += 1;
-                continue;
-            }
+        let opened = parse_open(line).with_context(|| format!("the marker at line {}", at + 1))?;
+        let Some((labels, first)) = opened else {
+            out.push(line.to_owned());
+            at += 1;
+            continue;
         };
 
         let close = (at + 1..source.len())
@@ -48,7 +75,7 @@ pub fn regenerate(markdown: &str) -> Result<String> {
 
         let (fence, example) = source_block(&source[at + 1..close])
             .with_context(|| format!("the region at line {}", at + 1))?;
-        let rendered = render::group(&example, &fence, labels)
+        let rendered = render::group(&example, &fence, labels, first)
             .with_context(|| format!("the example at line {}", at + 1))?;
 
         out.push(line.to_owned());
@@ -158,6 +185,38 @@ Outro.
         let once = regenerate(SOURCE).unwrap();
         let twice = regenerate(&once).unwrap();
         assert_eq!(once, twice);
+    }
+
+    fn region(marker: &str) -> String {
+        format!("{marker}\n```json\n{{ \"a\": \"x\" }}\n```\n<!-- /formats -->\n")
+    }
+
+    #[test]
+    fn marker_options_pick_the_labels_and_the_first_tab() {
+        for (marker, summary) in [
+            ("<!-- formats -->", "JSON"),
+            ("<!-- formats: files -->", "vendor.json"),
+            ("<!-- formats: json first -->", "JSON"),
+            ("<!-- formats: yml first -->", "YAML"),
+            ("<!-- formats: toml first -->", "TOML"),
+            ("<!-- formats: files, yml first -->", "vendor.yml"),
+            ("<!-- formats: toml first, files -->", "vendor.toml"),
+        ] {
+            let once = regenerate(&region(marker)).unwrap();
+            let opening = format!("{marker}\n<details open>\n<summary>{summary}</summary>");
+            assert!(once.starts_with(&opening), "{once}");
+            assert_eq!(once, regenerate(&once).unwrap());
+        }
+    }
+
+    #[test]
+    fn an_unknown_marker_option_is_an_error() {
+        let error = format!(
+            "{:#}",
+            regenerate(&region("<!-- formats: yaml first -->")).unwrap_err()
+        );
+        assert!(error.contains("line 1"), "{error}");
+        assert!(error.contains("unknown option `yaml first`"), "{error}");
     }
 
     #[test]
