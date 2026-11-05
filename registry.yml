@@ -821,3 +821,24 @@ programs:
       macos-aarch64: darwin_arm64
       linux-x86_64: linux_amd64
       linux-aarch64: linux_arm64
+
+  # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz`. No windows-aarch64 build.
+  edamame:
+    description: "Terminal text editor for Markdown that stays rendered while you edit"
+    repository: https://github.com/mijowi/edamame
+    targets:
+      windows-x86_64:
+        asset: "{release}/edamame-x86_64-pc-windows-msvc.zip"
+        member: "edamame.exe"
+      macos-x86_64:
+        asset: "{release}/edamame-x86_64-apple-darwin.tar.xz"
+        member: "edamame-x86_64-apple-darwin/edamame"
+      macos-aarch64:
+        asset: "{release}/edamame-aarch64-apple-darwin.tar.xz"
+        member: "edamame-aarch64-apple-darwin/edamame"
+      linux-x86_64:
+        asset: "{release}/edamame-x86_64-unknown-linux-gnu.tar.xz"
+        member: "edamame-x86_64-unknown-linux-gnu/edamame"
+      linux-aarch64:
+        asset: "{release}/edamame-aarch64-unknown-linux-gnu.tar.xz"
+        member: "edamame-aarch64-unknown-linux-gnu/edamame"
