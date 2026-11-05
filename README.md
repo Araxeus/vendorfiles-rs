@@ -1018,7 +1018,7 @@ repository, and name matches rank first:
 ```bash
 vendor search          # everything
 vendor search disk     # bottom, btop, dust, dysk and gdu
-vendor search git      # delta, gh, lazygit and bat
+vendor search git      # delta, gh and lazygit
 ```
 
 A name the registry nearly knows gets a hint before the GitHub search runs, so `vendor add ripgreb`
