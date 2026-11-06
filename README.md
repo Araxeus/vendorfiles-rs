@@ -1018,7 +1018,7 @@ repository, and name matches rank first:
 ```bash
 vendor search          # everything
 vendor search disk     # bottom, btop, dust, dysk and gdu
-vendor search git      # delta, gh, lazygit and bat
+vendor search git      # delta, gh, lazygit and actionlint
 ```
 
 A name the registry nearly knows gets a hint before the GitHub search runs, so `vendor add ripgreb`
@@ -1026,10 +1026,11 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (47)</summary>
+<summary>Programs you can add by name (48)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
+| [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
 | [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
 | [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
