@@ -1026,7 +1026,7 @@ asks whether you meant `ripgrep`.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (48)</summary>
+<summary>Programs you can add by name (49)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
