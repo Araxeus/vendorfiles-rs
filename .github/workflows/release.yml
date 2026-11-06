@@ -74,7 +74,7 @@ jobs:
       - name: Get filename
         id: filename
         shell: sh
-        run: echo "FILENAME=vendor_${GITHUB_REF#refs/tags/}_${{ matrix.name }}.${{ matrix.extension }}" >> $GITHUB_OUTPUT
+        run: echo "FILENAME=vendor_${GITHUB_REF#refs/tags/}_${{ matrix.name }}.${{ matrix.extension }}" >> "$GITHUB_OUTPUT"
 
       - name: Tar (Unix)
         if: matrix.os != 'windows-latest'
