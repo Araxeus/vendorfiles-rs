@@ -42,7 +42,9 @@ async fn dispatch_without_workspace(cli: &Cli) -> Option<Result<()>> {
 
         // Authenticating is not a project-scoped action; the reference's blanket `preAction`
         // hook made `vendor login` fail outside a project.
-        Command::Login { token } => match token {
+        // No GitHub token is the word `status`, so `vendor auth status` cannot shadow a login.
+        Command::Login { token } => match token.as_deref() {
+            Some("status") => auth::status().await.map_err(Into::into),
             Some(token) => auth::login_with_token(token).await.map_err(Into::into),
             None => auth::login_with_device_flow().await.map_err(Into::into),
         },

@@ -147,7 +147,8 @@ pub enum VendorError {
     /// message has to say where one comes from.
     #[error(
         "GitHub rejected the credentials (401 Bad credentials).\n\
-         Check your GITHUB_TOKEN, or run `vendor login`"
+         Check your GITHUB_TOKEN, or run `vendor login`. `vendor auth status` shows which token \
+         is in use"
     )]
     BadCredentials,
 
@@ -244,6 +245,24 @@ pub enum VendorError {
 
     #[error("Could not remove the stored token: {0}")]
     KeyringDelete(String),
+
+    /// `vendor auth status` found no token anywhere it looks.
+    #[error("Not logged in to GitHub.\nRun `vendor login` or set a GITHUB_TOKEN env variable")]
+    NotLoggedIn,
+
+    /// `vendor auth status` found a token, and GitHub refused it.
+    ///
+    /// `origin` reads "from `GITHUB_TOKEN`" or "from the credential store"; `fix` says what to do
+    /// about that source in particular.
+    #[error("GitHub rejected the token {origin} (401 Bad credentials).\n{fix}")]
+    StoredTokenRejected {
+        origin: &'static str,
+        fix: &'static str,
+    },
+
+    /// `vendor auth status` could not reach GitHub, so the token is neither good nor bad.
+    #[error("Could not reach GitHub to check the token: {0}")]
+    AuthCheckUnreachable(String),
 
     // ---- registry -----------------------------------------------------------------
     #[error("Could not reach the program registry: {0}")]
