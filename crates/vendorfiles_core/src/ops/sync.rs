@@ -86,7 +86,7 @@ impl Session {
     /// Returns the first error any dependency produces; earlier dependencies keep their effects.
     pub async fn sync(&mut self, options: SyncOptions) -> Result<()> {
         self.progress.begin(self.workspace.dependencies.len());
-        let plans = self.plan(&options)?;
+        let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
             return Ok(());

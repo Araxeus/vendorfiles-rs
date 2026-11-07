@@ -27,6 +27,16 @@ impl Session {
     /// [`VendorError::DeleteFailed`] for a file that could not be removed, or a write error if
     /// the lockfile or config cannot be updated.
     pub async fn uninstall(&mut self, name: &str) -> Result<()> {
+        let outcome = self.remove(name).await;
+
+        // Closed before the error leaves, so earlier outcome rows print above it.
+        if outcome.is_err() {
+            self.progress.end();
+        }
+        outcome
+    }
+
+    async fn remove(&mut self, name: &str) -> Result<()> {
         let progress = self.progress.dependency(name);
         progress.status("removing files");
         let dependency = self
@@ -47,11 +57,10 @@ impl Session {
         let single = self.workspace.config.single_lockfile.is_some();
         let lockfile = read_lockfile(&lockfile_path).await.ok();
         let owned = Owned::find(name, &dependency, &folder, &lockfile_path, single).await;
-        if let Err(error) = owned.delete().await {
-            progress.failed(&error.brief());
-            self.progress.end();
-            return Err(error);
-        }
+        owned
+            .delete()
+            .await
+            .inspect_err(|error| progress.failed(&error.brief()))?;
 
         if single {
             retire_folder_entry(name, &folder, &lockfile_path).await;
