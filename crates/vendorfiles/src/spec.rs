@@ -219,7 +219,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "uninstall",
-        aliases: &["remove", "delete", "del", "rm", "un", "r"],
+        aliases: &["remove", "delete", "del", "rm"],
         max_operands: None,
         options: &[],
         help: include_str!("help/uninstall.txt"),

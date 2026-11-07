@@ -113,7 +113,7 @@ pub enum Command {
 
     /// Uninstall all/selected dependencies.
     #[command(
-        aliases = ["remove", "delete", "del", "rm", "un", "r"],
+        aliases = ["remove", "delete", "del", "rm"],
         disable_help_flag = true
     )]
     Uninstall { names: Vec<String> },
