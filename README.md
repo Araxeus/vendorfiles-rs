@@ -846,43 +846,44 @@ version = 'afde2592a6254be7c14ccac520cb608bd1adbaf9'
 Usage: vendor command [options]
 
 Options:
-  -c, --config <file/folder path>             Config file path / Folder containing the config file
-  -p, --plain                                 Print plain lines instead of a live display
-  -v, --version                               output the current version
-  -h, --help                                  display help for command
+  -c, --config <file/folder path>                Config file path / Folder containing the config file
+  -p, --plain                                    Print plain lines instead of a live display
+  -v, --version                                  output the current version
+  -h, --help                                     display help for command
 
 Commands:
-  sync|s [options]                            Sync config file
-  update|upgrade [options] [names...]         Update outdated dependencies
-  outdated|o                                  List outdated dependencies
-  install|add [options] <url/name...>         Install dependencies
-  search|find [options] [terms...]            Find programs to install by name
-  uninstall|remove|rm [names...]              Uninstall dependencies
-  list|ls                                     List dependencies in the config file
-  config|cfg [editor]                         Show or edit the config file
-  login|auth [token]                          Login to GitHub
-  logout                                      Log out of GitHub
-  completions <shell>                         Print a shell completion script
-  help [command]                              display help for command
+  sync|s [options]                               Sync config file
+  update|upgrade|bump|up|u [options] [names...]  Update outdated dependencies
+  outdated|o                                     List outdated dependencies
+  install|add|i|a [options] <url/name...>        Install dependencies
+  search|find [options] [terms...]               Find programs to install by name
+  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
+  list|ls                                        List dependencies in the config file
+  config|cfg [command]                           Show or edit the config file
+  login|auth [token]                             Login to GitHub, or check it with auth status
+  logout                                         Log out of GitHub
+  completions <shell>                            Print a shell completion script
+  help [command]                                 display help for command
 ```
 
 Root options work on either side of the subcommand. The config location can also come from
 `VENDOR_CONFIG`, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config is found.
 
-| Command                        | What it does                                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `vendor sync\|s`                  | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date.                                  |
-| `vendor update\|upgrade [names...]`     | Install the latest version of each dependency.<br>`--pr` prints a Markdown summary.                                            |
-| `vendor outdated\|o`              | List dependencies with a newer version available.                                                                           |
-| `vendor install\|add\|i <url/name...>` | Add dependencies by URL, `owner/repo` or name, optionally `source@version`.<br>`-n`/`--name` sets the config key,<br>`-f`/`--files` lists the files. <br>`--dry-run` prints what it would add and changes nothing. <br>`--list` is an alias for`vendor search`. |
-| `vendor search\|find [terms...]`     | Find programs installable by name or description. Aliased `find`.                                                                                          |
-| `vendor uninstall\|remove\|rm <names...>`  | Delete a dependency's files and remove it from the config and lockfile.                                                                  |
-| `vendor list\|ls`                  | Print the config's dependencies. aliased as`vendor config list`                                                                                           |
-| `vendor config\|cfg [editor]`         | Print the config file path, or open it in an editor.                                                                        |
-| `vendor login\|auth [token]`         | Store a GitHub token, With no argument, runs the OAuth device flow.                                             |
-| `vendor auth\|login status`           | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it.                                                                              |
-| `vendor logout`                | Delete the stored token.                                                                                                    |
-| `vendor completions <shell>`   | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`.                                              |
+| Command | What it does |
+| --- | --- |
+| `vendor sync\|s` | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date. |
+| `vendor update\|upgrade\|bump\|up\|u [names...]` | Install the latest version of each dependency, or only the named ones.<br>`--pr` prints a Markdown summary. |
+| `vendor outdated\|o` | List dependencies with a newer version available. |
+| `vendor install\|add\|i\|a <url/name...>` | Add dependencies. A source is a [program name from the registry](#installing-by-name) (`vendor add rg`), a repo URL, `owner/repo`, or a repo name to search GitHub for. Any source can be pinned as `source@version`.<br>A registry program needs no `-f`; for anything else, `-f`/`--files` lists the files.<br>`-n`/`--name` sets the config key.<br>`--dry-run` prints what it would add and changes nothing.<br>`--list` does the same as `vendor search`. |
+| `vendor search\|find [terms...]` | Find registry programs by name, alias or description. |
+| `vendor uninstall\|remove\|delete\|del\|rm <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
+| `vendor list\|ls` | Print the config's dependencies. Also spelled `vendor config list\|ls`. |
+| `vendor config\|cfg` | Print the config file path. |
+| `vendor config\|cfg edit [editor]` | Open the config file in `editor`, `$EDITOR`, or the OS default. |
+| `vendor login\|auth [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
+| `vendor login\|auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. |
+| `vendor logout` | Delete the stored token. |
+| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
 **Examples:**
 
