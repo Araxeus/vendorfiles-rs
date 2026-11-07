@@ -86,12 +86,29 @@ impl Session {
     /// Returns the first error any dependency produces; earlier dependencies keep their effects.
     pub async fn sync(&mut self, options: SyncOptions) -> Result<()> {
         self.progress.begin(self.workspace.dependencies.len());
-        let plans = self.plan(&options)?;
+        let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
             return Ok(());
         }
 
+        // Closed before any error leaves, so the outcome rows print above it.
+        let bumps = self.run_plans(plans, &options).await;
+        self.progress.end();
+        let bumps = bumps?;
+
+        if !options.show_outdated_only {
+            self.prune_lockfiles().await?;
+        }
+
+        if ui::pr_mode() && !bumps.is_empty() {
+            print_pull_request_body(&bumps);
+        }
+        Ok(())
+    }
+
+    /// Runs the three passes and returns the version bumps they made.
+    async fn run_plans(&mut self, plans: Vec<Plan>, options: &SyncOptions) -> Result<Vec<Bump>> {
         let versions = futures_util::future::join_all(
             plans
                 .iter()
@@ -106,14 +123,7 @@ impl Session {
 
         let mut prepared = Vec::with_capacity(plans.len());
         for (plan, version) in plans.into_iter().zip(versions) {
-            let version = match version {
-                Ok(version) => version,
-                Err(error) => {
-                    plan.progress.failed(&error.brief());
-                    self.progress.end();
-                    return Err(error);
-                }
-            };
+            let version = version.inspect_err(|error| plan.progress.failed(&error.brief()))?;
             prepared.push(
                 self.prepare(plan.dependency, plan.options, version, plan.progress)
                     .await,
@@ -128,57 +138,29 @@ impl Session {
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
         for item in &prepared {
-            if let Err(error) = clear_previous(item).await {
-                self.progress.end();
-                return Err(error);
-            }
+            clear_previous(item).await?;
         }
 
         let mut tasks = self.spawn_downloads(prepared);
-        let mut bumps: Vec<Bump> = Vec::new();
+        let bumps = self.commit_in_order(&mut tasks).await;
+        if bumps.is_err() {
+            cancel(&tasks);
+        }
+        bumps
+    }
 
+    /// Awaits each download in config order and commits it, stopping at the first error.
+    ///
+    /// Tasks not yet reached stay in `tasks`, so the caller can cancel them.
+    async fn commit_in_order(&mut self, tasks: &mut VecDeque<DownloadTask>) -> Result<Vec<Bump>> {
+        let mut bumps = Vec::new();
         while let Some(task) = tasks.pop_front() {
-            let outcome = task.await.map_err(|e| VendorError::Http(e.to_string()));
-            let prepared = match outcome.and_then(|inner| inner) {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    cancel(&tasks);
-                    self.progress.end();
-                    return Err(error);
-                }
-            };
-
-            let candidate = BumpCandidate {
-                name: prepared.dependency.name.clone(),
-                url: prepared.dependency.repository.clone(),
-                old_version: prepared.dependency.version.clone(),
-                tracked: prepared.options.should_update && !prepared.options.show_outdated_only,
-            };
-
-            match self.commit(prepared).await {
-                Ok(new_version) => {
-                    if let Some(bump) = candidate.into_bump(new_version) {
-                        bumps.push(bump);
-                    }
-                }
-                Err(error) => {
-                    cancel(&tasks);
-                    self.progress.end();
-                    return Err(error);
-                }
-            }
+            let prepared = task.await.map_err(|e| VendorError::Http(e.to_string()))??;
+            let candidate = BumpCandidate::of(&prepared);
+            let new_version = self.commit(prepared).await?;
+            bumps.extend(candidate.into_bump(new_version));
         }
-
-        self.progress.end();
-
-        if !options.show_outdated_only {
-            self.prune_lockfiles().await?;
-        }
-
-        if ui::pr_mode() && !bumps.is_empty() {
-            print_pull_request_body(&bumps);
-        }
-        Ok(())
+        Ok(bumps)
     }
 
     /// Validates every dependency and resolves it, in config order.
@@ -221,6 +203,15 @@ impl Session {
 }
 
 impl BumpCandidate {
+    fn of(prepared: &Prepared) -> Self {
+        Self {
+            name: prepared.dependency.name.clone(),
+            url: prepared.dependency.repository.clone(),
+            old_version: prepared.dependency.version.clone(),
+            tracked: prepared.options.should_update && !prepared.options.show_outdated_only,
+        }
+    }
+
     /// The bump line for this dependency, if it actually moved.
     fn into_bump(self, new_version: Option<String>) -> Option<Bump> {
         if !self.tracked {

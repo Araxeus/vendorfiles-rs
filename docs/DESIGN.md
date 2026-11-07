@@ -54,7 +54,12 @@ vendorfiles-rs/
 │       └── src/
 │           ├── main.rs       # exit codes, ERROR: prefix
 │           ├── cli.rs        # clap derive + Commander error wording
-│           ├── run.rs        # command dispatch
+│           ├── run/
+│           │   ├── mod.rs        # command dispatch
+│           │   ├── install.rs    # source resolution, entry merging, dry run
+│           │   ├── search.rs
+│           │   ├── config.rs     # list, config edit
+│           │   └── completions.rs
 │           ├── source.rs     # splitting an `install` operand into source and version
 │           ├── spec.rs       # the command grammar, for help routing and operand counting
 │           ├── help.rs       # help/version interception

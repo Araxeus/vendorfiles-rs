@@ -24,46 +24,56 @@ pub fn to_line(text: &str) -> Line<'static> {
             plain.push(character);
             continue;
         }
-        // OSC (a hyperlink, say) runs to ST (`ESC \`) or BEL. The frame shows only its text.
-        if chars.peek() == Some(&']') {
-            while let Some(character) = chars.next() {
-                if character == '\u{7}' {
-                    break;
-                }
-                if character == '\u{1b}' {
-                    chars.next_if_eq(&'\\');
-                    break;
+        match chars.peek() {
+            // A hyperlink, say. The frame shows only its text.
+            Some(']') => skip_osc(&mut chars),
+            Some('[') => {
+                if let Some(params) = read_sgr(&mut chars) {
+                    if !plain.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut plain), style));
+                    }
+                    style = apply(style, &params);
                 }
             }
-            continue;
+            _ => {}
         }
-        if chars.peek() != Some(&'[') {
-            continue;
-        }
-        chars.next();
-        let mut params = String::new();
-        let mut terminator = None;
-        for character in chars.by_ref() {
-            if character.is_ascii_digit() || character == ';' {
-                params.push(character);
-            } else {
-                terminator = Some(character);
-                break;
-            }
-        }
-        // Only SGR ends in `m`. Anything else is a sequence we did not write; drop it.
-        if terminator != Some('m') {
-            continue;
-        }
-        if !plain.is_empty() {
-            spans.push(Span::styled(std::mem::take(&mut plain), style));
-        }
-        style = apply(style, &params);
     }
     if !plain.is_empty() {
         spans.push(Span::styled(plain, style));
     }
     Line::from(spans)
+}
+
+type Chars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+
+/// Skips an OSC sequence, which runs to ST (`ESC \`) or BEL.
+fn skip_osc(chars: &mut Chars<'_>) {
+    while let Some(character) = chars.next() {
+        match character {
+            '\u{7}' => return,
+            '\u{1b}' => {
+                chars.next_if_eq(&'\\');
+                return;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Reads a CSI sequence that starts at `[`, returning its parameters when it is SGR.
+///
+/// Only SGR ends in `m`. Any other sequence is one we did not write, so it is dropped.
+fn read_sgr(chars: &mut Chars<'_>) -> Option<String> {
+    chars.next();
+    let mut params = String::new();
+    for character in chars.by_ref() {
+        if character.is_ascii_digit() || character == ';' {
+            params.push(character);
+        } else {
+            return (character == 'm').then_some(params);
+        }
+    }
+    None
 }
 
 /// Splits text into lines and parses each, since inserting above the region needs a height.
