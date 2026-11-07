@@ -24,6 +24,19 @@ pub fn to_line(text: &str) -> Line<'static> {
             plain.push(character);
             continue;
         }
+        // OSC (a hyperlink, say) runs to ST (`ESC \`) or BEL. The frame shows only its text.
+        if chars.peek() == Some(&']') {
+            while let Some(character) = chars.next() {
+                if character == '\u{7}' {
+                    break;
+                }
+                if character == '\u{1b}' {
+                    chars.next_if_eq(&'\\');
+                    break;
+                }
+            }
+            continue;
+        }
         if chars.peek() != Some(&'[') {
             continue;
         }
@@ -123,6 +136,12 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    #[test]
+    fn a_link_shows_only_its_text() {
+        let line = to_line(&format!("see {} now", ui::link("fd", "https://x.test/fd")));
+        assert_eq!(text(&line), "see fd now");
     }
 
     #[test]
