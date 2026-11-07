@@ -12,7 +12,7 @@ Commands:
   outdated|o                                     List outdated dependencies
   install|add|i|a [options] <url/name...>        Install dependencies
   search|find [options] [terms...]               Find programs to install by name
-  uninstall|remove|delete|del|rm [names...]      Uninstall dependencies
+  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
   list|ls                                        List dependencies in the config file
   config|cfg [command]                           Show or edit the config file
   login|auth [token]                             Login to GitHub, or check it with auth status

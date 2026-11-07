@@ -111,7 +111,7 @@ pub enum Command {
         refresh: bool,
     },
 
-    /// Uninstall all/selected dependencies.
+    /// Uninstall the named dependencies.
     #[command(
         aliases = ["remove", "delete", "del", "rm"],
         disable_help_flag = true

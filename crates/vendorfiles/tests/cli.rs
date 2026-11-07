@@ -164,7 +164,10 @@ fn expected_help(name: &str) -> String {
             )
             .replace("  update|upgrade ", "  update|upgrade|bump|up|u ")
             .replace("  install|add ", "  install|add|i|a ")
-            .replace("  uninstall|remove ", "  uninstall|remove|delete|del|rm ")
+            .replace(
+                "  uninstall|remove [names...]",
+                "  uninstall|remove|delete|del|rm <names...>",
+            )
             .replace(
                 "Login to GitHub\n",
                 "Login to GitHub, or check it with auth status\n",
@@ -177,10 +180,16 @@ fn expected_help(name: &str) -> String {
                 "Usage: vendor update|upgrade ",
                 "Usage: vendor update|upgrade|bump|up|u ",
             ),
-        "uninstall" => reference.replace(
-            "Usage: vendor uninstall|remove ",
-            "Usage: vendor uninstall|remove|delete|del|rm ",
-        ),
+        // Names are required, so the help no longer offers to uninstall everything.
+        "uninstall" => reference
+            .replace(
+                "Usage: vendor uninstall|remove [options] [names...]",
+                "Usage: vendor uninstall|remove|delete|del|rm [options] <names...>",
+            )
+            .replace(
+                "Uninstall all/selected dependencies",
+                "Uninstall the named dependencies",
+            ),
         // `--refresh` is ours, and the summary mentions the registry the reference has no idea
         // about. `install` also takes any number of sources now, each carrying its own version
         // as `source@version`, so the usage line, the summary, the argument list and one example
