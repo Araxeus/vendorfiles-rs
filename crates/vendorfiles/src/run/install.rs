@@ -2,11 +2,11 @@
 
 use anyhow::{Result, bail};
 use vendorfiles_core::error::VendorError;
-use vendorfiles_core::model::{DefaultOptions, RawDependency};
+use vendorfiles_core::model::{DefaultOptions, HashVersionFile, RawDependency};
 use vendorfiles_core::template::{
     is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
 };
-use vendorfiles_core::{InstallOptions, Session, registry, ui};
+use vendorfiles_core::{FileEntry, InstallOptions, Session, Workspace, registry, ui};
 
 use crate::{known, source};
 
@@ -52,35 +52,13 @@ async fn resolve_source(
         && known.is_none()
         && !is_github_url(source)
         && !is_owner_repo_shorthand(source);
-    let mut unlisted = "is not in the program registry";
-    let listed = if bare_name {
-        match registry::load(refresh).await {
-            Ok(registry) => match registry.entry(source) {
-                Ok(entry) => {
-                    if entry.is_none() {
-                        suggest(&registry, source);
-                    }
-                    entry
-                }
-                Err(error) => {
-                    return Err(match instead(&registry, source) {
-                        Some(others) => anyhow::anyhow!("{error} - try {others} instead"),
-                        None => error.into(),
-                    });
-                }
-            },
-            Err(error) => {
-                ui::warning(error);
-                unlisted = "could not be looked up in the program registry";
-                None
-            }
-        }
+    let (listed, unlisted) = if bare_name {
+        look_up_registry(source, refresh).await?
     } else {
-        None
+        (None, NOT_LISTED)
     };
 
     let mut searched = None;
-
     let (lookup, stored) = if let Some(known) = known.as_ref() {
         (known.repository.to_owned(), known.repository.to_owned())
     } else if let Some(listed) = listed.as_ref() {
@@ -93,25 +71,7 @@ async fn resolve_source(
             format!("https://github.com/{source}"),
         )
     } else {
-        // The search is the last resort, so its miss also says the registry missed first.
-        let found = session
-            .github
-            .find_repo_url(source)
-            .await
-            .map_err(|error| match error {
-                VendorError::NoSearchResults(_) => VendorError::NotFoundAnywhere {
-                    typed: source.to_owned(),
-                    why: unlisted,
-                },
-                VendorError::NoSearchResultsDidYouMean { suggestion, .. } => {
-                    VendorError::NotFoundAnywhereDidYouMean {
-                        typed: source.to_owned(),
-                        why: unlisted,
-                        suggestion,
-                    }
-                }
-                other => other,
-            })?;
+        let found = search_github(session, source, unlisted).await?;
         searched = Some(unlisted);
         (found.clone(), found)
     };
@@ -123,6 +83,63 @@ async fn resolve_source(
         listed,
         searched,
     })
+}
+
+/// Why a bare name fell through to the GitHub search.
+const NOT_LISTED: &str = "is not in the program registry";
+const REGISTRY_UNREACHABLE: &str = "could not be looked up in the program registry";
+
+/// Looks `source` up in the hosted registry.
+///
+/// Returns the entry, if any, and the reason to give if the search after it also misses.
+async fn look_up_registry(
+    source: &str,
+    refresh: bool,
+) -> Result<(Option<registry::Entry>, &'static str)> {
+    let registry = match registry::load(refresh).await {
+        Ok(registry) => registry,
+        Err(error) => {
+            ui::warning(error);
+            return Ok((None, REGISTRY_UNREACHABLE));
+        }
+    };
+    match registry.entry(source) {
+        Ok(entry) => {
+            if entry.is_none() {
+                suggest(&registry, source);
+            }
+            Ok((entry, NOT_LISTED))
+        }
+        Err(error) => Err(match instead(&registry, source) {
+            Some(others) => anyhow::anyhow!("{error} - try {others} instead"),
+            None => error.into(),
+        }),
+    }
+}
+
+/// Searches GitHub for `source`, the last resort for a bare name.
+///
+/// A miss also says why the registry missed first.
+async fn search_github(session: &Session, source: &str, unlisted: &'static str) -> Result<String> {
+    let found = session
+        .github
+        .find_repo_url(source)
+        .await
+        .map_err(|error| match error {
+            VendorError::NoSearchResults(_) => VendorError::NotFoundAnywhere {
+                typed: source.to_owned(),
+                why: unlisted,
+            },
+            VendorError::NoSearchResultsDidYouMean { suggestion, .. } => {
+                VendorError::NotFoundAnywhereDidYouMean {
+                    typed: source.to_owned(),
+                    why: unlisted,
+                    suggestion,
+                }
+            }
+            other => other,
+        })?;
+    Ok(found)
 }
 
 /// Names registry programs close to `typed`, which the registry does not know.
@@ -254,43 +271,12 @@ async fn install(
         },
     };
 
-    // Files may be inherited from an entry under this name, or from any entry pointing at the
-    // same repository - the reference looks in both places.
-    let under_this_name = session.workspace.dependencies.get(&name).cloned();
-    // Which *other* entry it would be borrowed from, when there is nothing under this name. Worth
-    // knowing separately: inheriting from an entry the user did not name is the surprising half.
-    let neighbour = if under_this_name.is_some() {
-        None
-    } else {
-        session
-            .workspace
-            .dependencies
-            .iter()
-            .find(|(_, dependency)| dependency.repository.as_deref() == Some(lookup.as_str()))
-            .map(|(key, dependency)| (key.clone(), dependency.clone()))
-    };
-    let inherited = neighbour
-        .as_ref()
-        .map(|(_, dependency)| Inherited::from_neighbour(dependency, files.is_some()));
-    let existing = under_this_name
-        .or_else(|| neighbour.as_ref().map(|(_, dependency)| dependency.clone()))
-        .unwrap_or_default();
+    let Base {
+        existing,
+        neighbour,
+    } = Base::find(&session.workspace, &name, &lookup, files.is_some());
 
-    let files = match files {
-        Some(files) => Some(
-            files
-                .into_iter()
-                .map(vendorfiles_core::FileEntry::Simple)
-                .collect(),
-        ),
-        // An entry already in the config describes itself; otherwise a known name or the
-        // registry does.
-        None => existing
-            .files
-            .clone()
-            .or_else(|| known.as_ref().map(|known| known.files.clone()))
-            .or_else(|| listed.as_ref().map(|listed| listed.files.clone())),
-    };
+    let files = chosen_files(files, &existing, known.as_ref(), listed.as_ref());
     if files.as_ref().is_none_or(Vec::is_empty) {
         // A searched repository is a guess, so say how it was reached before asking for files.
         if let Some(why) = searched {
@@ -308,28 +294,14 @@ async fn install(
     // named is the surprising half of `install`, and the borrowed `version` is the sharp edge:
     // the new entry starts out claiming it, so when it already matches what gets installed the
     // entry is never written at all - which looks like nothing happening for no reason.
-    if let Some(((neighbour, _), inherited)) = neighbour.as_ref().zip(inherited)
-        && let Some(warning) = inherited.warning(neighbour, &name, &lookup)
+    if let Some((neighbour, inherited)) = neighbour
+        && let Some(warning) = inherited.warning(&neighbour, &name, &lookup)
     {
         ui::warning(warning);
     }
 
     let mut entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
-    // Where a known dependency belongs, unless the config already says.
-    if entry.vendor_folder.is_none()
-        && let Some(known) = known.as_ref()
-    {
-        entry.vendor_folder = known.folder.clone();
-    }
-    // What a registry entry knows about the repository that the config does not yet.
-    if let Some(listed) = listed.as_ref() {
-        if entry.release_regex.is_none() {
-            entry.release_regex = listed.release_regex.clone();
-        }
-        if entry.hash_version_file.is_none() && listed.hash_version_file == Some(true) {
-            entry.hash_version_file = Some(vendorfiles_core::model::HashVersionFile::Flag(true));
-        }
-    }
+    fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
     let dependency = entry.resolve(&name)?;
 
     if preview.dry_run {
@@ -347,6 +319,88 @@ async fn install(
         )
         .await?;
     Ok(())
+}
+
+/// The config entry a new install builds on.
+///
+/// Files may be inherited from an entry under this name, or from any entry pointing at the same
+/// repository - the reference looks in both places.
+struct Base {
+    /// The entry under this name, else the neighbour, else an empty entry.
+    existing: RawDependency,
+    /// The neighbour's name and what it hands over, when there is no entry under this name.
+    /// Inheriting from an entry the user did not name is the surprising half, so it is kept apart.
+    neighbour: Option<(String, Inherited)>,
+}
+
+impl Base {
+    fn find(workspace: &Workspace, name: &str, repository: &str, files_given: bool) -> Self {
+        if let Some(existing) = workspace.dependencies.get(name) {
+            return Self {
+                existing: existing.clone(),
+                neighbour: None,
+            };
+        }
+        let neighbour = workspace
+            .dependencies
+            .iter()
+            .find(|(_, dependency)| dependency.repository.as_deref() == Some(repository));
+        match neighbour {
+            Some((key, dependency)) => Self {
+                existing: dependency.clone(),
+                neighbour: Some((
+                    key.clone(),
+                    Inherited::from_neighbour(dependency, files_given),
+                )),
+            },
+            None => Self {
+                existing: RawDependency::default(),
+                neighbour: None,
+            },
+        }
+    }
+}
+
+/// The files the new entry lists, in precedence order.
+///
+/// `--files` wins. Otherwise an entry already in the config describes itself, and failing that a
+/// known name or the registry does.
+fn chosen_files(
+    given: Option<Vec<String>>,
+    existing: &RawDependency,
+    known: Option<&known::Known>,
+    listed: Option<&registry::Entry>,
+) -> Option<Vec<FileEntry>> {
+    if let Some(given) = given {
+        return Some(given.into_iter().map(FileEntry::Simple).collect());
+    }
+    existing
+        .files
+        .clone()
+        .or_else(|| known.map(|known| known.files.clone()))
+        .or_else(|| listed.map(|listed| listed.files.clone()))
+}
+
+/// Fills in what a known name or registry entry says and the config does not yet.
+fn fill_from_source(
+    entry: &mut RawDependency,
+    known: Option<&known::Known>,
+    listed: Option<&registry::Entry>,
+) {
+    // Where a known dependency belongs, unless the config already says.
+    if entry.vendor_folder.is_none()
+        && let Some(known) = known
+    {
+        entry.vendor_folder.clone_from(&known.folder);
+    }
+    if let Some(listed) = listed {
+        if entry.release_regex.is_none() {
+            entry.release_regex.clone_from(&listed.release_regex);
+        }
+        if entry.hash_version_file.is_none() && listed.hash_version_file == Some(true) {
+            entry.hash_version_file = Some(HashVersionFile::Flag(true));
+        }
+    }
 }
 
 /// What a new entry takes from a *neighbour* - an entry under a different name that already
