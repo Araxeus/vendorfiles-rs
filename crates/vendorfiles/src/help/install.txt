@@ -1,4 +1,4 @@
-Usage: vendor install|add [options] <url/name...>
+Usage: vendor install|add|i|a [options] <url/name...>
 
 Install dependencies. Each source can be a GitHub repo URL or owner/repo format
 or name of repo to search for, and may pin a version as source@version.

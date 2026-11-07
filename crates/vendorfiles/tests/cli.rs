@@ -74,6 +74,34 @@ fn fixture(name: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// Width of the root help's first column, wide enough for `update`'s alias list.
+const ROOT_HELP_COLUMN: usize = 49;
+
+/// Re-aligns every two-column help line so its description starts at `column`.
+///
+/// A row's name and description are separated by the first run of two or more spaces after the
+/// indent.
+fn repad_columns(text: &str, column: usize) -> String {
+    text.lines()
+        .map(|line| {
+            let Some(body) = line.strip_prefix("  ") else {
+                return line.to_owned();
+            };
+            match body.split_once("  ") {
+                Some((name, description)) => {
+                    format!(
+                        "{:<column$}{}",
+                        format!("  {name}"),
+                        description.trim_start()
+                    )
+                }
+                None => line.to_owned(),
+            }
+        })
+        .map(|line| line + "\n")
+        .collect()
+}
+
 /// The reference help, plus every place our help deliberately differs from it.
 ///
 /// The fixtures stay exactly as captured from `vendorfiles@1.4.2`, so both facts stay checkable:
@@ -81,12 +109,14 @@ fn fixture(name: &str) -> String {
 /// all recorded in `docs/DESIGN.md` §6 - `-p` means `--plain` everywhere, so `--pr` gave up its
 /// short form; `install` takes any number of sources, with the version moved out of its second
 /// operand into `source@version`; and `list`, `config` and `logout` are commands the reference
-/// never had, so the root help gains lines with nothing to compare against.
+/// never had, so the root help gains lines with nothing to compare against. Usage lines also
+/// list every alias, which widens the root help's first column.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
         // The config value is required here, so it is `<…>` rather than the reference's `[…]`.
-        "root" => reference
+        "root" => repad_columns(
+            &reference
             .replace(
                 "  -c, --config [file/folder path]",
                 "  -c, --config <file/folder path>",
@@ -131,8 +161,26 @@ fn expected_help(name: &str) -> String {
                         "  -p, --plain", "Print plain lines instead of a live display"
                     )
                 ),
+            )
+            .replace("  update|upgrade ", "  update|upgrade|bump|up|u ")
+            .replace("  install|add ", "  install|add|i|a ")
+            .replace("  uninstall|remove ", "  uninstall|remove|delete|del|rm ")
+            .replace(
+                "Login to GitHub\n",
+                "Login to GitHub, or check it with auth status\n",
             ),
-        "update" => reference.replace("  -p|--pr     ", &format!("{:<14}", "  --pr")),
+            ROOT_HELP_COLUMN,
+        ),
+        "update" => reference
+            .replace("  -p|--pr     ", &format!("{:<14}", "  --pr"))
+            .replace(
+                "Usage: vendor update|upgrade ",
+                "Usage: vendor update|upgrade|bump|up|u ",
+            ),
+        "uninstall" => reference.replace(
+            "Usage: vendor uninstall|remove ",
+            "Usage: vendor uninstall|remove|delete|del|rm ",
+        ),
         // `--refresh` is ours, and the summary mentions the registry the reference has no idea
         // about. `install` also takes any number of sources now, each carrying its own version
         // as `source@version`, so the usage line, the summary, the argument list and one example
@@ -140,7 +188,7 @@ fn expected_help(name: &str) -> String {
         "install" => reference
             .replace(
                 "Usage: vendor install|add [options] <url/name> [version]",
-                "Usage: vendor install|add [options] <url/name...>",
+                "Usage: vendor install|add|i|a [options] <url/name...>",
             )
             .replace(
                 "Install a dependency. origin can be a GitHub repo URL or owner/repo format or

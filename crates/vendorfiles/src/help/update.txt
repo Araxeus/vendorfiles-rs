@@ -1,4 +1,4 @@
-Usage: vendor update|upgrade [options] [names...]
+Usage: vendor update|upgrade|bump|up|u [options] [names...]
 
 Update all/selected dependencies to their latest version (the tag of the latest
 release)
