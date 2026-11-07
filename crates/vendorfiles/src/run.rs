@@ -236,20 +236,33 @@ async fn search(query: &str, refresh: bool) -> Result<()> {
             .max()
             .unwrap_or(0)
     });
-    let line = |cells: [&str; 3]| {
+
+    // The name pads by hand, since its link escapes would count toward a `{:<width$}`.
+    let line = |name: &str, url: Option<&str>, cells: [&str; 2]| {
+        let padding = " ".repeat(widths[0] - name.chars().count());
+        let name = url.map_or_else(|| name.to_owned(), |url| ui::link(name, url));
         format!(
-            "{:<name$}  {:<aliases$}  {}",
+            "{name}{padding}  {:<aliases$}  {}",
             cells[0],
             cells[1],
-            cells[2],
-            name = widths[0],
             aliases = widths[1]
         )
     };
 
-    vendorfiles_core::progress::print_out(&ui::cyan(&line(HEADERS)));
-    for row in &rows {
-        vendorfiles_core::progress::print_out(&line([&row[0], &row[1], &row[2]]));
+    vendorfiles_core::progress::print_out(&ui::cyan(&line(
+        HEADERS[0],
+        None,
+        [HEADERS[1], HEADERS[2]],
+    )));
+    let rule = ui::rule();
+    vendorfiles_core::progress::print_out(&rule);
+    for (row, (_, program)) in rows.iter().zip(&found) {
+        vendorfiles_core::progress::print_out(&line(
+            &row[0],
+            Some(&program.repository),
+            [&row[1], &row[2]],
+        ));
+        vendorfiles_core::progress::print_out(&rule);
     }
     Ok(())
 }

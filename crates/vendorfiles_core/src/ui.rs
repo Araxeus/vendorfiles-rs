@@ -39,6 +39,23 @@ color_fn!(/// Wraps `message` in yellow.
     yellow, "33");
 color_fn!(/// Wraps `message` in cyan.
     cyan, "36");
+color_fn!(/// Dims `message`.
+    dim, "2");
+
+/// Makes `text` a clickable link to `url` in terminals that support OSC 8.
+///
+/// Other terminals ignore the sequence and show `text` alone.
+#[must_use]
+pub fn link(text: &str, url: &str) -> String {
+    format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+}
+
+/// A dim horizontal line as wide as the terminal, or 80 columns when there is none.
+#[must_use]
+pub fn rule() -> String {
+    let width = ratatui::crossterm::terminal::size().map_or(80, |(columns, _)| columns);
+    dim(&"─".repeat(usize::from(width)))
+}
 
 /// Prints `WARNING: {message}` in yellow to stderr, unless `--pr` mode is active.
 pub fn warning(message: impl Display) {
