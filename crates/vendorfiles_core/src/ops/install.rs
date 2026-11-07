@@ -79,6 +79,7 @@ impl Session {
     /// Returns whichever [`VendorError`](crate::VendorError) the version lookup, the downloads,
     /// the archive extraction or the config/lockfile write produced.
     pub async fn install(&mut self, dependency: Dependency, options: InstallOptions) -> OpResult {
+        self.progress.begin(1);
         let progress = Arc::new(self.progress.dependency(&dependency.name));
         progress.status("resolving version");
         let version = match self.decide_version(&dependency, &options).await {
@@ -96,6 +97,11 @@ impl Session {
         let prepared = self
             .prepare(dependency, options, version, Arc::clone(&progress))
             .await;
+        self.progress.summary("installing");
+
+        // An install that is already up to date gets no worker row, as in `sync`.
+        self.progress.reserve_rows(usize::from(prepared.has_work()));
+
         // The two stages below report their own failures, so there is nothing to add here.
         let outcome = match clear_previous(&prepared).await {
             Ok(()) => download(Arc::clone(&self.github), prepared).await,
