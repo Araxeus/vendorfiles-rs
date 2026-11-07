@@ -14,7 +14,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 - Download files directly from any GitHub repo
 - Grab release assets, including extracting members from zip/tar/tar.gz/crx archives
 - Track versions via releases or commit hashes
-- Configure with TOML, YAML, JSON, or `package.json`
+- Configure with TOML, YAML, JSON, or `package.json` (JSON5 is supported)
 - Parallel, streaming downloads on a Tokio runtime
 - Single static binary, no Node runtime
 
@@ -214,8 +214,8 @@ vendor add vendorfiles rg fd
 ## Configuration
 
 Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, `vendor.yaml`,
-`vendor.json`, `package.json`. Only the current directory is searched - there is no upward
-walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
+`vendor.json`, `vendor.json5`, `package.json`. Only the current directory is searched - there is
+no upward walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
 
 If nothing is found, `DEFAULT_VENDOR_CONFIG` is tried last - set it to a folder or config file
 to give every directory a fallback config. Paths inside it stay relative to *it*, so its

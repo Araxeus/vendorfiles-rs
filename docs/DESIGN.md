@@ -122,20 +122,28 @@ TS module-level singleton.
 
 ### 3.3 Config document (write-back)
 
-Write-back must preserve keys the tool does not model (`package.json` has dozens).
-`ConfigDocument` therefore keeps the *whole* parsed document, not a projection:
+Write-back must preserve keys the tool does not model (`package.json` has dozens), and the
+comments and layout around them. `ConfigDocument` therefore edits the file through a lossless
+syntax tree in each format:
 
 ```rust
 pub enum ConfigDocument {
-    /// JSON and YAML: structural round-trip through an order-preserving JSON value.
-    Structural(serde_json::Value),
-    /// TOML: `toml_edit` document - preserves comments and layout.
+    /// JSON5 source, edited through `jsonc-parser`'s CST.
+    Json(String),
+    /// YAML source, edited through `yaml-edit`.
+    Yaml(String),
+    /// TOML: `toml_edit` document.
     Toml(Box<toml_edit::DocumentMut>),
 }
 ```
 
+JSON and YAML hold text and build their tree per edit. Both trees are `Rc`-based, so holding text
+keeps `Workspace` `Send` and its `clone` a real copy. New YAML entries are written by
+`yaml_emit` in the reference style; `yaml-edit` always indents an inserted block two columns past
+its key, so the entry is emitted in two-space steps and widened to the file's step afterwards.
+
 Mutation surface is deliberately tiny (three operations), which is what makes keeping the
-two representations honest tractable:
+three representations honest tractable:
 
 * `set_dependency_version(name, version)`
 * `upsert_dependency(name, &VendorDependency)`
@@ -463,8 +471,10 @@ code and the complete resulting file tree (including binary payloads). Covered:
    macOS Keychain / Secret Service) instead of the TS tool's hostname-derived AES-CBC blob.
    Same service/user (`vendorfiles-cli` / `github_token`); a value that cannot be a GitHub
    token is treated as absent so a TS-era entry degrades to "not logged in" rather than 401.
-4. **TOML comments survive** a version bump (`toml_edit`); the TS tool drops them. Removing a
-   dependency collapses the trailing blank lines that would otherwise accumulate.
+4. **Comments and layout survive** write-back in every format; the TS tool re-serializes the
+   whole file and drops them. Every JSON config is read as JSON5, and `vendor.json5` is
+   discovered after `vendor.json`. Removing a dependency collapses the trailing blank lines
+   that would otherwise accumulate.
 5. **Failures the TS tool never handled** - a nonexistent tag, for instance - print the message
    the source already had for them and exit 1, instead of dumping an unhandled Octokit
    rejection and exiting 127.

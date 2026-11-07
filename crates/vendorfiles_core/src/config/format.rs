@@ -1,4 +1,4 @@
-//! Config file formats: detection, parsing into a canonical value, and rendering.
+//! Config file formats: detection, parsing into a canonical value, and indent detection.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -6,7 +6,8 @@ use std::path::Path;
 use crate::error::{Result, VendorError};
 
 /// The three interchangeable config encodings. `.yaml` and `.yml` share one variant, matching
-/// the reference's `format` field.
+/// the reference's `format` field. `.json` and `.json5` share `Json`, because every JSON config
+/// is read as JSON5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigFormat {
     Toml,
@@ -42,7 +43,9 @@ impl ConfigFormat {
         match self {
             Self::Toml => toml_edit::de::from_str(text).map_err(|e| fail(&e)),
             Self::Yml => serde_yaml_ng::from_str(text).map_err(|e| fail(&e)),
-            Self::Json => serde_json::from_str(text).map_err(|e| fail(&e)),
+            Self::Json => {
+                jsonc_parser::parse_to_serde_value(text, &json5_options()).map_err(|e| fail(&e))
+            }
         }
     }
 }
@@ -145,33 +148,10 @@ fn indents_map(text: &str, ignore_single_spaces: bool) -> Option<Indent> {
     Some(Indent(if is_space { " " } else { "\t" }.repeat(amount)))
 }
 
-/// Serialises a canonical value as JSON with the given indent, like `JSON.stringify`.
-///
-/// # Errors
-///
-/// Returns [`VendorError::SerializeConfig`] if the value cannot be encoded as JSON.
-pub fn to_json_string(value: &serde_json::Value, indent: &Indent) -> Result<String> {
-    let mut buf = Vec::new();
-    let formatter = serde_json::ser::PrettyFormatter::with_indent(indent.as_str().as_bytes());
-    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-    serde::Serialize::serialize(value, &mut ser).map_err(|e| VendorError::SerializeConfig {
-        path: "config".to_owned(),
-        message: e.to_string(),
-    })?;
-    String::from_utf8(buf).map_err(|e| VendorError::SerializeConfig {
-        path: "config".to_owned(),
-        message: e.to_string(),
-    })
-}
-
-/// Serialises a canonical value as YAML, in the reference emitter's block style.
-///
-/// # Errors
-///
-/// Infallible in practice; the `Result` mirrors [`to_json_string`] so callers can treat both
-/// emitters alike.
-pub fn to_yaml_string(value: &serde_json::Value, indent: &Indent) -> Result<String> {
-    Ok(crate::config::yaml_emit::to_string(value, indent.width()))
+/// Parser options for JSON configs. The defaults accept all of JSON5.
+#[must_use]
+pub fn json5_options() -> jsonc_parser::ParseOptions {
+    jsonc_parser::ParseOptions::default()
 }
 
 /// The document's trailing newline, so it can be restored verbatim on write.
@@ -188,7 +168,7 @@ pub fn final_newline(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigFormat, Indent, final_newline, to_json_string};
+    use super::{ConfigFormat, Indent, final_newline};
     use std::path::Path;
 
     #[test]
@@ -210,6 +190,10 @@ mod tests {
             ConfigFormat::Json
         );
         assert_eq!(
+            ConfigFormat::from_path(Path::new("a/vendor.json5")),
+            ConfigFormat::Json
+        );
+        assert_eq!(
             ConfigFormat::from_path(Path::new("a/package.json")),
             ConfigFormat::Json
         );
@@ -225,15 +209,6 @@ mod tests {
         );
         // No indentation at all falls back to two spaces.
         assert_eq!(Indent::detect("{}").as_str(), "  ");
-    }
-
-    #[test]
-    fn json_rendering_honours_the_detected_indent() {
-        let value: serde_json::Value = serde_json::from_str(r#"{"a":{"b":1}}"#).unwrap();
-        assert_eq!(
-            to_json_string(&value, &Indent::detect("{\n\t\"x\": 1\n}")).unwrap(),
-            "{\n\t\"a\": {\n\t\t\"b\": 1\n\t}\n}"
-        );
     }
 
     #[test]
@@ -260,5 +235,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(yaml["vendorConfig"]["vendorFolder"], "./v");
+    }
+
+    #[test]
+    fn json_is_read_as_json5() {
+        let value = ConfigFormat::Json
+            .parse(
+                "// note
+{vendorConfig: {vendorFolder: './v',}, /* c */ n: 0x10,}",
+                Path::new("vendor.json"),
+            )
+            .unwrap();
+        assert_eq!(value["vendorConfig"]["vendorFolder"], "./v");
+        assert_eq!(value["n"], 16);
+    }
+
+    #[test]
+    fn json_keeps_key_order() {
+        let value = ConfigFormat::Json
+            .parse(r#"{"b": 1, "a": 2}"#, Path::new("vendor.json"))
+            .unwrap();
+        let keys: Vec<_> = value.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["b", "a"]);
     }
 }

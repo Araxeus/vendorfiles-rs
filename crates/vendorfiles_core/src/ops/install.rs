@@ -275,7 +275,7 @@ impl Session {
             self.workspace
                 .file
                 .document
-                .set_dependency_version(&name, new_version);
+                .set_dependency_version(&name, new_version)?;
         } else {
             let mut entry = RawDependency {
                 version: Some(new_version.to_owned()),
