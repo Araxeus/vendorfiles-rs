@@ -633,7 +633,7 @@ impl GitHubClient {
             // unlike the `octocrab` one it can say how much was left and when it comes back.
             // Returning here also leaves the body unread, which is the point - reading it would
             // consume the response for a message nothing goes on to use.
-            if let Some(detail) = rate_limit_detail(&response) {
+            if let Some(detail) = rate_limit_detail(status, response.headers(), now()) {
                 return Err(VendorError::RateLimited(detail));
             }
             let message = error_message(response).await;
@@ -758,10 +758,16 @@ async fn error_message(mut response: reqwest::Response) -> String {
         let room = MAX_ERROR_BODY - body.len();
         body.extend_from_slice(&chunk[..chunk.len().min(room)]);
     }
+    // A body cut off at the cap will not parse, which lands on the same empty string as any
+    // other unusable one.
+    message_from(&body)
+}
+
+/// The `message` of a GitHub refusal body, as one short line, or an empty string.
+fn message_from(body: &[u8]) -> String {
     // Parsed from the bytes rather than through `Response::json`, which reqwest is built without -
-    // the same reason `fetch_quota` does it by hand. A body cut off at the cap will not parse,
-    // which lands on the same empty string as any other unusable one.
-    serde_json::from_slice::<serde_json::Value>(&body)
+    // the same reason `fetch_quota` does it by hand.
+    serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .as_ref()
         .and_then(|body| body.get("message"))
@@ -774,23 +780,31 @@ async fn error_message(mut response: reqwest::Response) -> String {
 ///
 /// The headers are what decide it: an exhausted limit answers with `x-ratelimit-remaining: 0`,
 /// and a `403` without that is some other refusal entirely - a bad token, most likely.
-fn rate_limit_detail(response: &reqwest::Response) -> Option<String> {
+fn rate_limit_detail(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    now: u64,
+) -> Option<String> {
     // The status alone is checked here rather than through `is_rate_limited`: that one has to
     // read the body's wording because it is all the `octocrab` route gets, whereas the header
     // below is a stronger test than any message.
-    if !matches!(response.status().as_u16(), 403 | 429) {
+    if !matches!(status, 403 | 429) {
         return None;
     }
-    let number =
-        |name: &str| -> Option<u64> { response.headers().get(name)?.to_str().ok()?.parse().ok() };
+    let number = |name: &str| header_number(headers, name);
     if number("x-ratelimit-remaining")? > 0 {
         return None;
     }
     Some(format!(
         " - 0 of {} left, {}",
         number("x-ratelimit-limit")?,
-        resets_in(number("x-ratelimit-reset")?, now())
+        resets_in(number("x-ratelimit-reset")?, now)
     ))
+}
+
+/// A numeric response header, such as `x-ratelimit-remaining`.
+fn header_number(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
+    headers.get(name)?.to_str().ok()?.parse().ok()
 }
 
 /// Percent-encodes a path, keeping `/` separators intact.

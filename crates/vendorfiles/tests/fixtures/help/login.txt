@@ -3,7 +3,7 @@ Usage: vendor login|auth [options] [token]
 Login to GitHub to increase rate limit
 
 Arguments:
-  token       GitHub token (leave empty to login via browser)
+  token       GitHub token (leave empty to login via browser), or "status" to check the current login
 
 Options:
   -h, --help  display help for command
@@ -11,4 +11,5 @@ Options:
 Examples:
     vendor login
     vendor auth <token>
+    vendor auth status
 

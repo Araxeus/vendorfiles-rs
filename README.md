@@ -911,6 +911,7 @@ the same output a redirected stdout gets. It works on either side of the subcomm
 | `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |
 | `vendor config edit [editor]` | Open the config file. Naming an editor here runs that one and reports it if it fails; with no name, `$EDITOR` is tried and then whatever the OS associates with the file. |
 | `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
+| `vendor auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. Also spelled `vendor login status`. |
 | `vendor logout` | Delete the stored token. The npm CLI's own keyring entry is left alone. |
 | `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
@@ -933,6 +934,7 @@ vendor config
 vendor config edit
 vendor cfg edit "code --wait"
 vendor login
+vendor auth status
 ```
 
 Every failure exits with code `1`; success exits `0`.
@@ -1193,6 +1195,18 @@ SUCCESS: Logged in successfully
 `GITHUB_TOKEN` in the environment, or a token the npm CLI left in its own keyring entry - that
 entry is not this tool's to delete.
 
+`vendor auth status` shows which of those a run would use and asks GitHub whether it still
+works. It names the account, the requests left this hour and, for a token that has one, the
+expiry date:
+
+```text
+$ vendor auth status
+SUCCESS: Logged in to GitHub as octocat with the token from the credential store
+INFO: 4990 of 5000 API requests left this hour (resets in 42 min)
+```
+
+It exits `1` when there is no token or GitHub rejects it, so CI can run it as a preflight check.
+
 Native stores are compiled in per platform - there is no cross-platform facade, and no system
 library to install:
 
@@ -1221,7 +1235,7 @@ Two ways to get persistence if you see that: run a Secret Service daemon (instal
 [this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
 your shell profile or CI secrets.
 
-`login` and `logout` need no config file - they work from any directory.
+`login`, `logout` and `auth status` need no config file - they work from any directory.
 
 ## Lockfile
 
