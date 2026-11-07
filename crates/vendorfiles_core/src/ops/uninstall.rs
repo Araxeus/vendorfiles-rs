@@ -101,7 +101,7 @@ impl Session {
             }
         }
         self.workspace.dependencies.shift_remove(name);
-        self.workspace.file.document.remove_dependency(name);
+        self.workspace.file.document.remove_dependency(name)?;
         self.workspace.file.write().await?;
 
         progress.uninstalled();

@@ -18,6 +18,7 @@ fancy-regex.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
 indexmap.workspace = true
+jsonc-parser.workspace = true
 keyring-core.workspace = true
 lzma-rust2.workspace = true
 octocrab.workspace = true
@@ -36,6 +37,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
+yaml-edit.workspace = true
 zip.workspace = true
 
 # One native credential store per platform. `keyring_core::set_default_store` is told which one

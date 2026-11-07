@@ -17,20 +17,20 @@ pub use document::ConfigDocument;
 pub use format::{ConfigFormat, Indent};
 
 /// The file names searched for, in priority order.
-pub const CONFIG_FILE_NAMES: [&str; 5] = [
+pub const CONFIG_FILE_NAMES: [&str; 6] = [
     "vendor.toml",
     "vendor.yml",
     "vendor.yaml",
     "vendor.json",
+    "vendor.json5",
     "package.json",
 ];
 
-/// Everything needed to write the config back exactly as it was formatted.
+/// Where the config lives, what it is written in, and how its text ends.
 #[derive(Debug, Clone)]
 pub struct ConfigFileSettings {
     pub format: ConfigFormat,
     pub path: PathBuf,
-    pub indent: Indent,
     pub final_newline: String,
 }
 
@@ -46,12 +46,9 @@ impl ConfigFile {
     ///
     /// # Errors
     ///
-    /// Returns [`VendorError::SerializeConfig`] if the document cannot be encoded, or
-    /// [`VendorError::WriteFile`] if it cannot be written.
+    /// Returns [`VendorError::WriteFile`] if the file cannot be written.
     pub async fn write(&self) -> Result<()> {
-        let body = self
-            .document
-            .render(self.settings.format, &self.settings.indent)?;
+        let body = self.document.render();
         let data = format!("{body}{}", self.settings.final_newline);
         tokio::fs::write(&self.settings.path, data)
             .await
@@ -113,7 +110,6 @@ impl Workspace {
                 settings: ConfigFileSettings {
                     format,
                     path,
-                    indent: Indent::detect(&text),
                     final_newline: format::final_newline(&text),
                 },
                 document,
