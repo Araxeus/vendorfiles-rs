@@ -163,9 +163,15 @@ impl Reporter {
     ///
     /// The region starts with no worker rows: how many are wanted is not known until staleness
     /// has been checked, and a project already up to date should not be shown a column of blanks.
+    ///
+    /// Each run starts from a clean state, so a session that runs several installs in turn counts
+    /// and times each one on its own.
     pub fn begin(&self, total: usize) {
         if let Ok(mut state) = self.state.lock() {
-            state.total = total;
+            *state = RunState {
+                total,
+                ..RunState::default()
+            };
         }
         if !self.animated() || total == 0 {
             return;
