@@ -114,66 +114,7 @@ fn repad_columns(text: &str, column: usize) -> String {
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
-        // The config value is required here, so it is `<…>` rather than the reference's `[…]`.
-        "root" => repad_columns(
-            &reference
-            .replace(
-                "  -c, --config [file/folder path]",
-                "  -c, --config <file/folder path>",
-            )
-            .replace(
-                "  install|add [options] <url/name> [version]  Install a dependency",
-                &format!(
-                    "{:<46}{}
-{:<46}{}",
-                    "  install|add [options] <url/name...>",
-                    "Install dependencies",
-                    "  search|find [options] [terms...]",
-                    "Find programs to install by name"
-                ),
-            )
-            .replace(
-                "  help [command]                              display help for command",
-                "  logout                                      Log out of GitHub\n  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
-            )
-            // `list` and `config` have no counterpart in the reference at all - nor does
-            // `logout`, inserted alongside `completions` above.
-            .replace(
-                "  login|auth [token]",
-                &format!(
-                    "{}\n{}\n  login|auth [token]",
-                    format_args!(
-                        "{:<46}{}",
-                        "  list|ls", "List dependencies in the config file"
-                    ),
-                    format_args!(
-                        "{:<46}{}",
-                        "  config|cfg [command]", "Show or edit the config file"
-                    )
-                ),
-            )
-            .replace(
-                "  -v, --version",
-                &format!(
-                    "{}\n  -v, --version",
-                    format_args!(
-                        "{:<46}{}",
-                        "  -p, --plain", "Print plain lines instead of a live display"
-                    )
-                ),
-            )
-            .replace("  update|upgrade ", "  update|upgrade|bump|up|u ")
-            .replace("  install|add ", "  install|add|i|a ")
-            .replace(
-                "  uninstall|remove [names...]",
-                "  uninstall|remove|delete|del|rm <names...>",
-            )
-            .replace(
-                "Login to GitHub\n",
-                "Login to GitHub, or check it with auth status\n",
-            ),
-            ROOT_HELP_COLUMN,
-        ),
+        "root" => expected_root_help(&reference),
         "update" => reference
             .replace("  -p|--pr     ", &format!("{:<14}", "  --pr"))
             .replace(
@@ -190,56 +131,127 @@ fn expected_help(name: &str) -> String {
                 "Uninstall all/selected dependencies",
                 "Uninstall the named dependencies",
             ),
-        // `--refresh` is ours, and the summary mentions the registry the reference has no idea
-        // about. `install` also takes any number of sources now, each carrying its own version
-        // as `source@version`, so the usage line, the summary, the argument list and one example
-        // all depart from the reference.
-        "install" => reference
-            .replace(
-                "Usage: vendor install|add [options] <url/name> [version]",
-                "Usage: vendor install|add|i|a [options] <url/name...>",
-            )
-            .replace(
-                "Install a dependency. origin can be a GitHub repo URL or owner/repo format or
+        "install" => expected_install_help(&reference),
+        _ => reference,
+    }
+}
+
+/// The root help's deltas from the reference.
+///
+/// The config value is required here, so it is `<…>` rather than the reference's `[…]`.
+fn expected_root_help(reference: &str) -> String {
+    repad_columns(
+        &reference
+        .replace(
+            "  -c, --config [file/folder path]",
+            "  -c, --config <file/folder path>",
+        )
+        .replace(
+            "  install|add [options] <url/name> [version]  Install a dependency",
+            &format!(
+                "{:<46}{}
+{:<46}{}",
+                "  install|add [options] <url/name...>",
+                "Install dependencies",
+                "  search|find [options] [terms...]",
+                "Find programs to install by name"
+            ),
+        )
+        .replace(
+            "  help [command]                              display help for command",
+            "  logout                                      Log out of GitHub\n  completions <shell>                         Print a shell completion script\n  help [command]                              display help for command",
+        )
+        // `list` and `config` have no counterpart in the reference at all - nor does
+        // `logout`, inserted alongside `completions` above.
+        .replace(
+            "  login|auth [token]",
+            &format!(
+                "{}\n{}\n  login|auth [token]",
+                format_args!(
+                    "{:<46}{}",
+                    "  list|ls", "List dependencies in the config file"
+                ),
+                format_args!(
+                    "{:<46}{}",
+                    "  config|cfg [command]", "Show or edit the config file"
+                )
+            ),
+        )
+        .replace(
+            "  -v, --version",
+            &format!(
+                "{}\n  -v, --version",
+                format_args!(
+                    "{:<46}{}",
+                    "  -p, --plain", "Print plain lines instead of a live display"
+                )
+            ),
+        )
+        .replace("  update|upgrade ", "  update|upgrade|bump|up|u ")
+        .replace("  install|add ", "  install|add|i|a ")
+        .replace(
+            "  uninstall|remove [names...]",
+            "  uninstall|remove|delete|del|rm <names...>",
+        )
+        .replace(
+            "Login to GitHub\n",
+            "Login to GitHub, or check it with auth status\n",
+        ),
+        ROOT_HELP_COLUMN,
+    )
+}
+
+/// The install help's deltas from the reference.
+///
+/// `--refresh` is ours, and the summary mentions the registry the reference has no idea
+/// about. `install` also takes any number of sources now, each carrying its own version
+/// as `source@version`, so the usage line, the summary, the argument list and one example
+/// all depart from the reference.
+fn expected_install_help(reference: &str) -> String {
+    reference
+        .replace(
+            "Usage: vendor install|add [options] <url/name> [version]",
+            "Usage: vendor install|add|i|a [options] <url/name...>",
+        )
+        .replace(
+            "Install a dependency. origin can be a GitHub repo URL or owner/repo format or
 name of repo to search for.",
-                "Install dependencies. Each source can be a GitHub repo URL or owner/repo format
+            "Install dependencies. Each source can be a GitHub repo URL or owner/repo format
 or name of repo to search for, and may pin a version as source@version.",
-            )
-            .replace(
-                "  url/name                GitHub repo URL or owner/repo format or name of repo
+        )
+        .replace(
+            "  url/name                GitHub repo URL or owner/repo format or name of repo
                           to search for
   version                 Version to install",
-                "  url/name                GitHub repo URL or owner/repo format or name of repo
+            "  url/name                GitHub repo URL or owner/repo format or name of repo
                           to search for, optionally as source@version",
-            )
-            .replace(
-                "  -h, --help              display help for command",
-                &format!(
-                    "{:<24}{}
+        )
+        .replace(
+            "  -h, --help              display help for command",
+            &format!(
+                "{:<24}{}
 {:<24}{}
 {:<24}{}
   -h, --help              display help for command",
-                    "  --refresh",
-                    "Re-check the program registry",
-                    "  --dry-run",
-                    "Print the entry, change nothing",
-                    "  --list",
-                    "List programs installable by name"
-                ),
-            )
-            .replace(
-                "Files have to be provided with -f or --files <files...>",
-                "A name in the program registry needs no files; otherwise provide them with -f or
+                "  --refresh",
+                "Re-check the program registry",
+                "  --dry-run",
+                "Print the entry, change nothing",
+                "  --list",
+                "List programs installable by name"
+            ),
+        )
+        .replace(
+            "Files have to be provided with -f or --files <files...>",
+            "A name in the program registry needs no files; otherwise provide them with -f or
 --files <files...>. vendor search lists the names it knows.",
-            )
-            .replace(
-                "    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE",
-                "    vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
+        )
+        .replace(
+            "    vendor add Araxeus/vendorfiles v1.0.0 -f README.md LICENSE",
+            "    vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
     vendor add rg fd
     vendor add --list",
-            ),
-        _ => reference,
-    }
+        )
 }
 
 // ---------------------------------------------------------------------------------------
