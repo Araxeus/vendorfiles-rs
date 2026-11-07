@@ -36,7 +36,7 @@ TypeScript/Bun tool, so you can drop this binary onto an existing project and ke
 - [Installing by name](#installing-by-name)
   - [Finding a program](#finding-a-program)
   - [Adding a program to the registry](#adding-a-program-to-the-registry)
-- [Keeping vendor updated](#keeping-vendor-updated)
+- [Keeping vendorfiles updated](#keeping-vendorfiles-updated)
 - [Authentication](#authentication)
 - [Lockfile](#lockfile)
 - [JSON Schema](#json-schema)
@@ -520,8 +520,9 @@ files = ['dist/coloris.min.js']
 
 ### GitHub Releases
 
-Download release assets with `{release}/` in the path. `{version}` expands to the semver core
-of the tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
+Download release assets with `{release}/` in the path.<br>
+`{version}` expands to the semver core
+of the git tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
 
 <!-- formats -->
 <details open>
@@ -637,20 +638,9 @@ files = [
 </details>
 <!-- /formats -->
 
-The container format is detected from the file's magic bytes, not its name: zip, tar, gzip, xz,
-tar.gz/tgz, tar.xz, and the zip-based `.crx`/`.xpi` extension packages.
-
-Only the members you name are unpacked - an asset that also ships another platform's binaries or
-a manual costs neither the disk to write them out nor, for a tar stream, the time to decompress
-past the last file you asked for.
-
-For a `.zip` bigger than a few megabytes, the members are read straight out of the asset over
-HTTP range requests: the archive's index lives at its end, so two requests are usually enough and
-the rest of the asset is never transferred. Pulling two small files out of a 13 MB release zip
-moves about 320 KB. Any reason that cannot work - storage that will not serve ranges, a member
-the index does not hold - falls back to downloading the asset, so it is only ever faster or the
-same. `.tar.gz` cannot be read this way at all: tar has no index and gzip has no seekable entry
-point, so a member is only reachable by decompressing everything ahead of it.
+Supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`, detected from the
+file's contents rather than its name. Only the members you name are unpacked. For a large `.zip`,
+those members are fetched with HTTP range requests, so the rest of the archive is never downloaded.
 
 ### Filtering Releases
 
@@ -867,23 +857,44 @@ Commands:
   outdated|o                                  List outdated dependencies
   install|add [options] <url/name...>         Install dependencies
   search|find [options] [terms...]            Find programs to install by name
-  uninstall|remove [names...]                 Uninstall dependencies
+  uninstall|remove|rm [names...]              Uninstall dependencies
   list|ls                                     List dependencies in the config file
-  config|cfg [command]                        Show or edit the config file
+  config|cfg [editor]                         Show or edit the config file
   login|auth [token]                          Login to GitHub
   logout                                      Log out of GitHub
   completions <shell>                         Print a shell completion script
   help [command]                              display help for command
 ```
 
-Both root options are global, so they read naturally on either side of the subcommand:
-`vendor -c ./conf.json sync` and `vendor sync -c ./conf.json` are the same command. `-c` requires
-its value - naming the option is only ever a request for a specific config - so it can never claim
-a dependency name by accident. The location can also come from `VENDOR_CONFIG`; `-c` wins if both
-are set. `DEFAULT_VENDOR_CONFIG` is tried when the search finds nothing, unless `-c` was given.
+Root options work on either side of the subcommand. The config location can also come from
+`VENDOR_CONFIG`, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config is found.
 
-Completions are generated from the parser itself, so they always match the flags this build
-accepts - including anything added since the last release:
+| Command                        | What it does                                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `vendor sync\|s`                  | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date.                                  |
+| `vendor update\|upgrade [names...]`     | Install the latest version of each dependency.<br>`--pr` prints a Markdown summary.                                            |
+| `vendor outdated\|o`              | List dependencies with a newer version available.                                                                           |
+| `vendor install\|add\|i <url/name...>` | Add dependencies by URL, `owner/repo` or name, optionally `source@version`.<br>`-n`/`--name` sets the config key,<br>`-f`/`--files` lists the files. <br>`--dry-run` prints what it would add and changes nothing. <br>`--list` is an alias for`vendor search`. |
+| `vendor search\|find [terms...]`     | Find programs installable by name or description. Aliased `find`.                                                                                          |
+| `vendor uninstall\|remove\|rm <names...>`  | Delete a dependency's files and remove it from the config and lockfile.                                                                  |
+| `vendor list\|ls`                  | Print the config's dependencies. aliased as`vendor config list`                                                                                           |
+| `vendor config\|cfg [editor]`         | Print the config file path, or open it in an editor.                                                                        |
+| `vendor login\|auth [token]`         | Store a GitHub token, With no argument, runs the OAuth device flow.                                             |
+| `vendor auth\|login status`           | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it.                                                                              |
+| `vendor logout`                | Delete the stored token.                                                                                                    |
+| `vendor completions <shell>`   | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`.                                              |
+
+**Examples:**
+
+```bash
+vendor add rg fd
+vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
+vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
+vendor update
+vendor cfg edit "code --wait"
+```
+
+**Completions:**
 
 ```bash
 vendor completions bash > /etc/bash_completion.d/vendor
@@ -891,53 +902,6 @@ vendor completions zsh  > "${fpath[1]}/_vendor"
 vendor completions fish > ~/.config/fish/completions/vendor.fish
 vendor completions powershell >> $PROFILE
 ```
-
-The bash and zsh scripts also offer the [registry's](#finding-a-program) program names after
-`vendor add`, as they stood when the script was generated.
-
-`-p`/`--plain` turns the live display off and prints the plain `INFO:`/`SUCCESS:` lines instead -
-the same output a redirected stdout gets. It works on either side of the subcommand
-(`vendor -p sync`, `vendor sync --plain`).
-
-| Command | What it does |
-| --- | --- |
-| `vendor sync` | Download everything the config declares. `-f`/`--force` re-downloads even when the lockfile agrees. |
-| `vendor update [names...]` | Resolve each dependency's latest version and install it. `--pr` prints a Markdown bump summary instead of the usual logs (whole-project updates only). |
-| `vendor outdated` | List dependencies with a newer version available. |
-| `vendor install <url/name...>` | Add dependencies. Each source is a full URL, `owner/repo`, or a name to search for, optionally `source@version`. `-n`/`--name` sets the config key, `-f`/`--files` lists the files - one source only. `--dry-run` prints what it would add and changes nothing. `--list` lists the programs installable by name instead, like `vendor search`. |
-| `vendor search [terms...]` | List the programs installable by name, or those whose name, alias or description matches every term. Aliased `find`. |
-| `vendor uninstall <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
-| `vendor list` | Print the config's dependencies as a `name` / `version` / `repository` table, in config order. Aliased `ls`, and also spelled `vendor config list`. |
-| `vendor config` | Print the resolved config file path and nothing else, so `$EDITOR "$(vendor config)"` composes. Aliased `cfg`. It never parses the file, so it still answers for a config that no longer loads. |
-| `vendor config edit [editor]` | Open the config file. Naming an editor here runs that one and reports it if it fails; with no name, `$EDITOR` is tried and then whatever the OS associates with the file. |
-| `vendor login [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
-| `vendor auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. Also spelled `vendor login status`. |
-| `vendor logout` | Delete the stored token. The npm CLI's own keyring entry is left alone. |
-| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
-
-Examples:
-
-```bash
-vendor sync
-vendor sync -f
-vendor update
-vendor bump React
-vendor outdated
-vendor install React -n MyReact -f README.md
-vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
-vendor add rg fd
-vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
-vendor search disk
-vendor remove React youtube-music
-vendor list
-vendor config
-vendor config edit
-vendor cfg edit "code --wait"
-vendor login
-vendor auth status
-```
-
-Every failure exits with code `1`; success exits `0`.
 
 ## Installing by name
 
@@ -1032,55 +996,55 @@ asks whether you meant `ripgrep`.
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
-| [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
+| [actionlint](https://github.com/rhysd/actionlint) | | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
-| [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
-| [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
-| [biome](https://github.com/biomejs/biome) |  | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
+| [atuin](https://github.com/atuinsh/atuin) | | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
+| [bat](https://github.com/sharkdp/bat) | | cat clone and file viewer with syntax highlighting and a pager | All |
+| [biome](https://github.com/biomejs/biome) | | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI | All |
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | System monitor for processes, CPU, memory, disks and network, like htop | All |
-| [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
+| [btop](https://github.com/aristocratos/btop) | | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
 | [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Shell completion for hundreds of commands in bash, zsh, fish and more | All |
 | [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager and diff viewer for git, diff, grep and blame | Windows x64, macOS arm64, Linux |
-| [dust](https://github.com/bootandy/dust) |  | Disk usage viewer showing what takes up space, a more intuitive du | All |
-| [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
-| [edamame](https://github.com/mijowi/edamame) |  | Terminal text editor for Markdown that stays rendered while you edit | Windows x64, macOS, Linux |
+| [dust](https://github.com/bootandy/dust) | | Disk usage viewer showing what takes up space, a more intuitive du | All |
+| [dysk](https://github.com/Canop/dysk) | | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
+| [edamame](https://github.com/mijowi/edamame) | | Terminal text editor for Markdown that stays rendered while you edit | Windows x64, macOS, Linux |
 | [edit](https://github.com/microsoft/edit) | `msedit` | Microsoft's small terminal text editor, a modern MS-DOS Edit | Windows, macOS arm64, Linux |
-| [fastfetch](https://github.com/fastfetch-cli/fastfetch) |  | Neofetch-like tool that shows system information in the terminal | All |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | | Neofetch-like tool that shows system information in the terminal | All |
 | [fd](https://github.com/sharkdp/fd) | `fdfind`, `fd-find` | Fast, user-friendly alternative to find for locating files and folders | Windows, macOS arm64, Linux |
 | [file-pilot](https://github.com/Araxeus/fpilot-scraper) | `fpilot`, `filepilot` | Fast, lightweight file manager and Explorer replacement for Windows | Windows x64 |
-| [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
-| [fresh](https://github.com/sinelaw/fresh) |  | Fast, easy terminal text editor and IDE | All |
-| [fzf](https://github.com/junegunn/fzf) |  | Interactive command-line fuzzy finder for files, history and any list | All |
-| [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
+| [flow](https://github.com/neurocyte/flow) | | Flow Control, a programmer's text editor for the terminal | All |
+| [fresh](https://github.com/sinelaw/fresh) | | Fast, easy terminal text editor and IDE | All |
+| [fzf](https://github.com/junegunn/fzf) | | Interactive command-line fuzzy finder for files, history and any list | All |
+| [gdu](https://github.com/dundee/gdu) | | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub's official CLI for pull requests, issues, releases and repos | All |
-| [gum](https://github.com/charmbracelet/gum) |  | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
-| [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
+| [gum](https://github.com/charmbracelet/gum) | | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
+| [herdr](https://github.com/herdrdev/herdr) | | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
-| [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
-| [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
-| [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
-| [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git that handles staging, commits, branches and rebases | All |
+| [hyperfine](https://github.com/sharkdp/hyperfine) | | Command-line benchmarking tool that times and compares commands | All |
+| [jq](https://github.com/jqlang/jq) | | Command-line JSON processor for querying, filtering and transforming | All |
+| [just](https://github.com/casey/just) | | Command runner for project tasks and scripts, like make without builds | All |
+| [lazygit](https://github.com/jesseduffield/lazygit) | | Terminal UI for git that handles staging, commits, branches and rebases | All |
 | [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing files and navigating directories | All |
-| [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
+| [micro](https://github.com/zyedidia/micro) | | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
-| [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [ov](https://github.com/noborus/ov) | | Feature-rich terminal pager and text viewer, a modern take on less | All |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
-| [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
+| [rclone](https://github.com/rclone/rclone) | | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
-| [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
-| [shfmt](https://github.com/mvdan/sh) |  | Shell script formatter for bash, POSIX sh and mksh | Windows x64, macOS, Linux |
-| [sshm](https://github.com/Gu1llaum-3/sshm) |  | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
-| [starship](https://github.com/starship/starship) |  | Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell | All |
-| [surge](https://github.com/surge-downloader/surge) |  | Fast file download manager with a terminal UI | All |
-| [tmux](https://github.com/tmux/tmux-builds) |  | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
-| [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
-| [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
-| [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
-| [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |
-| [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp) |  | Download video and audio from YouTube and many other sites | All |
-| [zoxide](https://github.com/ajeetdsouza/zoxide) |  | Smarter cd that jumps to the directories you use most | All |
+| [ruff](https://github.com/astral-sh/ruff) | | Fast Python linter and code formatter | All |
+| [shfmt](https://github.com/mvdan/sh) | | Shell script formatter for bash, POSIX sh and mksh | Windows x64, macOS, Linux |
+| [sshm](https://github.com/Gu1llaum-3/sshm) | | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
+| [starship](https://github.com/starship/starship) | | Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell | All |
+| [surge](https://github.com/surge-downloader/surge) | | Fast file download manager with a terminal UI | All |
+| [tmux](https://github.com/tmux/tmux-builds) | | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
+| [ttt](https://github.com/eugenioenko/ttt) | | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
+| [upx](https://github.com/upx/upx) | | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
+| [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) | | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
+| [yamlfmt](https://github.com/google/yamlfmt) | | YAML file formatter | All |
+| [yq](https://github.com/mikefarah/yq) | | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | | Download video and audio from YouTube and many other sites | All |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | | Smarter cd that jumps to the directories you use most | All |
 
 </details>
 <!-- /registry -->
@@ -1090,16 +1054,15 @@ asks whether you meant `ripgrep`.
 See [`docs/add_to_registry.md`](./docs/add_to_registry.md). After changing `registry.yml`, run
 `cargo xtask readme` to regenerate the list above. CI fails while it is out of date.
 
-## Keeping vendor updated
+## Keeping vendorfiles updated
 
-`vendor` can vendor itself. Add it once:
+`vendor` can vendor itself:
 
 ```bash
 vendor add vendorfiles
 ```
 
-That writes an entry pointing at this repository's release asset for your platform, with
-`vendorFolder` set to the directory the running binary sits in:
+That writes an entry for your platform's release asset, installed next to the running binary:
 
 <!-- formats -->
 <details open>
@@ -1154,20 +1117,8 @@ vendorFolder = 'C:/tools/bin'
 </details>
 <!-- /formats -->
 
-On Linux and macOS the asset is `vendor_v{version}_linux.tar.gz` or
-`vendor_v{version}_macos.tar.gz` and the member inside it is `vendor`. `vendor add vendorfiles-rs`
-and `vendor add vendor` write the same entry.
-
-From then on `vendor update` upgrades the tool along with everything else, and `vendor outdated`
-tells you when a release is waiting. Because the file being installed *is* the running binary, it
-cannot simply be written over - Windows keeps the image locked, and replacing it underneath a live
-process is unsafe everywhere. `vendor` notices that the destination is itself and swaps it in place
-instead: the new build is staged beside the old one, the old image is moved aside, and the
-operating system deletes it once the process exits. Clearing a previous install skips the running
-binary for the same reason.
-
-`vendor uninstall vendorfiles-rs` drops the entry and its lockfile but leaves the binary where it
-is - stopping tracking should not remove the tool you are running.
+From then on `vendor update` upgrades the tool along with everything else, replacing the running
+binary safely. `vendor uninstall vendorfiles-rs` stops tracking it but leaves the binary in place.
 
 ## Authentication
 
@@ -1210,13 +1161,13 @@ It exits `1` when there is no token or GitHub rejects it, so CI can run it as a 
 Native stores are compiled in per platform - there is no cross-platform facade, and no system
 library to install:
 
-| Platform | Store | Survives |
-| --- | --- | --- |
-| Windows | Credential Manager (`windows-native-keyring-store`) | until deleted |
-| macOS | login Keychain (`apple-native-keyring-store`) | until deleted |
-| Linux | Secret Service (`zbus-secret-service-keyring-store`) | until deleted |
-| Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`) | **until reboot** |
-| anything else | none - `GITHUB_TOKEN` only | - |
+| Platform                 | Store                                                | Survives         |
+| ------------------------ | ---------------------------------------------------- | ---------------- |
+| Windows                  | Credential Manager (`windows-native-keyring-store`)  | until deleted    |
+| macOS                    | login Keychain (`apple-native-keyring-store`)        | until deleted    |
+| Linux                    | Secret Service (`zbus-secret-service-keyring-store`) | until deleted    |
+| Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`)     | **until reboot** |
+| anything else            | none - `GITHUB_TOKEN` only                           | -                |
 
 On Linux the Secret Service is tried first, so a token persists wherever a keyring daemon is
 running - gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
@@ -1308,27 +1259,15 @@ vendorDependencies:
 
 ## Differences from the TypeScript version
 
-CLI help text, argument errors, exit codes, log wording, ANSI colours, lockfile bytes and
-config write-back formatting are all matched deliberately - the help fixtures in
-[`crates/vendorfiles/tests/fixtures/help`](./crates/vendorfiles/tests/fixtures/help) are captured
-from `vendorfiles@1.4.2` and asserted byte-for-byte in the test suite. Two deliberate departures:
-the lines `-p`/`--plain` adds and takes away, and `install` taking many sources, with the version
-moved into `source@version`. The fixtures keep the reference text; the test applies each delta.
+Configs and lockfiles are interchangeable with the original. Version lookups and downloads run in
+parallel, which is where most of the speedup comes from. Measured against `vendorfiles@1.4.2` with 8 dependencies:
 
-The main difference:
-Version lookups run concurrently, and dependencies download
-   in parallel (up to 8 at a time) while results are still committed strictly in config order -
-   so the log is byte-identical to the original's but arrives sooner. Within one dependency the
-   original's log order was left to chance; here it follows the `files` array.
-
-Measured against `vendorfiles@1.4.2` with 8 dependencies:
-
-| | TypeScript | Rust |
-| --- | --- | --- |
-| `sync` (nothing downloaded yet) | 3127 ms | 893 ms |
-| `sync` (everything up to date) | 721 ms | 66 ms |
-| `outdated` | 3426 ms | 908 ms |
-| `--version` | 706 ms | 54 ms |
+|                                 | TypeScript | Rust   |
+| ------------------------------- | ---------- | ------ |
+| `sync` (nothing downloaded yet) | 3127 ms    | 893 ms |
+| `sync` (everything up to date)  | 721 ms     | 66 ms  |
+| `outdated`                      | 3426 ms    | 908 ms |
+| `--version`                     | 706 ms     | 54 ms  |
 
 ## Development
 
@@ -1348,11 +1287,11 @@ cargo test --workspace
 
 The workspace is three crates:
 
-| Crate | Role |
-| --- | --- |
-| `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process. |
-| `crates/vendorfiles` | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary. |
-| `xtask` | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest and README update, format, commit, tag, and then the push, `cargo publish --workspace` and draft GitHub release it asks about up front; `--push`, `--publish` and `--draft-release` answer those three ahead of time, for a release that never stops on a prompt. |
+| Crate                     | Role                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process.                                                                                                                                                                                                                                                                                |
+| `crates/vendorfiles`      | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary.                                                                                                                                                                                                                                                                                                                          |
+| `xtask`                   | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest and README update, format, commit, tag, and then the push, `cargo publish --workspace` and draft GitHub release it asks about up front; `--push`, `--publish` and `--draft-release` answer those three ahead of time, for a release that never stops on a prompt. |
 
 See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
 parity contract.
