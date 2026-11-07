@@ -3,11 +3,12 @@
 use crate::error::{Result, VendorError};
 use crate::fsx::delete_file_and_empty_folders;
 use crate::lockfile::{
-    config_files_to_lock_files, flat_files, previous_entry, read_lockfile, retire_folder_entry,
-    saved_folder, to_json, write_string,
+    Lockfile, config_files_to_lock_files, flat_files, previous_entry, read_lockfile,
+    retire_folder_entry, saved_folder, to_json, write_string,
 };
+use crate::model::RawDependency;
 use crate::ops::Session;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 impl Session {
     /// Removes a dependency entirely.
@@ -45,61 +46,20 @@ impl Session {
 
         let single = self.workspace.config.single_lockfile.is_some();
         let lockfile = read_lockfile(&lockfile_path).await.ok();
-        let locked = previous_entry(name, &folder, &lockfile_path, single).await;
-        // With `singleLockfile` the files may sit where the entry was installed, not where the
-        // config points today.
-        let locked_folder = locked
-            .as_ref()
-            .and_then(|entry| {
-                saved_folder(
-                    lockfile_path.parent().unwrap_or_else(|| Path::new(".")),
-                    entry,
-                )
-            })
-            .unwrap_or_else(|| folder.clone());
-        let locked_files = locked
-            .as_ref()
-            .map(|entry| flat_files(&entry.files))
-            .unwrap_or_default();
-        let declared = config_files_to_lock_files(
-            dependency.files.as_deref().unwrap_or_default(),
-            dependency.version.as_deref().unwrap_or_default(),
-        );
-        let declared_files = flat_files(&declared);
-
-        let to_delete = locked_files
-            .iter()
-            .map(|file| (&locked_folder, file))
-            .chain(declared_files.iter().map(|file| (&folder, file)));
-        for (root, file) in to_delete {
-            if let Err(error) = delete_file_and_empty_folders(root, file).await {
-                progress.failed(&error.brief());
-                self.progress.end();
-                return Err(error);
-            }
-        }
-        if locked_folder != folder {
-            let _ = tokio::fs::remove_dir(&locked_folder).await;
+        let owned = Owned::find(name, &dependency, &folder, &lockfile_path, single).await;
+        if let Err(error) = owned.delete().await {
+            progress.failed(&error.brief());
+            self.progress.end();
+            return Err(error);
         }
 
         if single {
             retire_folder_entry(name, &folder, &lockfile_path).await;
         }
-
-        if let Some(mut lockfile) = lockfile.filter(|l| l.contains_key(name)) {
-            if lockfile.len() == 1 {
-                // Still best-effort: by here every file this dependency owned is gone, and a
-                // stray lockfile or an empty folder records nothing that is not true.
-                let _ = tokio::fs::remove_file(&lockfile_path).await;
-                if is_empty_dir(&folder).await {
-                    let _ = tokio::fs::remove_dir_all(&folder).await;
-                }
-            } else {
-                lockfile.shift_remove(name);
-                // The reference writes this one without a trailing newline.
-                write_string(&lockfile_path, &to_json(&lockfile)?).await?;
-            }
+        if let Some(lockfile) = lockfile.filter(|l| l.contains_key(name)) {
+            drop_lock_entry(name, lockfile, &lockfile_path, &folder).await?;
         }
+
         self.workspace.dependencies.shift_remove(name);
         self.workspace.file.document.remove_dependency(name)?;
         self.workspace.file.write().await?;
@@ -107,6 +67,89 @@ impl Session {
         progress.uninstalled();
         Ok(())
     }
+}
+
+/// The files a dependency owns, by the lockfile and by the config.
+struct Owned {
+    /// Where the lock entry says the files were installed.
+    locked_folder: PathBuf,
+    locked_files: Vec<String>,
+    /// Where the config puts the dependency today.
+    folder: PathBuf,
+    declared_files: Vec<String>,
+}
+
+impl Owned {
+    async fn find(
+        name: &str,
+        dependency: &RawDependency,
+        folder: &Path,
+        lockfile_path: &Path,
+        single: bool,
+    ) -> Self {
+        let locked = previous_entry(name, folder, lockfile_path, single).await;
+
+        // With `singleLockfile` the files may sit where the entry was installed, not where the
+        // config points today.
+        let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
+        let locked_folder = locked
+            .as_ref()
+            .and_then(|entry| saved_folder(lock_dir, entry))
+            .unwrap_or_else(|| folder.to_path_buf());
+        let locked_files = locked
+            .as_ref()
+            .map(|entry| flat_files(&entry.files))
+            .unwrap_or_default();
+
+        let declared = config_files_to_lock_files(
+            dependency.files.as_deref().unwrap_or_default(),
+            dependency.version.as_deref().unwrap_or_default(),
+        );
+        Self {
+            locked_folder,
+            locked_files,
+            folder: folder.to_path_buf(),
+            declared_files: flat_files(&declared),
+        }
+    }
+
+    /// Deletes every owned file, stopping at the first one that refuses to go.
+    async fn delete(&self) -> Result<()> {
+        let locked = self
+            .locked_files
+            .iter()
+            .map(|file| (&self.locked_folder, file));
+        let declared = self.declared_files.iter().map(|file| (&self.folder, file));
+        for (root, file) in locked.chain(declared) {
+            delete_file_and_empty_folders(root, file).await?;
+        }
+        if self.locked_folder != self.folder {
+            let _ = tokio::fs::remove_dir(&self.locked_folder).await;
+        }
+        Ok(())
+    }
+}
+
+/// Removes `name` from a lockfile, deleting the file when it was the only entry.
+async fn drop_lock_entry(
+    name: &str,
+    mut lockfile: Lockfile,
+    lockfile_path: &Path,
+    folder: &Path,
+) -> Result<()> {
+    if lockfile.len() == 1 {
+        // Still best-effort: by here every file this dependency owned is gone, and a stray
+        // lockfile or an empty folder records nothing that is not true.
+        let _ = tokio::fs::remove_file(lockfile_path).await;
+        if is_empty_dir(folder).await {
+            let _ = tokio::fs::remove_dir_all(folder).await;
+        }
+        return Ok(());
+    }
+    lockfile.shift_remove(name);
+
+    // The reference writes this one without a trailing newline.
+    write_string(lockfile_path, &to_json(&lockfile)?).await
 }
 
 async fn is_empty_dir(path: &std::path::Path) -> bool {
