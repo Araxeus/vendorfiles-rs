@@ -1,6 +1,6 @@
-Usage: vendor uninstall|remove [options] [names...]
+Usage: vendor uninstall|remove|delete|del|rm [options] <names...>
 
-Uninstall all/selected dependencies
+Uninstall the named dependencies
 
 Arguments:
   names       Package names to uninstall

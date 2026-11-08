@@ -846,43 +846,44 @@ version = 'afde2592a6254be7c14ccac520cb608bd1adbaf9'
 Usage: vendor command [options]
 
 Options:
-  -c, --config <file/folder path>             Config file path / Folder containing the config file
-  -p, --plain                                 Print plain lines instead of a live display
-  -v, --version                               output the current version
-  -h, --help                                  display help for command
+  -c, --config <file/folder path>                Config file path / Folder containing the config file
+  -p, --plain                                    Print plain lines instead of a live display
+  -v, --version                                  output the current version
+  -h, --help                                     display help for command
 
 Commands:
-  sync|s [options]                            Sync config file
-  update|upgrade [options] [names...]         Update outdated dependencies
-  outdated|o                                  List outdated dependencies
-  install|add [options] <url/name...>         Install dependencies
-  search|find [options] [terms...]            Find programs to install by name
-  uninstall|remove|rm [names...]              Uninstall dependencies
-  list|ls                                     List dependencies in the config file
-  config|cfg [editor]                         Show or edit the config file
-  login|auth [token]                          Login to GitHub
-  logout                                      Log out of GitHub
-  completions <shell>                         Print a shell completion script
-  help [command]                              display help for command
+  sync|s [options]                               Sync config file
+  update|upgrade|bump|up|u [options] [names...]  Update outdated dependencies
+  outdated|o                                     List outdated dependencies
+  install|add|i|a [options] <url/name...>        Install dependencies
+  search|find [options] [terms...]               Find programs to install by name
+  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
+  list|ls                                        List dependencies in the config file
+  config|cfg [command]                           Show or edit the config file
+  login|auth [token]                             Login to GitHub, or check it with auth status
+  logout                                         Log out of GitHub
+  completions <shell>                            Print a shell completion script
+  help [command]                                 display help for command
 ```
 
 Root options work on either side of the subcommand. The config location can also come from
 `VENDOR_CONFIG`, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config is found.
 
-| Command                        | What it does                                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `vendor sync\|s`                  | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date.                                  |
-| `vendor update\|upgrade [names...]`     | Install the latest version of each dependency.<br>`--pr` prints a Markdown summary.                                            |
-| `vendor outdated\|o`              | List dependencies with a newer version available.                                                                           |
-| `vendor install\|add\|i <url/name...>` | Add dependencies by URL, `owner/repo` or name, optionally `source@version`.<br>`-n`/`--name` sets the config key,<br>`-f`/`--files` lists the files. <br>`--dry-run` prints what it would add and changes nothing. <br>`--list` is an alias for`vendor search`. |
-| `vendor search\|find [terms...]`     | Find programs installable by name or description. Aliased `find`.                                                                                          |
-| `vendor uninstall\|remove\|rm <names...>`  | Delete a dependency's files and remove it from the config and lockfile.                                                                  |
-| `vendor list\|ls`                  | Print the config's dependencies. aliased as`vendor config list`                                                                                           |
-| `vendor config\|cfg [editor]`         | Print the config file path, or open it in an editor.                                                                        |
-| `vendor login\|auth [token]`         | Store a GitHub token, With no argument, runs the OAuth device flow.                                             |
-| `vendor auth\|login status`           | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it.                                                                              |
-| `vendor logout`                | Delete the stored token.                                                                                                    |
-| `vendor completions <shell>`   | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`.                                              |
+| Command | What it does |
+| --- | --- |
+| `vendor sync\|s` | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date. |
+| `vendor update\|upgrade\|bump\|up\|u [names...]` | Install the latest version of each dependency, or only the named ones.<br>`--pr` prints a Markdown summary. |
+| `vendor outdated\|o` | List dependencies with a newer version available. |
+| `vendor install\|add\|i\|a <url/name...>` | Add dependencies. A source is a [program name from the registry](#installing-by-name) (`vendor add rg`), a repo URL, `owner/repo`, or a repo name to search GitHub for. Any source can be pinned as `source@version`.<br>A registry program needs no `-f`; for anything else, `-f`/`--files` lists the files.<br>`-n`/`--name` sets the config key.<br>`--dry-run` prints what it would add and changes nothing.<br>`--list` does the same as `vendor search`. |
+| `vendor search\|find [terms...]` | Find registry programs by name, alias or description. |
+| `vendor uninstall\|remove\|delete\|del\|rm <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
+| `vendor list\|ls` | Print the config's dependencies. Also spelled `vendor config list\|ls`. |
+| `vendor config\|cfg` | Print the config file path. |
+| `vendor config\|cfg edit [editor]` | Open the config file in `editor`, `$EDITOR`, or the OS default. |
+| `vendor login\|auth [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
+| `vendor login\|auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. |
+| `vendor logout` | Delete the stored token. |
+| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
 
 **Examples:**
 
@@ -996,55 +997,55 @@ asks whether you meant `ripgrep`.
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
-| [actionlint](https://github.com/rhysd/actionlint) | | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
+| [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
-| [atuin](https://github.com/atuinsh/atuin) | | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
-| [bat](https://github.com/sharkdp/bat) | | cat clone and file viewer with syntax highlighting and a pager | All |
-| [biome](https://github.com/biomejs/biome) | | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
+| [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
+| [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
+| [biome](https://github.com/biomejs/biome) |  | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI | All |
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | System monitor for processes, CPU, memory, disks and network, like htop | All |
-| [btop](https://github.com/aristocratos/btop) | | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
+| [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
 | [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Shell completion for hundreds of commands in bash, zsh, fish and more | All |
 | [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager and diff viewer for git, diff, grep and blame | Windows x64, macOS arm64, Linux |
-| [dust](https://github.com/bootandy/dust) | | Disk usage viewer showing what takes up space, a more intuitive du | All |
-| [dysk](https://github.com/Canop/dysk) | | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
-| [edamame](https://github.com/mijowi/edamame) | | Terminal text editor for Markdown that stays rendered while you edit | Windows x64, macOS, Linux |
+| [dust](https://github.com/bootandy/dust) |  | Disk usage viewer showing what takes up space, a more intuitive du | All |
+| [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
+| [edamame](https://github.com/mijowi/edamame) |  | Terminal text editor for Markdown that stays rendered while you edit | Windows x64, macOS, Linux |
 | [edit](https://github.com/microsoft/edit) | `msedit` | Microsoft's small terminal text editor, a modern MS-DOS Edit | Windows, macOS arm64, Linux |
-| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | | Neofetch-like tool that shows system information in the terminal | All |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) |  | Neofetch-like tool that shows system information in the terminal | All |
 | [fd](https://github.com/sharkdp/fd) | `fdfind`, `fd-find` | Fast, user-friendly alternative to find for locating files and folders | Windows, macOS arm64, Linux |
 | [file-pilot](https://github.com/Araxeus/fpilot-scraper) | `fpilot`, `filepilot` | Fast, lightweight file manager and Explorer replacement for Windows | Windows x64 |
-| [flow](https://github.com/neurocyte/flow) | | Flow Control, a programmer's text editor for the terminal | All |
-| [fresh](https://github.com/sinelaw/fresh) | | Fast, easy terminal text editor and IDE | All |
-| [fzf](https://github.com/junegunn/fzf) | | Interactive command-line fuzzy finder for files, history and any list | All |
-| [gdu](https://github.com/dundee/gdu) | | Fast disk usage analyzer with a terminal UI | All |
+| [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
+| [fresh](https://github.com/sinelaw/fresh) |  | Fast, easy terminal text editor and IDE | All |
+| [fzf](https://github.com/junegunn/fzf) |  | Interactive command-line fuzzy finder for files, history and any list | All |
+| [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub's official CLI for pull requests, issues, releases and repos | All |
-| [gum](https://github.com/charmbracelet/gum) | | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
-| [herdr](https://github.com/herdrdev/herdr) | | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
+| [gum](https://github.com/charmbracelet/gum) |  | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
+| [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
-| [hyperfine](https://github.com/sharkdp/hyperfine) | | Command-line benchmarking tool that times and compares commands | All |
-| [jq](https://github.com/jqlang/jq) | | Command-line JSON processor for querying, filtering and transforming | All |
-| [just](https://github.com/casey/just) | | Command runner for project tasks and scripts, like make without builds | All |
-| [lazygit](https://github.com/jesseduffield/lazygit) | | Terminal UI for git that handles staging, commits, branches and rebases | All |
+| [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
+| [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
+| [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
+| [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git that handles staging, commits, branches and rebases | All |
 | [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing files and navigating directories | All |
-| [micro](https://github.com/zyedidia/micro) | | Terminal text editor with familiar keys and mouse support, a modern nano | All |
+| [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
-| [ov](https://github.com/noborus/ov) | | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
-| [rclone](https://github.com/rclone/rclone) | | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
+| [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
-| [ruff](https://github.com/astral-sh/ruff) | | Fast Python linter and code formatter | All |
-| [shfmt](https://github.com/mvdan/sh) | | Shell script formatter for bash, POSIX sh and mksh | Windows x64, macOS, Linux |
-| [sshm](https://github.com/Gu1llaum-3/sshm) | | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
-| [starship](https://github.com/starship/starship) | | Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell | All |
-| [surge](https://github.com/surge-downloader/surge) | | Fast file download manager with a terminal UI | All |
-| [tmux](https://github.com/tmux/tmux-builds) | | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
-| [ttt](https://github.com/eugenioenko/ttt) | | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
-| [upx](https://github.com/upx/upx) | | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
-| [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) | | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
-| [yamlfmt](https://github.com/google/yamlfmt) | | YAML file formatter | All |
-| [yq](https://github.com/mikefarah/yq) | | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | | Download video and audio from YouTube and many other sites | All |
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | | Smarter cd that jumps to the directories you use most | All |
+| [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
+| [shfmt](https://github.com/mvdan/sh) |  | Shell script formatter for bash, POSIX sh and mksh | Windows x64, macOS, Linux |
+| [sshm](https://github.com/Gu1llaum-3/sshm) |  | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
+| [starship](https://github.com/starship/starship) |  | Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell | All |
+| [surge](https://github.com/surge-downloader/surge) |  | Fast file download manager with a terminal UI | All |
+| [tmux](https://github.com/tmux/tmux-builds) |  | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
+| [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
+| [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
+| [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
+| [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |
+| [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) |  | Download video and audio from YouTube and many other sites | All |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) |  | Smarter cd that jumps to the directories you use most | All |
 
 </details>
 <!-- /registry -->

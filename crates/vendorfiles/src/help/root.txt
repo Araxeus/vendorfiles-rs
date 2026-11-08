@@ -1,21 +1,21 @@
 Usage: vendor command [options]
 
 Options:
-  -c, --config <file/folder path>             Config file path / Folder containing the config file
-  -p, --plain                                 Print plain lines instead of a live display
-  -v, --version                               output the current version
-  -h, --help                                  display help for command
+  -c, --config <file/folder path>                Config file path / Folder containing the config file
+  -p, --plain                                    Print plain lines instead of a live display
+  -v, --version                                  output the current version
+  -h, --help                                     display help for command
 
 Commands:
-  sync|s [options]                            Sync config file
-  update|upgrade [options] [names...]         Update outdated dependencies
-  outdated|o                                  List outdated dependencies
-  install|add [options] <url/name...>         Install dependencies
-  search|find [options] [terms...]            Find programs to install by name
-  uninstall|remove [names...]                 Uninstall dependencies
-  list|ls                                     List dependencies in the config file
-  config|cfg [command]                        Show or edit the config file
-  login|auth [token]                          Login to GitHub
-  logout                                      Log out of GitHub
-  completions <shell>                         Print a shell completion script
-  help [command]                              display help for command
+  sync|s [options]                               Sync config file
+  update|upgrade|bump|up|u [options] [names...]  Update outdated dependencies
+  outdated|o                                     List outdated dependencies
+  install|add|i|a [options] <url/name...>        Install dependencies
+  search|find [options] [terms...]               Find programs to install by name
+  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
+  list|ls                                        List dependencies in the config file
+  config|cfg [command]                           Show or edit the config file
+  login|auth [token]                             Login to GitHub, or check it with auth status
+  logout                                         Log out of GitHub
+  completions <shell>                            Print a shell completion script
+  help [command]                                 display help for command
