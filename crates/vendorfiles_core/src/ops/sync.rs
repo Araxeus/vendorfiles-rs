@@ -89,16 +89,21 @@ impl Session {
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
+            report_unchanged(&options);
             return Ok(());
         }
 
         // Closed before any error leaves, so the outcome rows print above it.
-        let bumps = self.run_plans(plans, &options).await;
+        let outcome = self.run_plans(plans, &options).await;
         self.progress.end();
-        let bumps = bumps?;
+        let (bumps, changed) = outcome?;
 
         if !options.show_outdated_only {
             self.prune_lockfiles().await?;
+        }
+
+        if !changed {
+            report_unchanged(&options);
         }
 
         if ui::pr_mode() && !bumps.is_empty() {
@@ -107,8 +112,12 @@ impl Session {
         Ok(())
     }
 
-    /// Runs the three passes and returns the version bumps they made.
-    async fn run_plans(&mut self, plans: Vec<Plan>, options: &SyncOptions) -> Result<Vec<Bump>> {
+    /// Runs the three passes, returning the version bumps they made and whether anything changed.
+    async fn run_plans(
+        &mut self,
+        plans: Vec<Plan>,
+        options: &SyncOptions,
+    ) -> Result<(Vec<Bump>, bool)> {
         let versions = futures_util::future::join_all(
             plans
                 .iter()
@@ -134,6 +143,7 @@ impl Session {
         // project already up to date - or `outdated`, which never downloads - gets none, and
         // the height is settled before the first byte moves.
         let working = prepared.iter().filter(|item| item.has_work()).count();
+        let changed = working > 0;
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
@@ -146,7 +156,7 @@ impl Session {
         if bumps.is_err() {
             cancel(&tasks);
         }
-        bumps
+        bumps.map(|bumps| (bumps, changed))
     }
 
     /// Awaits each download in config order and commits it, stopping at the first error.
@@ -239,6 +249,13 @@ impl BumpCandidate {
             old_version: old,
             new_version: new,
         })
+    }
+}
+
+/// Tells the user a `sync` or `update` had nothing to do. `outdated` prints nothing.
+fn report_unchanged(options: &SyncOptions) {
+    if !options.show_outdated_only {
+        ui::info("Everything is up to date");
     }
 }
 

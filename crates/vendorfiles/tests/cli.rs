@@ -676,11 +676,15 @@ fn invalid_config_keys_are_reported_with_the_reference_wording() {
 }
 
 #[test]
-fn an_empty_dependency_map_is_a_silent_success() {
+fn an_empty_dependency_map_is_a_success() {
     let dir = project(r#"{"vendorDependencies":{}}"#);
-    for args in [vec!["sync"], vec!["update"], vec!["outdated"]] {
+    for (args, expected) in [
+        (vec!["sync"], NOTHING_CHANGED),
+        (vec!["update"], NOTHING_CHANGED),
+        (vec!["outdated"], ""),
+    ] {
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), "", "stdout for `vendor {args:?}`");
+        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
@@ -1005,6 +1009,8 @@ fn script(dir: &Path, name: &str, body: &str) -> String {
 // ---------------------------------------------------------------------------------------
 
 /// A project whose lockfile and files already agree with the config, so no request is made.
+const NOTHING_CHANGED: &str = "\u{1b}[36mINFO: Everything is up to date\u{1b}[0m\n";
+
 fn up_to_date_project() -> tempfile::TempDir {
     let dir = project(
         r#"{
@@ -1041,9 +1047,25 @@ fn up_to_date_project() -> tempfile::TempDir {
 }
 
 #[test]
-fn sync_says_nothing_about_a_dependency_already_up_to_date() {
+fn sync_says_once_that_nothing_changed() {
     let dir = up_to_date_project();
     let out = vendor(dir.path(), &["sync"]);
+    assert_eq!(stdout(&out), NOTHING_CHANGED);
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn update_says_once_that_nothing_changed() {
+    let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
+    let out = vendor(dir.path(), &["update"]);
+    assert_eq!(stdout(&out), NOTHING_CHANGED);
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn outdated_prints_nothing_when_nothing_is_outdated() {
+    let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
+    let out = vendor(dir.path(), &["outdated"]);
     assert_eq!(stdout(&out), "");
     assert_eq!(code(&out), 0);
 }
@@ -1060,7 +1082,11 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
     ] {
         let dir = up_to_date_project();
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), "", "stdout for `vendor {args:?}`");
+        assert_eq!(
+            stdout(&out),
+            NOTHING_CHANGED,
+            "stdout for `vendor {args:?}`"
+        );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
