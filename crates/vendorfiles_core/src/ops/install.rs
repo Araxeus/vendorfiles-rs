@@ -80,7 +80,11 @@ impl Session {
     /// the archive extraction or the config/lockfile write produced.
     pub async fn install(&mut self, dependency: Dependency, options: InstallOptions) -> OpResult {
         self.progress.begin(1);
-        let progress = Arc::new(self.progress.dependency(&dependency.name));
+        let progress = Arc::new(
+            self.progress
+                .dependency(&dependency.name)
+                .linked_to(&dependency.repository),
+        );
         progress.status("resolving version");
         let version = match self.decide_version(&dependency, &options).await {
             Ok(version) => version,
@@ -198,9 +202,10 @@ impl Session {
         } = prepared;
 
         if options.show_outdated_only {
-            progress.finish_quietly();
             if needs_update {
-                report_outdated(&dependency, &version);
+                progress.finish_with_line(outdated_line(&dependency, &version));
+            } else {
+                progress.finish_quietly();
             }
             return Ok(None);
         }
@@ -306,20 +311,15 @@ impl Session {
     }
 }
 
-/// Prints one line of `vendor outdated` output.
-fn report_outdated(dependency: &Dependency, new_version: &str) {
-    let line = match dependency.version.as_deref() {
-        Some(old) if old != new_version => format!(
-            "{} {} -> {}",
-            dependency.name,
-            ui::red(old),
-            ui::green(new_version)
-        ),
-        _ => format!("{} {new_version}", dependency.name),
-    };
-    // Through the display, not around it: the listing is the command's real output, but it
-    // still has to wait for the bars to step aside.
-    progress::print_out(&line);
+/// One line of `vendor outdated` output.
+fn outdated_line(dependency: &Dependency, new_version: &str) -> String {
+    let name = ui::link(&dependency.name, &dependency.repository);
+    match dependency.version.as_deref() {
+        Some(old) if old != new_version => {
+            format!("{name} {} -> {}", ui::red(old), ui::green(new_version))
+        }
+        _ => format!("{name} {new_version}"),
+    }
 }
 
 /// Fetches everything a prepared dependency needs, returning it with its pending log lines.

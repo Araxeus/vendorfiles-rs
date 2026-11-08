@@ -1558,7 +1558,10 @@ fn outdated_reports_dependencies_in_config_order() {
     let out = vendor(dir.path(), &["outdated"]);
     let expected = names.iter().fold(String::new(), |mut acc, name| {
         use std::fmt::Write as _;
-        let _ = writeln!(acc, "{name} v1");
+        let _ = writeln!(
+            acc,
+            "\u{1b}]8;;https://github.com/example/{name}\u{1b}\\{name}\u{1b}]8;;\u{1b}\\ v1"
+        );
         acc
     });
     assert_eq!(stdout(&out), expected);

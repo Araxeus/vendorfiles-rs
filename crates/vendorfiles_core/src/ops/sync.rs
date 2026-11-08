@@ -176,7 +176,11 @@ impl Session {
         for (name, raw) in &self.workspace.dependencies {
             raw.validate(name)?;
             let dependency = raw.resolve(name)?;
-            let progress = Arc::new(self.progress.dependency(name));
+            let progress = Arc::new(
+                self.progress
+                    .dependency(name)
+                    .linked_to(&dependency.repository),
+            );
             plans.push(Plan {
                 options: InstallOptions {
                     should_update: !dependency.locked && options.should_update,
