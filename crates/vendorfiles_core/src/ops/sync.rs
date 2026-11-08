@@ -156,6 +156,13 @@ impl Session {
         let mut bumps = Vec::new();
         while let Some(task) = tasks.pop_front() {
             let prepared = task.await.map_err(|e| VendorError::Http(e.to_string()))??;
+
+            // A traversal reports only what it affects. `vendor list` shows the rest.
+            if !prepared.needs_update {
+                prepared.progress.finish_quietly();
+                continue;
+            }
+
             let candidate = BumpCandidate::of(&prepared);
             let new_version = self.commit(prepared).await?;
             bumps.extend(candidate.into_bump(new_version));
