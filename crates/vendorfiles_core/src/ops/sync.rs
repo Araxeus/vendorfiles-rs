@@ -19,6 +19,9 @@ use crate::ui;
 /// requests from one client.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
+/// What a traversal says when no dependency was stale.
+const NOTHING_CHANGED: &str = "Everything is up to date";
+
 /// How a traversal of every configured dependency should behave.
 #[derive(Debug, Clone, Default)]
 pub struct SyncOptions {
@@ -89,21 +92,21 @@ impl Session {
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
-            report_unchanged(&options);
+            ui::info(NOTHING_CHANGED);
             return Ok(());
         }
 
         // Closed before any error leaves, so the outcome rows print above it.
         let outcome = self.run_plans(plans, &options).await;
         self.progress.end();
-        let (bumps, changed) = outcome?;
+        let (bumps, stale) = outcome?;
 
         if !options.show_outdated_only {
             self.prune_lockfiles().await?;
         }
 
-        if !changed {
-            report_unchanged(&options);
+        if !stale {
+            ui::info(NOTHING_CHANGED);
         }
 
         if ui::pr_mode() && !bumps.is_empty() {
@@ -112,7 +115,7 @@ impl Session {
         Ok(())
     }
 
-    /// Runs the three passes, returning the version bumps they made and whether anything changed.
+    /// Runs the three passes, returning the version bumps they made and whether anything was stale.
     async fn run_plans(
         &mut self,
         plans: Vec<Plan>,
@@ -143,7 +146,7 @@ impl Session {
         // project already up to date - or `outdated`, which never downloads - gets none, and
         // the height is settled before the first byte moves.
         let working = prepared.iter().filter(|item| item.has_work()).count();
-        let changed = working > 0;
+        let stale = prepared.iter().any(|item| item.needs_update);
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
@@ -156,7 +159,7 @@ impl Session {
         if bumps.is_err() {
             cancel(&tasks);
         }
-        bumps.map(|bumps| (bumps, changed))
+        bumps.map(|bumps| (bumps, stale))
     }
 
     /// Awaits each download in config order and commits it, stopping at the first error.
@@ -249,13 +252,6 @@ impl BumpCandidate {
             old_version: old,
             new_version: new,
         })
-    }
-}
-
-/// Tells the user a `sync` or `update` had nothing to do. `outdated` prints nothing.
-fn report_unchanged(options: &SyncOptions) {
-    if !options.show_outdated_only {
-        ui::info("Everything is up to date");
     }
 }
 

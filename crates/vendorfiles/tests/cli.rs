@@ -681,7 +681,7 @@ fn an_empty_dependency_map_is_a_success() {
     for (args, expected) in [
         (vec!["sync"], NOTHING_CHANGED),
         (vec!["update"], NOTHING_CHANGED),
-        (vec!["outdated"], ""),
+        (vec!["outdated"], NOTHING_CHANGED),
     ] {
         let out = vendor(dir.path(), &args);
         assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
@@ -1063,10 +1063,10 @@ fn update_says_once_that_nothing_changed() {
 }
 
 #[test]
-fn outdated_prints_nothing_when_nothing_is_outdated() {
+fn outdated_says_once_that_nothing_is_outdated() {
     let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
     let out = vendor(dir.path(), &["outdated"]);
-    assert_eq!(stdout(&out), "");
+    assert_eq!(stdout(&out), NOTHING_CHANGED);
     assert_eq!(code(&out), 0);
 }
 
