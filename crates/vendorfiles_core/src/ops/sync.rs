@@ -89,7 +89,7 @@ impl Session {
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
-            ui::info(nothing_changed(&options));
+            ui::info(self.workspace.no_dependencies_notice());
             return Ok(());
         }
 

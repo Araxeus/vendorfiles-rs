@@ -676,15 +676,15 @@ fn invalid_config_keys_are_reported_with_the_reference_wording() {
 }
 
 #[test]
-fn an_empty_dependency_map_is_a_success() {
+fn an_empty_dependency_map_says_so_and_succeeds() {
     let dir = project(r#"{"vendorDependencies":{}}"#);
-    for (args, expected) in [
-        (vec!["sync"], ALREADY_IN_SYNC),
-        (vec!["update"], NOTHING_CHANGED),
-        (vec!["outdated"], NOTHING_CHANGED),
-    ] {
+    for args in [vec!["sync"], vec!["update"], vec!["outdated"]] {
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        let printed = stdout(&out);
+        assert!(
+            printed.contains("INFO: no dependencies in") && printed.contains("vendor.json"),
+            "stdout for `vendor {args:?}`: {printed}"
+        );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
