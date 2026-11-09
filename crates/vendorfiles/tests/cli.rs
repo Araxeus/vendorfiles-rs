@@ -1202,6 +1202,41 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
 }
 
 #[test]
+fn a_config_entry_that_cannot_be_edited_stops_before_touching_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vendor.yml"),
+        format!(
+            "base: &b\n  repository: {NEIGHBOURED}\n  version: v1.0.0\n  files:\n    - LICENSE\n\
+             vendorDependencies:\n  a: *b\n"
+        ),
+    )
+    .unwrap();
+    let folder = dir.path().join("vendor").join("a");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("LICENSE"), "text").unwrap();
+    let lock = format!(
+        r#"{{"a":{{"repository":"{NEIGHBOURED}","version":"v1.0.0","files":{{"LICENSE":"LICENSE"}}}}}}"#
+    );
+    std::fs::write(folder.join("vendor-lock.json"), &lock).unwrap();
+
+    let pinned = format!("{NEIGHBOURED}@v2.0.0");
+    let out = vendor(dir.path(), &["add", pinned.as_str(), "-n", "a"]);
+
+    assert_ne!(code(&out), 0);
+    assert!(
+        stderr(&out).contains("not a plain mapping"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(folder.join("LICENSE").exists(), "the old file was deleted");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap(),
+        lock
+    );
+}
+
+#[test]
 fn a_known_name_does_not_move_the_entry_already_under_it() {
     let dir = project(
         r#"{"vendorDependencies":{"vendorfiles-rs":{

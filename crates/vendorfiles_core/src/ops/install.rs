@@ -8,7 +8,7 @@
 //!    extract into the dependency folder, reporting to the
 //!    dependency's own progress line as it goes. Owns everything it needs, so it can run on
 //!    its own task.
-//! 3. [`Session::commit`] - write the lockfile, update the config, settle the line. Ordered.
+//! 3. [`Session::commit`] - update the config, write the lockfile, settle the line. Ordered.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -108,7 +108,11 @@ impl Session {
         self.progress.reserve_rows(usize::from(prepared.has_work()));
 
         // The two stages below report their own failures, so there is nothing to add here.
-        let outcome = match clear_previous(&prepared).await {
+        let ready = match self.check_recordable(&prepared) {
+            Ok(()) => clear_previous(&prepared).await,
+            Err(error) => Err(error),
+        };
+        let outcome = match ready {
             Ok(()) => download(Arc::clone(&self.github), prepared).await,
             Err(error) => Err(error),
         };
@@ -182,7 +186,7 @@ impl Session {
         }
     }
 
-    /// Reports the outcome and makes it durable: log lines, lockfile, config.
+    /// Reports the outcome and makes it durable: log lines, config, lockfile.
     ///
     /// Everything here is ordered and sequential, which is what keeps `sync`'s output identical
     /// to the reference's even though the downloads overlapped.
@@ -216,6 +220,14 @@ impl Session {
             return Ok(None);
         }
 
+        // Config first: a lockfile left behind by a failed write reads as stale and reinstalls
+        // forward, where a config left behind would pull the next `sync` back to the old version.
+        let old_version = dependency.version.clone();
+        progress.committing("updating config");
+        self.record(&dependency, &version)
+            .await
+            .map_err(|error| blame(&progress, error))?;
+
         progress.committing("writing lockfile");
         let save_path = self.workspace.config.single_lockfile.is_some().then(|| {
             save_path(
@@ -246,12 +258,6 @@ impl Session {
             retire_folder_entry(&dependency.name, &folder, &lockfile_path).await;
         }
 
-        let old_version = dependency.version.clone();
-        progress.committing("updating config");
-        self.record(&dependency, &version)
-            .await
-            .map_err(|error| blame(&progress, error))?;
-
         if options.should_update {
             match old_version.as_deref() {
                 // A dependency with no previous version was installed, not updated.
@@ -263,6 +269,25 @@ impl Session {
 
         progress.installed(&version);
         Ok(None)
+    }
+
+    /// Confirms the config can take this install's change, before any file is touched.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::SerializeConfig`] when the entry cannot be edited, such as a YAML
+    /// entry written as an alias.
+    pub fn check_recordable(&self, prepared: &Prepared) -> Result<()> {
+        if !prepared.has_work() {
+            return Ok(());
+        }
+        self.edit_config(
+            &mut self.workspace.file.document.clone(),
+            &prepared.dependency,
+            &prepared.version,
+        )
+        .map(drop)
+        .map_err(|error| blame(&prepared.progress, error))
     }
 
     /// Saves what this install changed about the dependency's config entry, if anything.
@@ -937,6 +962,28 @@ mod tests {
             first.files,
             serde_json::from_value(serde_json::json!(["README.md"])).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn the_config_is_saved_before_the_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+        // A folder in the lockfile's place makes writing it fail.
+        std::fs::create_dir_all(dir.path().join("vendor/first/vendor-lock.json")).unwrap();
+
+        let dependency = dependency("first", "v1", "LICENSE");
+        let progress = Arc::new(session.progress.dependency("first"));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(dependency, options, "v2".to_owned(), progress)
+            .await;
+
+        assert!(session.commit(prepared).await.is_err());
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["first"].version.as_deref(), Some("v2"));
     }
 
     #[tokio::test]
