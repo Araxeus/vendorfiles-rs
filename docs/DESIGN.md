@@ -237,7 +237,7 @@ changing what the user sees required splitting an install into three stages, in 
 | --- | --- | --- |
 | `Session::prepare` | `&self` | resolve version + staleness; read-only |
 | `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
-| `Session::commit` | `&mut self` | strictly ordered: write lockfile, write config, settle the line |
+| `Session::commit` | `&mut self` | strictly ordered: write config, write lockfile, settle the line |
 
 `sync` then:
 
@@ -623,3 +623,8 @@ code and the complete resulting file tree (including binary payloads). Covered:
 23. **`{version}` expands everywhere in a path.** The reference replaces only the first occurrence,
    so `a-{version}/b-{version}.zip` kept a literal `{version}` in its second half and could never
    match a real file. `{vendorFolder}` and `{release}/` still replace the first occurrence only.
+24. **`install` refuses a repository the config already vendors under another name**, unless `-n`
+   asks for a second entry. The reference borrows that entry's files and version and, when the
+   version already matches, writes the lockfile and never the config. A second entry borrows files
+   only. The lockfile is written only alongside a config that describes the same install, and an
+   entry the config cannot record fails before any file is touched.

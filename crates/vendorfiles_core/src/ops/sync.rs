@@ -84,6 +84,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns the first error any dependency produces; earlier dependencies keep their effects.
+    /// A config entry that cannot be edited stops the run before any file is touched.
     pub async fn sync(&mut self, options: SyncOptions) -> Result<()> {
         self.progress.begin(self.workspace.dependencies.len());
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
