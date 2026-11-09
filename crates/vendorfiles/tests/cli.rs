@@ -679,7 +679,7 @@ fn invalid_config_keys_are_reported_with_the_reference_wording() {
 fn an_empty_dependency_map_is_a_success() {
     let dir = project(r#"{"vendorDependencies":{}}"#);
     for (args, expected) in [
-        (vec!["sync"], NOTHING_CHANGED),
+        (vec!["sync"], ALREADY_IN_SYNC),
         (vec!["update"], NOTHING_CHANGED),
         (vec!["outdated"], NOTHING_CHANGED),
     ] {
@@ -1010,6 +1010,7 @@ fn script(dir: &Path, name: &str, body: &str) -> String {
 
 /// A project whose lockfile and files already agree with the config, so no request is made.
 const NOTHING_CHANGED: &str = "\u{1b}[36mINFO: Everything is up to date\u{1b}[0m\n";
+const ALREADY_IN_SYNC: &str = "\u{1b}[36mINFO: Already in sync\u{1b}[0m\n";
 
 fn up_to_date_project() -> tempfile::TempDir {
     let dir = project(
@@ -1047,10 +1048,10 @@ fn up_to_date_project() -> tempfile::TempDir {
 }
 
 #[test]
-fn sync_says_once_that_nothing_changed() {
+fn sync_says_once_that_it_is_already_in_sync() {
     let dir = up_to_date_project();
     let out = vendor(dir.path(), &["sync"]);
-    assert_eq!(stdout(&out), NOTHING_CHANGED);
+    assert_eq!(stdout(&out), ALREADY_IN_SYNC);
     assert_eq!(code(&out), 0);
 }
 
@@ -1084,7 +1085,7 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
         let out = vendor(dir.path(), &args);
         assert_eq!(
             stdout(&out),
-            NOTHING_CHANGED,
+            ALREADY_IN_SYNC,
             "stdout for `vendor {args:?}`"
         );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");

@@ -19,9 +19,6 @@ use crate::ui;
 /// requests from one client.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
-/// What a traversal says when no dependency was stale.
-const NOTHING_CHANGED: &str = "Everything is up to date";
-
 /// How a traversal of every configured dependency should behave.
 #[derive(Debug, Clone, Default)]
 pub struct SyncOptions {
@@ -92,7 +89,7 @@ impl Session {
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
-            ui::info(NOTHING_CHANGED);
+            ui::info(nothing_changed(&options));
             return Ok(());
         }
 
@@ -106,7 +103,7 @@ impl Session {
         }
 
         if !stale {
-            ui::info(NOTHING_CHANGED);
+            ui::info(nothing_changed(&options));
         }
 
         if ui::pr_mode() && !bumps.is_empty() {
@@ -252,6 +249,18 @@ impl BumpCandidate {
             old_version: old,
             new_version: new,
         })
+    }
+}
+
+/// What a traversal says when no dependency was stale.
+///
+/// `sync` compares files against the config and never looks for newer versions, so it cannot
+/// claim anything is up to date.
+const fn nothing_changed(options: &SyncOptions) -> &'static str {
+    if options.should_update {
+        "Everything is up to date"
+    } else {
+        "Already in sync"
     }
 }
 
