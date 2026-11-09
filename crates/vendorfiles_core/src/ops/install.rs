@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::archive;
+use crate::config::ConfigDocument;
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
@@ -246,12 +247,10 @@ impl Session {
         }
 
         let old_version = dependency.version.clone();
-        if old_version.as_deref() != Some(version.as_str()) {
-            progress.committing("updating config");
-            self.record_version(&dependency, &version)
-                .await
-                .map_err(|error| blame(&progress, error))?;
-        }
+        progress.committing("updating config");
+        self.record(&dependency, &version)
+            .await
+            .map_err(|error| blame(&progress, error))?;
 
         if options.should_update {
             match old_version.as_deref() {
@@ -266,7 +265,7 @@ impl Session {
         Ok(None)
     }
 
-    /// Writes the new version back to the config file, adding the dependency if it is new.
+    /// Saves what this install changed about the dependency's config entry, if anything.
     ///
     /// Registering a new dependency is a deliberate divergence: the reference crashes here
     /// because it never inserts the entry the `install` command was asked to create.
@@ -274,40 +273,65 @@ impl Session {
     /// The in-memory `dependencies` map is left alone for entries that already existed. The
     /// reference keeps a deep copy of them, so a version written mid-run is never visible to
     /// the staleness checks of later dependencies - and neither is it here.
-    async fn record_version(&mut self, dependency: &Dependency, new_version: &str) -> Result<()> {
-        let name = dependency.name.clone();
-        if self.workspace.dependencies.contains_key(&name) {
-            self.workspace
-                .file
-                .document
-                .set_dependency_version(&name, new_version)?;
-        } else {
-            let mut entry = RawDependency {
-                version: Some(new_version.to_owned()),
-                repository: Some(dependency.repository.clone()),
-                files: Some(dependency.files.clone()),
-                hash_version_file: dependency.hash_version_file.clone(),
-                vendor_folder: dependency.vendor_folder.clone(),
-                release_regex: dependency.release_regex.clone(),
-                locked: dependency.locked.then_some(true),
-                name: None,
-            };
-            // The resolved dependency has the `default` block folded into it. Writing those
-            // values back would restate the defaults in every entry, so drop them again -
-            // `load` will fold them in next time just the same.
-            let written = {
-                let mut written = entry.clone();
-                written.strip_defaults(&self.workspace.defaults);
-                written
-            };
-            self.workspace
-                .file
-                .document
-                .upsert_dependency(&name, &written)?;
-            entry.version = Some(new_version.to_owned());
-            self.workspace.dependencies.insert(name, entry);
+    async fn record(&mut self, dependency: &Dependency, version: &str) -> Result<()> {
+        let mut document = self.workspace.file.document.clone();
+        if !self.edit_config(&mut document, dependency, version)? {
+            return Ok(());
         }
+        self.workspace.file.document = document;
+        self.workspace
+            .dependencies
+            .entry(dependency.name.clone())
+            .or_insert_with(|| new_entry(dependency, version));
         self.workspace.file.write().await
+    }
+
+    /// Applies this install's change to `document`, answering whether there was one.
+    fn edit_config(
+        &self,
+        document: &mut ConfigDocument,
+        dependency: &Dependency,
+        version: &str,
+    ) -> Result<bool> {
+        let name = &dependency.name;
+        let Some(configured) = self.workspace.dependencies.get(name) else {
+            document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
+            return Ok(true);
+        };
+        if configured.files.as_deref() != Some(dependency.files.as_slice()) {
+            let entry = RawDependency {
+                version: Some(version.to_owned()),
+                files: Some(dependency.files.clone()),
+                ..configured.clone()
+            };
+            document.upsert_dependency(name, &self.written(entry))?;
+            return Ok(true);
+        }
+        if configured.version.as_deref() == Some(version) {
+            return Ok(false);
+        }
+        document.set_dependency_version(name, version)?;
+        Ok(true)
+    }
+
+    /// `entry` without the values the `default` block supplies, which `load` folds back in.
+    fn written(&self, mut entry: RawDependency) -> RawDependency {
+        entry.strip_defaults(&self.workspace.defaults);
+        entry
+    }
+}
+
+/// The config entry for a dependency the config does not list yet.
+fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
+    RawDependency {
+        version: Some(version.to_owned()),
+        repository: Some(dependency.repository.clone()),
+        files: Some(dependency.files.clone()),
+        hash_version_file: dependency.hash_version_file.clone(),
+        vendor_folder: dependency.vendor_folder.clone(),
+        release_regex: dependency.release_regex.clone(),
+        locked: dependency.locked.then_some(true),
+        name: None,
     }
 }
 
@@ -763,4 +787,103 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
         let _ = tokio::fs::remove_file(source).await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use super::InstallOptions;
+    use crate::config::Workspace;
+    use crate::github::GitHubClient;
+    use crate::lockfile::read_lockfile;
+    use crate::model::{Dependency, RawDependency};
+    use crate::ops::Session;
+    use crate::progress::Reporter;
+
+    const REPOSITORY: &str = "https://github.com/a/b";
+
+    async fn session(dir: &Path, config: &str) -> Session {
+        std::fs::write(dir.join("vendor.json"), config).unwrap();
+        let workspace = Workspace::load(dir.to_str()).await.unwrap();
+        let github = GitHubClient::new(None).unwrap();
+        Session::with_reporter(github, workspace, Reporter::new(false))
+    }
+
+    fn dependency(name: &str, version: &str, file: &str) -> Dependency {
+        RawDependency {
+            version: Some(version.to_owned()),
+            repository: Some(REPOSITORY.to_owned()),
+            files: serde_json::from_value(serde_json::json!([file])).unwrap(),
+            ..RawDependency::default()
+        }
+        .resolve(name)
+        .unwrap()
+    }
+
+    /// Commits `dependency` at `version` as an install that downloaded its files would.
+    async fn commit(session: &mut Session, dependency: Dependency, version: &str) {
+        let progress = Arc::new(session.progress.dependency(&dependency.name));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(dependency, options, version.to_owned(), progress)
+            .await;
+        session.commit(prepared).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_new_entry_is_saved_when_it_starts_at_the_installed_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), r#"{"vendorDependencies":{}}"#).await;
+
+        commit(&mut session, dependency("second", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["second"].version.as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn changed_files_are_saved_on_an_existing_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            r#"{{"vendorDependencies":{{"first":{{
+                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]
+            }}}}}}"#
+        );
+        let mut session = session(dir.path(), &config).await;
+
+        commit(&mut session, dependency("first", "v1", "README.md"), "v2").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        let first = &saved.dependencies["first"];
+        assert_eq!(first.version.as_deref(), Some("v2"));
+        assert_eq!(
+            first.files,
+            serde_json::from_value(serde_json::json!(["README.md"])).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_version_bump_rewrites_only_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            r#"{{"vendorDependencies":{{"first":{{ /* keep */
+                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]
+            }}}}}}"#
+        );
+        let mut session = session(dir.path(), &config).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v2").await;
+
+        let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+        assert_eq!(text, config.replace(r#""v1""#, r#""v2""#));
+        let locked = read_lockfile(&dir.path().join("vendor/first/vendor-lock.json"))
+            .await
+            .unwrap();
+        assert_eq!(locked["first"].version, "v2");
+    }
 }
