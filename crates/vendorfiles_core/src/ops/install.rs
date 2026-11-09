@@ -260,9 +260,8 @@ impl Session {
 
         if options.should_update {
             match old_version.as_deref() {
-                // A dependency with no previous version was installed, not updated.
-                Some(old) => progress.updated(old, &version),
-                None => progress.installed(&version),
+                Some(old) if old != version => progress.updated(old, &version),
+                _ => progress.installed(&version),
             }
             return Ok(Some(version));
         }
