@@ -160,7 +160,7 @@ impl Session {
         let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
             || self
-                .needs_update(&dependency.name, &lockfile_path, &folder, &version)
+                .needs_update(&dependency, &lockfile_path, &folder, &version)
                 .await;
         let previous = previous_entry(
             &dependency.name,
@@ -833,6 +833,78 @@ mod tests {
             .prepare(dependency, options, version.to_owned(), progress)
             .await;
         session.commit(prepared).await.unwrap();
+    }
+
+    /// Lays out `first` as installed at `v1` with `LICENSE`.
+    fn installed(dir: &Path) {
+        let folder = dir.join("vendor/first");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("LICENSE"), "text").unwrap();
+        let lock = format!(
+            r#"{{"first":{{"repository":"{REPOSITORY}","version":"v1","files":{{"LICENSE":"LICENSE"}}}}}}"#
+        );
+        std::fs::write(folder.join("vendor-lock.json"), lock).unwrap();
+    }
+
+    async fn stale(session: &Session, dependency: Dependency) -> bool {
+        let progress = Arc::new(session.progress.dependency(&dependency.name));
+        session
+            .prepare(
+                dependency,
+                InstallOptions::default(),
+                "v1".to_owned(),
+                progress,
+            )
+            .await
+            .needs_update
+    }
+
+    fn first_config(extra: &str) -> String {
+        format!(
+            r#"{{"vendorDependencies":{{"first":{{
+                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]{extra}
+            }}}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn an_installed_dependency_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+
+        assert!(!stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn files_the_lockfile_does_not_record_are_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+
+        assert!(stale(&session, dependency("first", "v1", "README.md")).await);
+    }
+
+    #[tokio::test]
+    async fn a_lock_entry_the_config_does_not_list_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), r#"{"vendorDependencies":{}}"#).await;
+
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn a_name_field_does_not_change_where_files_are_looked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let config = first_config(r#","name":"other""#);
+        let session = session(dir.path(), &config).await;
+        let dependency = session.workspace.dependencies["first"]
+            .resolve("first")
+            .unwrap();
+
+        assert!(!stale(&session, dependency).await);
     }
 
     #[tokio::test]

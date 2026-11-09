@@ -1,10 +1,9 @@
 //! Deciding which version a dependency should be at, and whether anything must change.
 
-use std::path::{Path, PathBuf};
-
-use indexmap::IndexMap;
+use std::path::Path;
 
 use crate::error::{Result, VendorError};
+use crate::fsx::anchor;
 use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
 use crate::model::Dependency;
 use crate::ops::Session;
@@ -67,22 +66,25 @@ impl Session {
         }
     }
 
-    /// Whether the dependency folder is out of step with the config.
+    /// Whether the dependency folder is out of step with what is being installed.
     ///
     /// Any inconsistency - missing lockfile, version drift, a file that vanished, a changed
-    /// `files` declaration - means "yes". Every failure path is also "yes", matching the
-    /// reference's blanket `catch`.
+    /// `files` declaration, an entry the config does not list - means "yes". Every failure path
+    /// is also "yes", matching the reference's blanket `catch`.
     pub(crate) async fn needs_update(
         &self,
-        name: &str,
+        dependency: &Dependency,
         lockfile_path: &Path,
         folder: &Path,
         new_version: &str,
     ) -> bool {
+        if !self.workspace.dependencies.contains_key(&dependency.name) {
+            return true;
+        }
         let Ok(lockfile) = read_lockfile(lockfile_path).await else {
             return true;
         };
-        let Some(locked) = lockfile.get(name) else {
+        let Some(locked) = lockfile.get(&dependency.name) else {
             return true;
         };
         if locked.version != new_version {
@@ -96,48 +98,11 @@ impl Session {
                 return true;
             }
         }
-        if self
-            .files_from_config()
-            .iter()
-            .any(|(path, owner)| owner == name && !path.exists())
-        {
-            return true;
-        }
-        let Some(configured) = self.workspace.dependencies.get(name) else {
-            return true;
-        };
-        let Some(files) = configured.files.as_deref() else {
-            return true;
-        };
-        let expected =
-            config_files_to_lock_files(files, configured.version.as_deref().unwrap_or_default());
+        let expected = config_files_to_lock_files(&dependency.files, new_version);
         expected != locked.files
-    }
-
-    /// Every path the config expects on disk, mapped to the dependency that owns it.
-    pub(crate) fn files_from_config(&self) -> IndexMap<PathBuf, String> {
-        let mut files = IndexMap::new();
-        for (name, dependency) in &self.workspace.dependencies {
-            let Some(declared) = dependency.files.as_deref() else {
-                continue;
-            };
-            let folder = self.workspace.dependency_folder(
-                dependency.vendor_folder.as_deref(),
-                dependency
-                    .name
-                    .as_deref()
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or(name),
-            );
-            let lock_files = config_files_to_lock_files(
-                declared,
-                dependency.version.as_deref().unwrap_or_default(),
-            );
-            for file in flat_files(&lock_files) {
-                files.insert(crate::fsx::anchor(&folder, file.as_str()), name.clone());
-            }
-        }
-        files
+            || flat_files(&expected)
+                .iter()
+                .any(|file| !anchor(folder, file.as_str()).exists())
     }
 }
 
