@@ -295,7 +295,9 @@ async fn install(
     }
 
     let mut entry = merge_install_entry(existing, &session.workspace.defaults, repository, files);
-    fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
+    if !session.workspace.dependencies.contains_key(&name) {
+        fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
+    }
     let dependency = entry.resolve(&name)?;
 
     if preview.dry_run {
@@ -394,7 +396,7 @@ fn chosen_files(
         .or_else(|| listed.map(|listed| listed.files.clone()))
 }
 
-/// Fills in what a known name or registry entry says and the config does not yet.
+/// Fills in what a known name or registry entry says about a new entry.
 fn fill_from_source(
     entry: &mut RawDependency,
     known: Option<&known::Known>,

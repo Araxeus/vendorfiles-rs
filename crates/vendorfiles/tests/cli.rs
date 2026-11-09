@@ -1202,6 +1202,22 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
 }
 
 #[test]
+fn a_known_name_does_not_move_the_entry_already_under_it() {
+    let dir = project(
+        r#"{"vendorDependencies":{"vendorfiles-rs":{
+            "repository":"https://github.com/Araxeus/vendorfiles-rs",
+            "version":"v1.0.0",
+            "files":["LICENSE"]
+        }}}"#,
+    );
+
+    let out = vendor(dir.path(), &["add", "vendor", "--dry-run"]);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(!stdout(&out).contains("vendorFolder"), "{}", stdout(&out));
+}
+
+#[test]
 fn every_spelling_of_a_repository_finds_the_entry_that_holds_it() {
     for source in [
         "vendorfiles-rs-tests/not-a-real-repository",
