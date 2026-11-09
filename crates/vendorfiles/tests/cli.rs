@@ -1009,7 +1009,8 @@ fn script(dir: &Path, name: &str, body: &str) -> String {
 // ---------------------------------------------------------------------------------------
 
 /// A project whose lockfile and files already agree with the config, so no request is made.
-const NOTHING_CHANGED: &str = "\u{1b}[36mINFO: Everything is up to date\u{1b}[0m\n";
+const UP_TO_DATE_ONE_LOCKED: &str =
+    "\u{1b}[36mINFO: Everything is up to date (1 locked)\u{1b}[0m\n";
 const ALREADY_IN_SYNC: &str = "\u{1b}[36mINFO: Already in sync\u{1b}[0m\n";
 
 fn up_to_date_project() -> tempfile::TempDir {
@@ -1059,7 +1060,7 @@ fn sync_says_once_that_it_is_already_in_sync() {
 fn update_says_once_that_nothing_changed() {
     let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
     let out = vendor(dir.path(), &["update"]);
-    assert_eq!(stdout(&out), NOTHING_CHANGED);
+    assert_eq!(stdout(&out), UP_TO_DATE_ONE_LOCKED);
     assert_eq!(code(&out), 0);
 }
 
@@ -1067,7 +1068,7 @@ fn update_says_once_that_nothing_changed() {
 fn outdated_says_once_that_nothing_is_outdated() {
     let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
     let out = vendor(dir.path(), &["outdated"]);
-    assert_eq!(stdout(&out), NOTHING_CHANGED);
+    assert_eq!(stdout(&out), UP_TO_DATE_ONE_LOCKED);
     assert_eq!(code(&out), 0);
 }
 

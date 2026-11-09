@@ -93,6 +93,8 @@ impl Session {
             return Ok(());
         }
 
+        let locked = plans.iter().filter(|plan| plan.dependency.locked).count();
+
         // Closed before any error leaves, so the outcome rows print above it.
         let outcome = self.run_plans(plans, &options).await;
         self.progress.end();
@@ -103,7 +105,7 @@ impl Session {
         }
 
         if !stale {
-            ui::info(nothing_changed(&options));
+            ui::info(nothing_changed(&options, locked));
         }
 
         if ui::pr_mode() && !bumps.is_empty() {
@@ -255,12 +257,13 @@ impl BumpCandidate {
 /// What a traversal says when no dependency was stale.
 ///
 /// `sync` compares files against the config and never looks for newer versions, so it cannot
-/// claim anything is up to date.
-const fn nothing_changed(options: &SyncOptions) -> &'static str {
-    if options.should_update {
-        "Everything is up to date"
-    } else {
-        "Already in sync"
+/// claim anything is up to date. `update` and `outdated` skip locked dependencies, so they count
+/// them.
+fn nothing_changed(options: &SyncOptions, locked: usize) -> String {
+    match (options.should_update, locked) {
+        (false, _) => "Already in sync".to_owned(),
+        (true, 0) => "Everything is up to date".to_owned(),
+        (true, locked) => format!("Everything is up to date ({locked} locked)"),
     }
 }
 
@@ -284,4 +287,24 @@ fn print_pull_request_body(bumps: &[Bump]) {
         .collect::<Vec<_>>()
         .join("\n");
     crate::progress::print_raw(body.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SyncOptions, nothing_changed};
+
+    #[test]
+    fn only_a_version_check_counts_locked_dependencies() {
+        let sync = SyncOptions::default();
+        let update = SyncOptions {
+            should_update: true,
+            ..SyncOptions::default()
+        };
+        assert_eq!(nothing_changed(&sync, 2), "Already in sync");
+        assert_eq!(nothing_changed(&update, 0), "Everything is up to date");
+        assert_eq!(
+            nothing_changed(&update, 2),
+            "Everything is up to date (2 locked)"
+        );
+    }
 }
