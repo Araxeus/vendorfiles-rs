@@ -562,6 +562,59 @@ vendorDependencies:
     }
 
     #[test]
+    fn json_upsert_replaces_an_entry_in_place() {
+        let mut d = doc(ConfigFormat::Json, JSON5);
+        d.upsert_dependency("a", &dependency()).unwrap();
+        let out = d.render();
+        assert!(
+            out.contains(r#""repository": "https://github.com/a/b""#),
+            "{out}"
+        );
+        assert!(out.contains(r#""b": { "version": "v2" }"#), "{out}");
+        assert_eq!(out.matches(r#""a":"#).count(), 1, "{out}");
+    }
+
+    #[test]
+    fn yaml_upsert_replaces_an_entry_in_place() {
+        let mut d = doc(ConfigFormat::Yml, YAML);
+        d.upsert_dependency("a", &dependency()).unwrap();
+        let entry = "
+    a:
+        version: v1
+        repository: https://github.com/a/b
+        files:
+            - LICENSE
+
+    b:
+        version: v2
+        files: [README.md]";
+        let top = "# top\nvendorConfig:\n    vendorFolder: ./v   # folder\nvendorDependencies:";
+        assert_eq!(d.render(), format!("{top}{entry}"));
+    }
+
+    #[test]
+    fn toml_upsert_replaces_an_entry_in_place() {
+        let source = "# top\n[vendorDependencies.a]\nversion = \"v0\"\n\n\
+                      [vendorDependencies.b] # keep\nversion = \"v2\"\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.upsert_dependency("a", &dependency()).unwrap();
+        let out = d.render();
+        assert_eq!(out.matches("[vendorDependencies.a]").count(), 1, "{out}");
+        assert!(
+            out.contains("repository = \"https://github.com/a/b\""),
+            "{out}"
+        );
+        assert!(
+            out.contains("[vendorDependencies.b] # keep\nversion = \"v2\""),
+            "{out}"
+        );
+        assert!(
+            out.find("vendorDependencies.a") < out.find("vendorDependencies.b"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn yaml_upsert_replaces_an_empty_flow_mapping_with_a_block() {
         let mut d = doc(ConfigFormat::Yml, "# keep\nvendorDependencies: {}\n");
         d.upsert_dependency("b", &dependency()).unwrap();
