@@ -261,7 +261,9 @@ async fn install(
         bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
     }
 
-    let name = match name.filter(|n| !n.is_empty()) {
+    let name = name.filter(|n| !n.is_empty());
+    let named = name.is_some();
+    let name = match name {
         Some(name) => name,
         // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` - the
         // canonical name, not the alias that was typed.
@@ -275,6 +277,14 @@ async fn install(
         existing,
         neighbour,
     } = Base::find(&session.workspace, &name, &lookup, files.is_some());
+
+    // Only `-n` asks for a second entry. Any other name was derived from the source.
+    if !named && let Some((holder, _)) = neighbour.as_ref() {
+        bail!(VendorError::AlreadyVendored {
+            repository: stored,
+            name: holder.clone(),
+        });
+    }
 
     let files = chosen_files(files, &existing, known.as_ref(), listed.as_ref());
     if files.as_ref().is_none_or(Vec::is_empty) {

@@ -1122,7 +1122,10 @@ fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
     // version, and when that version already matches nothing is written at all.
     let dir = described_neighbour(NEIGHBOURED);
 
-    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
+    );
     let warning = stderr(&out);
 
     assert_eq!(code(&out), 0, "stderr: {warning}");
@@ -1142,7 +1145,15 @@ fn describing_it_with_files_still_borrows_the_version() {
 
     let out = vendor(
         dir.path(),
-        &["add", NEIGHBOURED, "--dry-run", "-f", "README.md"],
+        &[
+            "add",
+            NEIGHBOURED,
+            "--dry-run",
+            "-n",
+            "second",
+            "-f",
+            "README.md",
+        ],
     );
     let warning = stderr(&out);
 
@@ -1183,13 +1194,40 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
     // borrowed would be the worst of both.
     let dir = neighbour_project(&format!(r#""repository":"{NEIGHBOURED}""#));
 
-    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
+    );
     assert_ne!(code(&out), 0);
     assert!(
         !stderr(&out).contains("already vendors"),
         "nothing was inherited: {}",
         stderr(&out)
     );
+}
+
+#[test]
+fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
+    let pinned = format!("{NEIGHBOURED}@v1.0.0");
+    for args in [
+        vec!["add", NEIGHBOURED],
+        vec!["add", pinned.as_str()],
+        vec!["add", NEIGHBOURED, "-f", "README.md"],
+        vec!["add", NEIGHBOURED, "--dry-run"],
+    ] {
+        let dir = described_neighbour(NEIGHBOURED);
+        let config = dir.path().join("vendor.json");
+        let before = std::fs::read_to_string(&config).unwrap();
+
+        let out = vendor(dir.path(), &args);
+
+        assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
+        let said = stderr(&out);
+        assert!(said.contains("already vendored as 'first'"), "{said}");
+        assert!(said.contains("vendor update first"), "{said}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(!dir.path().join("vendor").exists(), "{args:?} wrote files");
+    }
 }
 
 /// A registry with one program, written next to the project.
