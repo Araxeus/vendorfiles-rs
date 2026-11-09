@@ -12,10 +12,7 @@ pub(super) fn list_dependencies(workspace: &Workspace) {
     const HEADERS: [&str; 3] = ["NAME", "VERSION", "REPOSITORY"];
 
     if workspace.dependencies.is_empty() {
-        ui::info(format!(
-            "no dependencies in {}",
-            workspace.file.display_path()
-        ));
+        ui::info(workspace.no_dependencies_notice());
         return;
     }
 

@@ -79,6 +79,12 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// The line a command prints when the config declares no dependencies.
+    #[must_use]
+    pub fn no_dependencies_notice(&self) -> String {
+        format!("no dependencies in {}", self.file.display_path())
+    }
+
     /// Loads the config file, searching `config_location` (or the environment) for it.
     ///
     /// # Errors

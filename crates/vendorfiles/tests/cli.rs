@@ -676,11 +676,15 @@ fn invalid_config_keys_are_reported_with_the_reference_wording() {
 }
 
 #[test]
-fn an_empty_dependency_map_is_a_silent_success() {
+fn an_empty_dependency_map_says_so_and_succeeds() {
     let dir = project(r#"{"vendorDependencies":{}}"#);
     for args in [vec!["sync"], vec!["update"], vec!["outdated"]] {
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), "", "stdout for `vendor {args:?}`");
+        let printed = stdout(&out);
+        assert!(
+            printed.contains("INFO: no dependencies in") && printed.contains("vendor.json"),
+            "stdout for `vendor {args:?}`: {printed}"
+        );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
@@ -1005,6 +1009,10 @@ fn script(dir: &Path, name: &str, body: &str) -> String {
 // ---------------------------------------------------------------------------------------
 
 /// A project whose lockfile and files already agree with the config, so no request is made.
+const UP_TO_DATE_ONE_LOCKED: &str =
+    "\u{1b}[36mINFO: Everything is up to date (1 locked)\u{1b}[0m\n";
+const ALREADY_IN_SYNC: &str = "\u{1b}[36mINFO: Already in sync\u{1b}[0m\n";
+
 fn up_to_date_project() -> tempfile::TempDir {
     let dir = project(
         r#"{
@@ -1041,13 +1049,26 @@ fn up_to_date_project() -> tempfile::TempDir {
 }
 
 #[test]
-fn sync_reports_up_to_date_without_touching_the_network() {
+fn sync_says_once_that_it_is_already_in_sync() {
     let dir = up_to_date_project();
     let out = vendor(dir.path(), &["sync"]);
-    assert_eq!(
-        stdout(&out),
-        "\u{1b}[36mINFO: Coloris is up to date\u{1b}[0m\n"
-    );
+    assert_eq!(stdout(&out), ALREADY_IN_SYNC);
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn update_says_once_that_nothing_changed() {
+    let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
+    let out = vendor(dir.path(), &["update"]);
+    assert_eq!(stdout(&out), UP_TO_DATE_ONE_LOCKED);
+    assert_eq!(code(&out), 0);
+}
+
+#[test]
+fn outdated_says_once_that_nothing_is_outdated() {
+    let dir = project_with_lock(&format!("{{{LIVE_ENTRY}}}"), &["one"]);
+    let out = vendor(dir.path(), &["outdated"]);
+    assert_eq!(stdout(&out), UP_TO_DATE_ONE_LOCKED);
     assert_eq!(code(&out), 0);
 }
 
@@ -1055,7 +1076,6 @@ fn sync_reports_up_to_date_without_touching_the_network() {
 fn plain_is_accepted_on_either_side_of_the_subcommand() {
     // The output is already plain here - a test harness has no terminal - so what this pins is
     // that the flag parses in both positions and changes nothing else.
-    let expected = "\u{1b}[36mINFO: Coloris is up to date\u{1b}[0m\n";
     for args in [
         vec!["sync", "--plain"],
         vec!["sync", "-p"],
@@ -1064,7 +1084,11 @@ fn plain_is_accepted_on_either_side_of_the_subcommand() {
     ] {
         let dir = up_to_date_project();
         let out = vendor(dir.path(), &args);
-        assert_eq!(stdout(&out), expected, "stdout for `vendor {args:?}`");
+        assert_eq!(
+            stdout(&out),
+            ALREADY_IN_SYNC,
+            "stdout for `vendor {args:?}`"
+        );
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
@@ -1531,8 +1555,10 @@ fn a_missing_file_makes_sync_consider_the_dependency_stale() {
 }
 
 #[test]
-fn sync_reports_dependencies_in_config_order() {
+fn outdated_reports_dependencies_in_config_order() {
     // The download stage overlaps across dependencies; the commit stage must not.
+    //
+    // Locked and never installed, so each one is stale and none needs a version lookup.
     let dir = tempfile::tempdir().expect("temp dir");
     let names = ["zeta", "alpha", "middle", "beta"];
     let entries: Vec<String> = names
@@ -1541,6 +1567,7 @@ fn sync_reports_dependencies_in_config_order() {
             format!(
                 r#"    "{name}": {{
       "version": "v1",
+      "locked": true,
       "repository": "https://github.com/example/{name}",
       "files": ["one"]
     }}"#
@@ -1556,23 +1583,13 @@ fn sync_reports_dependencies_in_config_order() {
     )
     .expect("writing config");
 
-    for name in names {
-        let folder = dir.path().join("vendor").join(name);
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("one"), name).unwrap();
-        std::fs::write(
-            folder.join("vendor-lock.json"),
-            format!(
-                "{{\n  \"{name}\": {{\n    \"repository\": \"https://github.com/example/{name}\",\n    \"version\": \"v1\",\n    \"files\": {{\n      \"one\": \"one\"\n    }}\n  }}\n}}\n"
-            ),
-        )
-        .unwrap();
-    }
-
-    let out = vendor(dir.path(), &["sync"]);
+    let out = vendor(dir.path(), &["outdated"]);
     let expected = names.iter().fold(String::new(), |mut acc, name| {
         use std::fmt::Write as _;
-        let _ = writeln!(acc, "\u{1b}[36mINFO: {name} is up to date\u{1b}[0m");
+        let _ = writeln!(
+            acc,
+            "\u{1b}]8;;https://github.com/example/{name}\u{1b}\\{name}\u{1b}]8;;\u{1b}\\ v1"
+        );
         acc
     });
     assert_eq!(stdout(&out), expected);

@@ -215,22 +215,9 @@ impl Reporter {
 
     /// Closes the display, wiping the region and restoring the cursor.
     ///
-    /// The held outcome lines go out first, so they land above the region and are what remains on
-    /// screen once it is wiped.
+    /// The held outcome lines print once the region is gone, so they take its place on screen.
+    /// The render thread cannot carry them, because its parser drops their links.
     pub fn end(&self) {
-        let held: Vec<String> = self
-            .results
-            .lock()
-            .map(|mut results| results.drain(..).collect())
-            .unwrap_or_default();
-        if !held.is_empty() {
-            let lines = held.iter().flat_map(|line| ansi::to_lines(line)).collect();
-            if !dispatch(Command::Print(lines)) {
-                for line in held {
-                    println!("{line}");
-                }
-            }
-        }
         if let Ok(mut active) = ACTIVE.lock() {
             *active = None;
         }
@@ -238,6 +225,14 @@ impl Reporter {
             && let Some(mut driver) = driver.take()
         {
             driver.stop();
+        }
+        let held: Vec<String> = self
+            .results
+            .lock()
+            .map(|mut results| results.drain(..).collect())
+            .unwrap_or_default();
+        for line in held {
+            println!("{line}");
         }
     }
 
@@ -251,6 +246,7 @@ impl Reporter {
         Dependency {
             id,
             name: name.to_owned(),
+            repository: None,
             animated: self.animated(),
             state: Arc::clone(&self.state),
             pending: Mutex::new(Vec::new()),
@@ -270,6 +266,8 @@ impl Drop for Reporter {
 pub struct Dependency {
     id: DepId,
     name: String,
+    /// Where the name links to in outcome lines.
+    repository: Option<String>,
     animated: bool,
     state: Arc<Mutex<RunState>>,
     /// `INFO:` lines withheld until this dependency finishes, so piped output stays ordered.
@@ -279,6 +277,20 @@ pub struct Dependency {
 }
 
 impl Dependency {
+    /// Links this dependency's name to its repository in outcome lines.
+    #[must_use]
+    pub fn linked_to(mut self, repository: &str) -> Self {
+        self.repository = Some(repository.to_owned());
+        self
+    }
+
+    /// `text` as a link to the repository, when there is one.
+    fn linked(&self, text: &str) -> String {
+        self.repository
+            .as_deref()
+            .map_or_else(|| text.to_owned(), |url| ui::link(text, url))
+    }
+
     /// Replaces this dependency's stage.
     fn set(&self, stage: Stage) {
         if let Ok(mut state) = self.state.lock()
@@ -371,7 +383,7 @@ impl Dependency {
 
     /// Ends with a note that nothing needed doing.
     pub fn up_to_date(&self) {
-        let name = self.name.clone();
+        let name = self.linked(&self.name);
         self.finish(Outcome::Unchanged, "up to date".into(), || {
             ui::info(format!("{name} is up to date"));
         });
@@ -379,7 +391,7 @@ impl Dependency {
 
     /// Ends with the version now installed.
     pub fn installed(&self, version: &str) {
-        let name = self.name.clone();
+        let name = self.linked(&self.name);
         self.finish(
             Outcome::Changed,
             format!("installed {version}").into(),
@@ -391,7 +403,7 @@ impl Dependency {
 
     /// Ends with the version change.
     pub fn updated(&self, old: &str, new: &str) {
-        let name = self.name.clone();
+        let name = self.linked(&self.name);
         self.finish(Outcome::Changed, format!("{old} → {new}").into(), || {
             ui::success(format!("Updated {name} from {old} to {new}"));
         });
@@ -417,10 +429,24 @@ impl Dependency {
     /// token, whose message mentions no repository, there was no way to tell from the text
     /// either.
     pub fn failed(&self, reason: &str) {
-        let name = self.name.clone();
+        let name = self.linked(&self.name);
         self.finish(Outcome::Failed, reason.to_owned().into(), || {
             ui::error(format!("{name}: {reason}"));
         });
+    }
+
+    /// Ends with one line of the command's own output.
+    ///
+    /// An animated run holds the line for [`Reporter::end`], which keeps its link.
+    pub fn finish_with_line(&self, line: String) {
+        if self.animated {
+            if let Ok(mut results) = self.results.lock() {
+                results.push(line);
+            }
+        } else {
+            print_out(&line);
+        }
+        self.finish_quietly();
     }
 
     /// Ends without saying anything, for commands whose real output is elsewhere.
@@ -461,7 +487,11 @@ impl Dependency {
                 Outcome::Unchanged => ui::cyan(glyph),
                 Outcome::Failed => glyph.to_owned(),
             };
-            let line = format!("{mark}{pad} {} {detail}", column(&self.name));
+            // The padding stays outside the link, so only the name is clickable.
+            let name = column(&self.name);
+            let shown = name.trim_end();
+            let padding = &name[shown.len()..];
+            let line = format!("{mark}{pad} {}{padding} {detail}", self.linked(shown));
             if let Ok(mut results) = self.results.lock() {
                 results.push(line);
             }
@@ -704,6 +734,35 @@ mod tests {
         assert_eq!(held.len(), 2, "both lines are waiting for the end");
         assert!(held[0].contains("aaa") && held[0].contains("installed 1.0.0"));
         assert!(held[1].contains("bbb") && held[1].contains("up to date"));
+    }
+
+    #[test]
+    fn an_outcome_line_links_the_name_and_leaves_the_padding_outside() {
+        let reporter = Reporter::new(true);
+        let dependency = reporter
+            .dependency("fd")
+            .linked_to("https://github.com/sharkdp/fd");
+        dependency.installed("v10.5.0");
+
+        let held = reporter.results.lock().expect("results lock").clone();
+        let link = crate::ui::link("fd", "https://github.com/sharkdp/fd");
+        let padding = " ".repeat(NAME_WIDTH - "fd".len());
+        assert!(
+            held[0].contains(&format!("{link}{padding} installed v10.5.0")),
+            "{:?}",
+            held[0]
+        );
+    }
+
+    #[test]
+    fn an_animated_run_holds_the_outdated_listing_for_the_end() {
+        let reporter = Reporter::new(true);
+        let dependency = reporter.dependency("fd");
+        dependency.finish_with_line("fd v1 -> v2".to_owned());
+
+        let held = reporter.results.lock().expect("results lock").clone();
+        assert_eq!(held, ["fd v1 -> v2"]);
+        assert_eq!(peek(&reporter, |state| state.done), 1);
     }
 
     #[test]

@@ -89,16 +89,23 @@ impl Session {
         let plans = self.plan(&options).inspect_err(|_| self.progress.end())?;
         if plans.is_empty() {
             self.progress.end();
+            ui::info(self.workspace.no_dependencies_notice());
             return Ok(());
         }
 
+        let locked = plans.iter().filter(|plan| plan.dependency.locked).count();
+
         // Closed before any error leaves, so the outcome rows print above it.
-        let bumps = self.run_plans(plans, &options).await;
+        let outcome = self.run_plans(plans, &options).await;
         self.progress.end();
-        let bumps = bumps?;
+        let (bumps, stale) = outcome?;
 
         if !options.show_outdated_only {
             self.prune_lockfiles().await?;
+        }
+
+        if !stale {
+            ui::info(nothing_changed(&options, locked));
         }
 
         if ui::pr_mode() && !bumps.is_empty() {
@@ -107,8 +114,12 @@ impl Session {
         Ok(())
     }
 
-    /// Runs the three passes and returns the version bumps they made.
-    async fn run_plans(&mut self, plans: Vec<Plan>, options: &SyncOptions) -> Result<Vec<Bump>> {
+    /// Runs the three passes, returning the version bumps they made and whether anything was stale.
+    async fn run_plans(
+        &mut self,
+        plans: Vec<Plan>,
+        options: &SyncOptions,
+    ) -> Result<(Vec<Bump>, bool)> {
         let versions = futures_util::future::join_all(
             plans
                 .iter()
@@ -134,6 +145,7 @@ impl Session {
         // project already up to date - or `outdated`, which never downloads - gets none, and
         // the height is settled before the first byte moves.
         let working = prepared.iter().filter(|item| item.has_work()).count();
+        let stale = prepared.iter().any(|item| item.needs_update);
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
@@ -146,7 +158,7 @@ impl Session {
         if bumps.is_err() {
             cancel(&tasks);
         }
-        bumps
+        bumps.map(|bumps| (bumps, stale))
     }
 
     /// Awaits each download in config order and commits it, stopping at the first error.
@@ -156,6 +168,13 @@ impl Session {
         let mut bumps = Vec::new();
         while let Some(task) = tasks.pop_front() {
             let prepared = task.await.map_err(|e| VendorError::Http(e.to_string()))??;
+
+            // A traversal reports only what it affects. `vendor list` shows the rest.
+            if !prepared.needs_update {
+                prepared.progress.finish_quietly();
+                continue;
+            }
+
             let candidate = BumpCandidate::of(&prepared);
             let new_version = self.commit(prepared).await?;
             bumps.extend(candidate.into_bump(new_version));
@@ -169,7 +188,11 @@ impl Session {
         for (name, raw) in &self.workspace.dependencies {
             raw.validate(name)?;
             let dependency = raw.resolve(name)?;
-            let progress = Arc::new(self.progress.dependency(name));
+            let progress = Arc::new(
+                self.progress
+                    .dependency(name)
+                    .linked_to(&dependency.repository),
+            );
             plans.push(Plan {
                 options: InstallOptions {
                     should_update: !dependency.locked && options.should_update,
@@ -231,6 +254,19 @@ impl BumpCandidate {
     }
 }
 
+/// What a traversal says when no dependency was stale.
+///
+/// `sync` compares files against the config and never looks for newer versions, so it cannot
+/// claim anything is up to date. `update` and `outdated` skip locked dependencies, so they count
+/// them.
+fn nothing_changed(options: &SyncOptions, locked: usize) -> String {
+    match (options.should_update, locked) {
+        (false, _) => "Already in sync".to_owned(),
+        (true, 0) => "Everything is up to date".to_owned(),
+        (true, locked) => format!("Everything is up to date ({locked} locked)"),
+    }
+}
+
 /// Cancels download work that will never be committed.
 fn cancel(tasks: &VecDeque<DownloadTask>) {
     for task in tasks {
@@ -251,4 +287,24 @@ fn print_pull_request_body(bumps: &[Bump]) {
         .collect::<Vec<_>>()
         .join("\n");
     crate::progress::print_raw(body.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SyncOptions, nothing_changed};
+
+    #[test]
+    fn only_a_version_check_counts_locked_dependencies() {
+        let sync = SyncOptions::default();
+        let update = SyncOptions {
+            should_update: true,
+            ..SyncOptions::default()
+        };
+        assert_eq!(nothing_changed(&sync, 2), "Already in sync");
+        assert_eq!(nothing_changed(&update, 0), "Everything is up to date");
+        assert_eq!(
+            nothing_changed(&update, 2),
+            "Everything is up to date (2 locked)"
+        );
+    }
 }
