@@ -1118,8 +1118,6 @@ const NEIGHBOURED: &str = "https://github.com/vendorfiles-rs-tests/not-a-real-re
 
 #[test]
 fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
-    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
-    // version, and when that version already matches nothing is written at all.
     let dir = described_neighbour(NEIGHBOURED);
 
     let out = vendor(
@@ -1130,17 +1128,24 @@ fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
 
     assert_eq!(code(&out), 0, "stderr: {warning}");
     assert!(warning.contains("'first' already vendors"), "{warning}");
-    assert!(
-        warning.contains("inherits its files and version"),
-        "{warning}"
-    );
+    assert!(warning.contains("inherits its files."), "{warning}");
     assert!(warning.contains("--files"), "{warning}");
 }
 
 #[test]
-fn describing_it_with_files_still_borrows_the_version() {
-    // `--files` describes the files, but the neighbour is still the base of the new entry, so its
-    // version comes along - and that is the half that can skip the config write entirely.
+fn a_second_name_starts_with_no_version_of_its_own() {
+    let dir = described_neighbour(NEIGHBOURED);
+
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
+    );
+
+    assert!(!stdout(&out).contains("version"), "{}", stdout(&out));
+}
+
+#[test]
+fn describing_a_second_name_with_files_borrows_nothing() {
     let dir = described_neighbour(NEIGHBOURED);
 
     let out = vendor(
@@ -1158,17 +1163,7 @@ fn describing_it_with_files_still_borrows_the_version() {
     let warning = stderr(&out);
 
     assert_eq!(code(&out), 0, "stderr: {warning}");
-    assert!(warning.contains("inherits its version."), "{warning}");
-    assert!(
-        !warning.contains("its files"),
-        "the files were described, not borrowed: {warning}"
-    );
-    // And it really is borrowed: the entry a dry run prints says so.
-    assert!(
-        stdout(&out).contains(r#""version": "v1.0.0""#),
-        "{}",
-        stdout(&out)
-    );
+    assert!(!warning.contains("already vendors"), "{warning}");
 }
 
 #[test]
