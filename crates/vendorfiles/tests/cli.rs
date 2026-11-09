@@ -1207,6 +1207,23 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
 }
 
 #[test]
+fn every_spelling_of_a_repository_finds_the_entry_that_holds_it() {
+    for source in [
+        "vendorfiles-rs-tests/not-a-real-repository",
+        "VENDORFILES-RS-TESTS/Not-A-Real-Repository",
+        "https://www.github.com/vendorfiles-rs-tests/not-a-real-repository",
+    ] {
+        let dir = described_neighbour(NEIGHBOURED);
+        let out = vendor(dir.path(), &["add", source, "-f", "LICENSE", "--dry-run"]);
+        assert!(
+            stderr(&out).contains("already vendored as 'first'"),
+            "{source}: {}",
+            stderr(&out)
+        );
+    }
+}
+
+#[test]
 fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
     let pinned = format!("{NEIGHBOURED}@v1.0.0");
     for args in [

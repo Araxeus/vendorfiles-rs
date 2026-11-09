@@ -12,13 +12,8 @@ use crate::{known, source};
 
 /// What a `source` argument turned out to name.
 struct Source {
-    /// The URL the reference builds, warts and all - `owner/repo` becomes
-    /// `https://www.github.com/owner/repo`, and that exact string is what config entries are
-    /// compared against.
-    lookup: String,
-    /// The same repository without the `www.`, the form every documented example uses and the
-    /// form the search path returns.
-    stored: String,
+    /// The repository's URL.
+    repository: String,
     /// A name this tool knows describes itself.
     known: Option<known::Known>,
     /// A name the hosted registry describes.
@@ -59,26 +54,22 @@ async fn resolve_source(
     };
 
     let mut searched = None;
-    let (lookup, stored) = if let Some(known) = known.as_ref() {
-        (known.repository.to_owned(), known.repository.to_owned())
+    let repository = if let Some(known) = known.as_ref() {
+        known.repository.to_owned()
     } else if let Some(listed) = listed.as_ref() {
-        (listed.repository.clone(), listed.repository.clone())
+        listed.repository.clone()
     } else if is_github_url(source) {
-        (source.to_owned(), source.to_owned())
+        source.to_owned()
     } else if is_owner_repo_shorthand(source) {
-        (
-            format!("https://www.github.com/{source}"),
-            format!("https://github.com/{source}"),
-        )
+        format!("https://github.com/{source}")
     } else {
         let found = search_github(session, source, unlisted).await?;
         searched = Some(unlisted);
-        (found.clone(), found)
+        found
     };
 
     Ok(Source {
-        lookup,
-        stored,
+        repository,
         known,
         listed,
         searched,
@@ -250,15 +241,14 @@ async fn install(
     preview: Preview,
 ) -> Result<()> {
     let Source {
-        lookup,
-        stored,
+        repository,
         known,
         listed,
         searched,
     } = resolve_source(session, source, files.is_some(), preview.refresh).await?;
 
-    if !is_github_url(&lookup) {
-        bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
+    if !is_github_url(&repository) {
+        bail!(VendorError::InvalidGitHubUrlQuoted(repository));
     }
 
     let name = name.filter(|n| !n.is_empty());
@@ -269,19 +259,19 @@ async fn install(
         // canonical name, not the alias that was typed.
         None => match listed.as_ref() {
             Some(listed) => listed.name.clone(),
-            None => owner_and_name_from_repo_url(&lookup)?.name,
+            None => owner_and_name_from_repo_url(&repository)?.name,
         },
     };
 
     let Base {
         existing,
         neighbour,
-    } = Base::find(&session.workspace, &name, &lookup, files.is_some());
+    } = Base::find(&session.workspace, &name, &repository, files.is_some());
 
     // Only `-n` asks for a second entry. Any other name was derived from the source.
     if !named && let Some((holder, _)) = neighbour.as_ref() {
         bail!(VendorError::AlreadyVendored {
-            repository: stored,
+            repository,
             name: holder.clone(),
         });
     }
@@ -293,7 +283,7 @@ async fn install(
             bail!(VendorError::SearchedRepositoryNeedsFiles {
                 typed: source.to_owned(),
                 why,
-                repository: lookup.clone(),
+                repository: repository.clone(),
             });
         }
         bail!(VendorError::MissingFilesOption);
@@ -305,12 +295,12 @@ async fn install(
     // the new entry starts out claiming it, so when it already matches what gets installed the
     // entry is never written at all - which looks like nothing happening for no reason.
     if let Some((neighbour, inherited)) = neighbour
-        && let Some(warning) = inherited.warning(&neighbour, &name, &lookup)
+        && let Some(warning) = inherited.warning(&neighbour, &name, &repository)
     {
         ui::warning(warning);
     }
 
-    let mut entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
+    let mut entry = merge_install_entry(existing, &session.workspace.defaults, repository, files);
     fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
     let dependency = entry.resolve(&name)?;
 
@@ -354,7 +344,12 @@ impl Base {
         let neighbour = workspace
             .dependencies
             .iter()
-            .find(|(_, dependency)| dependency.repository.as_deref() == Some(repository));
+            .find(|(_, dependency)| {
+                dependency
+                    .repository
+                    .as_deref()
+                    .is_some_and(|url| same_repository(url, repository))
+            });
         match neighbour {
             Some((key, dependency)) => Self {
                 existing: dependency.clone(),
@@ -368,6 +363,19 @@ impl Base {
                 neighbour: None,
             },
         }
+    }
+}
+
+/// Whether two GitHub URLs name one repository, however each is spelled.
+fn same_repository(a: &str, b: &str) -> bool {
+    match (
+        owner_and_name_from_repo_url(a),
+        owner_and_name_from_repo_url(b),
+    ) {
+        (Ok(a), Ok(b)) => {
+            a.owner.eq_ignore_ascii_case(&b.owner) && a.name.eq_ignore_ascii_case(&b.name)
+        }
+        _ => false,
     }
 }
 

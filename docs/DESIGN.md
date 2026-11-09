@@ -487,7 +487,7 @@ code and the complete resulting file tree (including binary payloads). Covered:
    block** (the TS tool read the un-merged config entry there and reported "No repository
    found").
 7. **`vendor install owner/repo` keeps a configured dependency's own repository URL** rather
-   than rewriting it to the `https://www.github.com/...` form the shorthand expands to.
+   than rewriting it to the URL the shorthand expands to.
 8. **`releaseRegex` compiles with `fancy-regex`**, so JavaScript patterns using lookaround keep
    working.
 9. **`-p`/`--plain`** turns the live display off, and is the reason `--pr` no longer has a short
