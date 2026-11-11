@@ -136,10 +136,11 @@ impl ConfigDocument {
                 }
                 Ok(())
             }),
-            Self::Yaml(text) => set_yaml_block(text, name, key, &json, |doc| {
-                dependencies(doc)
+            Self::Yaml(text) => set_yaml_block(text, name, |doc| {
+                let entry = dependencies(doc)
                     .and_then(|deps| deps.get_mapping(name))
-                    .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))
+                    .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))?;
+                Ok((entry, key, &json))
             }),
             Self::Toml(doc) => {
                 let value = value
@@ -284,22 +285,22 @@ fn edit_yaml(
 
 /// Writes a dependency into YAML text, in the reference emitter's style and the file's indent.
 fn upsert_yaml(text: &mut String, name: &str, serialized: &serde_json::Value) -> Result<()> {
-    let width = Indent::detect(text).width();
     let wrapped = serde_json::json!({ name: serialized });
     if text.trim().is_empty() {
+        let width = Indent::detect(text).width();
         *text = yaml_emit::to_string(&serde_json::json!({ DEPENDENCIES_KEY: wrapped }), width);
         return Ok(());
     }
 
-    if dependencies(&yaml_document(text, name)?).is_some_and(|deps| !deps.is_empty()) {
-        return set_yaml_block(text, name, name, serialized, |doc| {
-            dependencies(doc).ok_or_else(|| unwritable(name, "vendorDependencies is not a table"))
-        });
-    }
-    // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
-    set_yaml_block(text, name, DEPENDENCIES_KEY, &wrapped, |doc| {
-        doc.as_mapping()
-            .ok_or_else(|| unwritable(name, "config root is not a table"))
+    set_yaml_block(text, name, |doc| match dependencies(doc) {
+        Some(deps) if !deps.is_empty() => Ok((deps, name, serialized)),
+        // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
+        _ => {
+            let root = doc
+                .as_mapping()
+                .ok_or_else(|| unwritable(name, "config root is not a table"))?;
+            Ok((root, DEPENDENCIES_KEY, &wrapped))
+        }
     })
 }
 
@@ -308,22 +309,22 @@ fn dependencies(doc: &yaml_edit::Document) -> Option<yaml_edit::Mapping> {
     doc.as_mapping()?.get_mapping(DEPENDENCIES_KEY)
 }
 
-/// Sets `key` on the mapping `parent` picks out, in the reference emitter's style and the
-/// file's indent.
-fn set_yaml_block(
+/// Sets a key on the mapping `place` picks out to the value it gives, in the reference
+/// emitter's style and the file's indent.
+fn set_yaml_block<'a>(
     text: &mut String,
     name: &str,
-    key: &str,
-    value: &serde_json::Value,
-    parent: impl FnOnce(&yaml_edit::Document) -> Result<yaml_edit::Mapping>,
+    place: impl FnOnce(
+        &yaml_edit::Document,
+    ) -> Result<(yaml_edit::Mapping, &'a str, &'a serde_json::Value)>,
 ) -> Result<()> {
     // `yaml-edit` indents an inserted block two columns past its key, so the block is written in
     // two-space steps and widened to the file's step once it is in place.
     let width = Indent::detect(text).width();
-    let block = yaml_document(&yaml_emit::to_string(value, 2), name)?;
     let mut inserted = None;
     edit_yaml(text, name, |doc| {
-        let parent = parent(doc)?;
+        let (parent, key, value) = place(doc)?;
+        let block = yaml_document(&yaml_emit::to_string(value, 2), name)?;
         parent.set(key, &block);
         inserted = parent
             .get(key)
