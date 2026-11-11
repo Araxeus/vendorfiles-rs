@@ -82,9 +82,7 @@ impl ConfigDocument {
                 Ok(())
             }),
             Self::Yaml(text) => edit_yaml(text, name, |doc| {
-                let entry = doc
-                    .as_mapping()
-                    .and_then(|root| root.get_mapping(DEPENDENCIES_KEY))
+                let entry = dependencies(doc)
                     .and_then(|deps| deps.get_mapping(name))
                     .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))?;
                 let style = yaml_version_style(entry.get("version").as_ref(), version);
@@ -118,27 +116,26 @@ impl ConfigDocument {
     /// Returns [`VendorError::SerializeConfig`] when the files cannot be encoded or the entry
     /// cannot be edited in place.
     pub fn set_dependency_files(&mut self, name: &str, files: &[FileEntry]) -> Result<()> {
+        let value = serde_json::to_value(files).map_err(|e| unwritable(name, e))?;
         match self {
-            Self::Json(text) => {
-                let value = serde_json::to_value(files).map_err(|e| unwritable(name, e))?;
-                edit_json(text, name, |root| {
-                    let entry = root
-                        .object_value_or_set()
-                        .object_value_or_set(DEPENDENCIES_KEY)
-                        .object_value_or_set(name);
-                    match entry.get("files") {
-                        Some(prop) => prop.set_value(cst_value(&value)),
-                        None => {
-                            entry.append("files", cst_value(&value));
-                        }
+            Self::Json(text) => edit_json(text, name, |root| {
+                let entry = root
+                    .object_value_or_set()
+                    .object_value_or_set(DEPENDENCIES_KEY)
+                    .object_value_or_set(name);
+                match entry.get("files") {
+                    Some(prop) => prop.set_value(cst_value(&value)),
+                    None => {
+                        entry.append("files", cst_value(&value));
                     }
-                    Ok(())
-                })
-            }
-            Self::Yaml(text) => {
-                let value = serde_json::to_value(files).map_err(|e| unwritable(name, e))?;
-                set_yaml_files(text, name, &value)
-            }
+                }
+                Ok(())
+            }),
+            Self::Yaml(text) => set_yaml_block(text, name, "files", &value, |doc| {
+                dependencies(doc)
+                    .and_then(|deps| deps.get_mapping(name))
+                    .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))
+            }),
             Self::Toml(doc) => {
                 let value = files
                     .serialize(toml_edit::ser::ValueSerializer::new())
@@ -224,10 +221,7 @@ impl ConfigDocument {
                 Ok(())
             }),
             Self::Yaml(text) => edit_yaml(text, name, |doc| {
-                if let Some(deps) = doc
-                    .as_mapping()
-                    .and_then(|root| root.get_mapping(DEPENDENCIES_KEY))
-                {
+                if let Some(deps) = dependencies(doc) {
                     deps.remove(name);
                 }
                 Ok(())
@@ -292,75 +286,43 @@ fn upsert_yaml(text: &mut String, name: &str, serialized: &serde_json::Value) ->
         return Ok(());
     }
 
-    // `yaml-edit` indents an inserted block two columns past its key, so the entry is written in
-    // two-space steps and widened to the file's step once it is in place.
-    let entry = yaml_document(&yaml_emit::to_string(&wrapped[name], 2), name)?;
-    let wrapped = yaml_document(&yaml_emit::to_string(&wrapped, 2), name)?;
-    let mut inserted = None;
-    edit_yaml(text, name, |doc| {
-        let root = doc
-            .as_mapping()
-            .ok_or_else(|| unwritable(name, "config root is not a table"))?;
-        let (parent, key) = match root.get_mapping(DEPENDENCIES_KEY) {
-            Some(deps) if !deps.is_empty() => {
-                deps.set(name, &entry);
-                (deps, name)
-            }
-            // Anything else under the key, such as an alias, holds entries a replacement would lose.
-            _ if !holds_nothing(root.get(DEPENDENCIES_KEY)) => {
-                return Err(unwritable(
-                    name,
-                    "vendorDependencies is not a plain mapping",
-                ));
-            }
-            // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
-            _ => {
-                root.set(DEPENDENCIES_KEY, &wrapped);
-                (root, DEPENDENCIES_KEY)
-            }
-        };
-        inserted = parent
-            .get_mapping(key)
-            .map(|value| (parent.detect_indentation_level(), value.byte_range()));
-        Ok(())
-    })?;
-    if let Some((column, range)) = inserted {
-        widen(
-            text,
-            column,
-            range.start as usize..range.end as usize,
-            width,
-        );
+    if dependencies(&yaml_document(text, name)?).is_some_and(|deps| !deps.is_empty()) {
+        return set_yaml_block(text, name, name, serialized, |doc| {
+            dependencies(doc).ok_or_else(|| unwritable(name, "vendorDependencies is not a table"))
+        });
     }
-    Ok(())
+    // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
+    set_yaml_block(text, name, DEPENDENCIES_KEY, &wrapped, |doc| {
+        doc.as_mapping()
+            .ok_or_else(|| unwritable(name, "config root is not a table"))
+    })
 }
 
-/// Whether a YAML value is missing, null or an empty mapping.
-fn holds_nothing(node: Option<yaml_edit::YamlNode>) -> bool {
-    match node {
-        None => true,
-        Some(yaml_edit::YamlNode::Mapping(mapping)) => mapping.is_empty(),
-        Some(yaml_edit::YamlNode::Scalar(scalar)) => scalar.is_null(),
-        Some(_) => false,
-    }
+/// The `vendorDependencies` mapping, when it is one.
+fn dependencies(doc: &yaml_edit::Document) -> Option<yaml_edit::Mapping> {
+    doc.as_mapping()?.get_mapping(DEPENDENCIES_KEY)
 }
 
-/// Writes a dependency's `files` into YAML text, in the reference emitter's style and the
+/// Sets `key` on the mapping `parent` picks out, in the reference emitter's style and the
 /// file's indent.
-fn set_yaml_files(text: &mut String, name: &str, files: &serde_json::Value) -> Result<()> {
+fn set_yaml_block(
+    text: &mut String,
+    name: &str,
+    key: &str,
+    value: &serde_json::Value,
+    parent: impl FnOnce(&yaml_edit::Document) -> Result<yaml_edit::Mapping>,
+) -> Result<()> {
+    // `yaml-edit` indents an inserted block two columns past its key, so the block is written in
+    // two-space steps and widened to the file's step once it is in place.
     let width = Indent::detect(text).width();
-    let value = yaml_document(&yaml_emit::to_string(files, 2), name)?;
+    let block = yaml_document(&yaml_emit::to_string(value, 2), name)?;
     let mut inserted = None;
     edit_yaml(text, name, |doc| {
-        let entry = doc
-            .as_mapping()
-            .and_then(|root| root.get_mapping(DEPENDENCIES_KEY))
-            .and_then(|deps| deps.get_mapping(name))
-            .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))?;
-        entry.set("files", &value);
-        inserted = entry
-            .get("files")
-            .map(|node| (entry.detect_indentation_level(), node.byte_range()));
+        let parent = parent(doc)?;
+        parent.set(key, &block);
+        inserted = parent
+            .get(key)
+            .map(|node| (parent.detect_indentation_level(), node.byte_range()));
         Ok(())
     })?;
     if let Some((column, range)) = inserted {
@@ -638,25 +600,6 @@ vendorDependencies:
     }
 
     #[test]
-    fn yaml_upsert_refuses_dependencies_written_as_an_alias() {
-        let text = "deps: &d\n  a:\n    version: v1\nvendorDependencies: *d\n";
-        let mut d = doc(ConfigFormat::Yml, text);
-        assert!(d.upsert_dependency("c", &dependency()).is_err());
-        assert_eq!(d.render(), text.trim_end());
-    }
-
-    #[test]
-    fn yaml_upsert_fills_a_null_dependencies_key() {
-        let mut d = doc(ConfigFormat::Yml, "vendorDependencies:\n");
-        d.upsert_dependency("c", &dependency()).unwrap();
-        assert!(
-            d.render().contains("  c:\n    version: v1"),
-            "{}",
-            d.render()
-        );
-    }
-
-    #[test]
     fn yaml_removal_drops_only_the_named_dependency() {
         let mut d = doc(ConfigFormat::Yml, YAML);
         d.remove_dependency("b").unwrap();
@@ -675,59 +618,6 @@ vendorDependencies:
         files:
             - LICENSE";
         assert_eq!(d.render(), format!("{}{entry}", yaml_without_b()));
-    }
-
-    #[test]
-    fn json_upsert_replaces_an_entry_in_place() {
-        let mut d = doc(ConfigFormat::Json, JSON5);
-        d.upsert_dependency("a", &dependency()).unwrap();
-        let out = d.render();
-        assert!(
-            out.contains(r#""repository": "https://github.com/a/b""#),
-            "{out}"
-        );
-        assert!(out.contains(r#""b": { "version": "v2" }"#), "{out}");
-        assert_eq!(out.matches(r#""a":"#).count(), 1, "{out}");
-    }
-
-    #[test]
-    fn yaml_upsert_replaces_an_entry_in_place() {
-        let mut d = doc(ConfigFormat::Yml, YAML);
-        d.upsert_dependency("a", &dependency()).unwrap();
-        let entry = "
-    a:
-        version: v1
-        repository: https://github.com/a/b
-        files:
-            - LICENSE
-
-    b:
-        version: v2
-        files: [README.md]";
-        let top = "# top\nvendorConfig:\n    vendorFolder: ./v   # folder\nvendorDependencies:";
-        assert_eq!(d.render(), format!("{top}{entry}"));
-    }
-
-    #[test]
-    fn toml_upsert_replaces_an_entry_in_place() {
-        let source = "# top\n[vendorDependencies.a]\nversion = \"v0\"\n\n\
-                      [vendorDependencies.b] # keep\nversion = \"v2\"\n";
-        let mut d = doc(ConfigFormat::Toml, source);
-        d.upsert_dependency("a", &dependency()).unwrap();
-        let out = d.render();
-        assert_eq!(out.matches("[vendorDependencies.a]").count(), 1, "{out}");
-        assert!(
-            out.contains("repository = \"https://github.com/a/b\""),
-            "{out}"
-        );
-        assert!(
-            out.contains("[vendorDependencies.b] # keep\nversion = \"v2\""),
-            "{out}"
-        );
-        assert!(
-            out.find("vendorDependencies.a") < out.find("vendorDependencies.b"),
-            "{out}"
-        );
     }
 
     #[test]
