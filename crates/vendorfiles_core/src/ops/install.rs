@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::archive;
-use crate::config::ConfigDocument;
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
@@ -159,7 +158,7 @@ impl Session {
             .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
         let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
-            || (!options.show_outdated_only && self.changes_config(&dependency, &version))
+            || (!options.show_outdated_only && self.entry_change(&dependency, &version).any())
             || self
                 .needs_update(&dependency, &lockfile_path, &folder, &version)
                 .await;
@@ -217,8 +216,8 @@ impl Session {
             return Ok(None);
         }
 
-        // Config first: a lockfile left behind by a failed write reads as stale and reinstalls
-        // forward, where a config left behind would pull the next `sync` back to the old version.
+        // The config is written first. A lockfile left behind by a failed write reads as stale
+        // and reinstalls forward, but a config left behind would pull `sync` back a version.
         let old_version = dependency.version.clone();
         progress.committing("updating config");
         self.record(&dependency, &version)
@@ -267,13 +266,17 @@ impl Session {
         Ok(None)
     }
 
-    /// Whether installing `dependency` at `version` would edit its config entry.
-    ///
-    /// An entry that cannot be edited counts as a change, so `commit` reports why.
-    fn changes_config(&self, dependency: &Dependency, version: &str) -> bool {
-        let mut document = self.workspace.file.document.clone();
-        self.edit_config(&mut document, dependency, version)
-            .unwrap_or(true)
+    /// What installing `dependency` at `version` would change about its config entry.
+    fn entry_change(&self, dependency: &Dependency, version: &str) -> EntryChange {
+        let Some(configured) = self.workspace.dependencies.get(&dependency.name) else {
+            return EntryChange::New;
+        };
+        EntryChange::Existing {
+            // An existing URL stays as written. A missing one is filled so `sync` finds it again.
+            repository: configured.repository.is_none(),
+            files: configured.files.as_deref() != Some(dependency.files.as_slice()),
+            version: configured.version.as_deref() != Some(version),
+        }
     }
 
     /// Saves what this install changed about the dependency's config entry, if anything.
@@ -284,9 +287,32 @@ impl Session {
     /// The in-memory entry follows the file, so a later install of the same name in one run
     /// compares against what was saved.
     async fn record(&mut self, dependency: &Dependency, version: &str) -> Result<()> {
-        let mut document = self.workspace.file.document.clone();
-        if !self.edit_config(&mut document, dependency, version)? {
+        let change = self.entry_change(dependency, version);
+        if !change.any() {
             return Ok(());
+        }
+        let name = &dependency.name;
+        // Edited on a copy, so a failed edit leaves the loaded document untouched.
+        let mut document = self.workspace.file.document.clone();
+        match change {
+            EntryChange::New => {
+                document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
+            }
+            EntryChange::Existing {
+                repository,
+                files,
+                version: version_changed,
+            } => {
+                if repository {
+                    document.set_dependency_value(name, "repository", &dependency.repository)?;
+                }
+                if files {
+                    document.set_dependency_value(name, "files", &dependency.files)?;
+                }
+                if version_changed {
+                    document.set_dependency_version(name, version)?;
+                }
+            }
         }
         self.workspace.file.document = document;
         let entry = self
@@ -302,38 +328,36 @@ impl Session {
         self.workspace.file.write().await
     }
 
-    /// Applies this install's change to `document`, answering whether there was one.
-    fn edit_config(
-        &self,
-        document: &mut ConfigDocument,
-        dependency: &Dependency,
-        version: &str,
-    ) -> Result<bool> {
-        let name = &dependency.name;
-        let Some(configured) = self.workspace.dependencies.get(name) else {
-            document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
-            return Ok(true);
-        };
-        // An existing URL stays as written; a missing one is filled so `sync` can find it again.
-        let repository_missing = configured.repository.is_none();
-        if repository_missing {
-            document.set_dependency_value(name, "repository", &dependency.repository)?;
-        }
-        let files_changed = configured.files.as_deref() != Some(dependency.files.as_slice());
-        if files_changed {
-            document.set_dependency_value(name, "files", &dependency.files)?;
-        }
-        let version_changed = configured.version.as_deref() != Some(version);
-        if version_changed {
-            document.set_dependency_version(name, version)?;
-        }
-        Ok(repository_missing || files_changed || version_changed)
-    }
-
     /// `entry` without the values the `default` block supplies, which `load` folds back in.
     fn written(&self, mut entry: RawDependency) -> RawDependency {
         entry.strip_defaults(&self.workspace.defaults);
         entry
+    }
+}
+
+/// What an install changes about a dependency's config entry.
+#[derive(Debug)]
+enum EntryChange {
+    /// The config does not list the dependency yet.
+    New,
+    /// Which keys of the existing entry differ from the install.
+    Existing {
+        repository: bool,
+        files: bool,
+        version: bool,
+    },
+}
+
+impl EntryChange {
+    const fn any(&self) -> bool {
+        match *self {
+            Self::New => true,
+            Self::Existing {
+                repository,
+                files,
+                version,
+            } => repository || files || version,
+        }
     }
 }
 
