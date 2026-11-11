@@ -8,7 +8,7 @@
 //!    extract into the dependency folder, reporting to the
 //!    dependency's own progress line as it goes. Owns everything it needs, so it can run on
 //!    its own task.
-//! 3. [`Session::commit`] - write the lockfile, update the config, settle the line. Ordered.
+//! 3. [`Session::commit`] - update the config, write the lockfile, settle the line. Ordered.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,8 +18,8 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, flat_files, previous_entry, retire_folder_entry,
-    save_path, saved_folder, write_lockfile,
+    VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
+    retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
 use crate::ops::{OpResult, Session};
@@ -158,8 +158,9 @@ impl Session {
             .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
         let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
+            || (!options.show_outdated_only && self.entry_change(&dependency, &version).any())
             || self
-                .needs_update(&dependency.name, &lockfile_path, &folder, &version)
+                .needs_update(&dependency, &lockfile_path, &folder, &version)
                 .await;
         let previous = previous_entry(
             &dependency.name,
@@ -181,7 +182,7 @@ impl Session {
         }
     }
 
-    /// Reports the outcome and makes it durable: log lines, lockfile, config.
+    /// Reports the outcome and makes it durable: log lines, config, lockfile.
     ///
     /// Everything here is ordered and sequential, which is what keeps `sync`'s output identical
     /// to the reference's even though the downloads overlapped.
@@ -215,6 +216,13 @@ impl Session {
             return Ok(None);
         }
 
+        // The lock entry is written last because it marks the install complete.
+        let old_version = dependency.version.clone();
+        progress.committing("updating config");
+        self.record(&dependency, &version)
+            .await
+            .map_err(|error| blame(&progress, error))?;
+
         progress.committing("writing lockfile");
         let save_path = self.workspace.config.single_lockfile.is_some().then(|| {
             save_path(
@@ -235,6 +243,7 @@ impl Session {
                 version: version.clone(),
                 files: config_files_to_lock_files(&dependency.files, &version),
                 save_path,
+                pending: false,
             },
             &lockfile_path,
         )
@@ -245,19 +254,10 @@ impl Session {
             retire_folder_entry(&dependency.name, &folder, &lockfile_path).await;
         }
 
-        let old_version = dependency.version.clone();
-        if old_version.as_deref() != Some(version.as_str()) {
-            progress.committing("updating config");
-            self.record_version(&dependency, &version)
-                .await
-                .map_err(|error| blame(&progress, error))?;
-        }
-
         if options.should_update {
             match old_version.as_deref() {
-                // A dependency with no previous version was installed, not updated.
-                Some(old) => progress.updated(old, &version),
-                None => progress.installed(&version),
+                Some(old) if old != version => progress.updated(old, &version),
+                _ => progress.installed(&version),
             }
             return Ok(Some(version));
         }
@@ -266,48 +266,112 @@ impl Session {
         Ok(None)
     }
 
-    /// Writes the new version back to the config file, adding the dependency if it is new.
+    /// What installing `dependency` at `version` would change about its config entry.
+    fn entry_change(&self, dependency: &Dependency, version: &str) -> EntryChange {
+        let Some(configured) = self.workspace.dependencies.get(&dependency.name) else {
+            return EntryChange::New;
+        };
+        EntryChange::Existing {
+            // An existing URL stays as written. A missing one is filled so `sync` finds it again.
+            repository: configured.repository.is_none(),
+            files: configured.files.as_deref() != Some(dependency.files.as_slice()),
+            version: configured.version.as_deref() != Some(version),
+        }
+    }
+
+    /// Saves what this install changed about the dependency's config entry, if anything.
     ///
     /// Registering a new dependency is a deliberate divergence: the reference crashes here
     /// because it never inserts the entry the `install` command was asked to create.
     ///
-    /// The in-memory `dependencies` map is left alone for entries that already existed. The
-    /// reference keeps a deep copy of them, so a version written mid-run is never visible to
-    /// the staleness checks of later dependencies - and neither is it here.
-    async fn record_version(&mut self, dependency: &Dependency, new_version: &str) -> Result<()> {
-        let name = dependency.name.clone();
-        if self.workspace.dependencies.contains_key(&name) {
-            self.workspace
-                .file
-                .document
-                .set_dependency_version(&name, new_version)?;
-        } else {
-            let mut entry = RawDependency {
-                version: Some(new_version.to_owned()),
-                repository: Some(dependency.repository.clone()),
-                files: Some(dependency.files.clone()),
-                hash_version_file: dependency.hash_version_file.clone(),
-                vendor_folder: dependency.vendor_folder.clone(),
-                release_regex: dependency.release_regex.clone(),
-                locked: dependency.locked.then_some(true),
-                name: None,
-            };
-            // The resolved dependency has the `default` block folded into it. Writing those
-            // values back would restate the defaults in every entry, so drop them again -
-            // `load` will fold them in next time just the same.
-            let written = {
-                let mut written = entry.clone();
-                written.strip_defaults(&self.workspace.defaults);
-                written
-            };
-            self.workspace
-                .file
-                .document
-                .upsert_dependency(&name, &written)?;
-            entry.version = Some(new_version.to_owned());
-            self.workspace.dependencies.insert(name, entry);
+    /// The in-memory entry follows the file, so a later install of the same name in one run
+    /// compares against what was saved.
+    async fn record(&mut self, dependency: &Dependency, version: &str) -> Result<()> {
+        let change = self.entry_change(dependency, version);
+        if !change.any() {
+            return Ok(());
         }
+        let name = &dependency.name;
+        // Edited on a copy, so a failed edit leaves the loaded document untouched.
+        let mut document = self.workspace.file.document.clone();
+        match change {
+            EntryChange::New => {
+                document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
+            }
+            EntryChange::Existing {
+                repository,
+                files,
+                version: version_changed,
+            } => {
+                if repository {
+                    document.set_dependency_value(name, "repository", &dependency.repository)?;
+                }
+                if files {
+                    document.set_dependency_value(name, "files", &dependency.files)?;
+                }
+                if version_changed {
+                    document.set_dependency_version(name, version)?;
+                }
+            }
+        }
+        self.workspace.file.document = document;
+        let entry = self
+            .workspace
+            .dependencies
+            .entry(dependency.name.clone())
+            .or_insert_with(|| new_entry(dependency, version));
+        entry.version = Some(version.to_owned());
+        entry.files = Some(dependency.files.clone());
+        entry
+            .repository
+            .get_or_insert_with(|| dependency.repository.clone());
         self.workspace.file.write().await
+    }
+
+    /// `entry` without the values the `default` block supplies, which `load` folds back in.
+    fn written(&self, mut entry: RawDependency) -> RawDependency {
+        entry.strip_defaults(&self.workspace.defaults);
+        entry
+    }
+}
+
+/// What an install changes about a dependency's config entry.
+#[derive(Debug)]
+enum EntryChange {
+    /// The config does not list the dependency yet.
+    New,
+    /// Which keys of the existing entry differ from the install.
+    Existing {
+        repository: bool,
+        files: bool,
+        version: bool,
+    },
+}
+
+impl EntryChange {
+    const fn any(&self) -> bool {
+        match *self {
+            Self::New => true,
+            Self::Existing {
+                repository,
+                files,
+                version,
+            } => repository || files || version,
+        }
+    }
+}
+
+/// The config entry for a dependency the config does not list yet.
+fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
+    RawDependency {
+        version: Some(version.to_owned()),
+        repository: Some(dependency.repository.clone()),
+        files: Some(dependency.files.clone()),
+        hash_version_file: dependency.hash_version_file.clone(),
+        vendor_folder: dependency.vendor_folder.clone(),
+        release_regex: dependency.release_regex.clone(),
+        locked: dependency.locked.then_some(true),
+        name: None,
     }
 }
 
@@ -350,21 +414,32 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
 /// dependencies can swap folders, and a cleanup that ran inside a download task could delete a
 /// file another task had already written into the folder it is clearing.
 ///
+/// The lock entry is marked pending before any file goes, listing the files this install may
+/// write as well, and `commit` writes the finished entry last. A run that stops anywhere in
+/// between leaves a pending entry, so the next install reinstalls and clears all of it.
+///
 /// # Errors
 ///
-/// Returns the error of the first file that could not be deleted.
+/// Returns the error of the lockfile write, or of the first file that could not be deleted.
 pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
     if !prepared.has_work() {
         return Ok(());
     }
     prepared.progress.status("clearing previous install");
-    remove_previously_installed(
-        &prepared.folder,
-        &prepared.lockfile_path,
-        prepared.previous.as_ref(),
-    )
-    .await
-    .map_err(|error| blame(&prepared.progress, error))
+    let incoming = config_files_to_lock_files(&prepared.dependency.files, &prepared.version);
+    let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
+    let cleared = match marked {
+        Ok(()) => {
+            remove_previously_installed(
+                &prepared.folder,
+                &prepared.lockfile_path,
+                prepared.previous.as_ref(),
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    cleared.map_err(|error| blame(&prepared.progress, error))
 }
 
 /// Fetches every file into the dependency folder.
@@ -763,4 +838,303 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
         let _ = tokio::fs::remove_file(source).await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use super::InstallOptions;
+    use crate::config::Workspace;
+    use crate::github::GitHubClient;
+    use crate::lockfile::read_lockfile;
+    use crate::model::{Dependency, RawDependency};
+    use crate::ops::Session;
+    use crate::progress::Reporter;
+
+    const REPOSITORY: &str = "https://github.com/a/b";
+
+    async fn session(dir: &Path, config: &str) -> Session {
+        std::fs::write(dir.join("vendor.json"), config).unwrap();
+        let workspace = Workspace::load(dir.to_str()).await.unwrap();
+        let github = GitHubClient::new(None).unwrap();
+        Session::with_reporter(github, workspace, Reporter::new(false))
+    }
+
+    fn dependency(name: &str, version: &str, file: &str) -> Dependency {
+        RawDependency {
+            version: Some(version.to_owned()),
+            repository: Some(REPOSITORY.to_owned()),
+            files: serde_json::from_value(serde_json::json!([file])).unwrap(),
+            ..RawDependency::default()
+        }
+        .resolve(name)
+        .unwrap()
+    }
+
+    /// Commits `dependency` at `version` as an install that downloaded its files would.
+    async fn commit(session: &mut Session, dependency: Dependency, version: &str) {
+        let progress = Arc::new(session.progress.dependency(&dependency.name));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(dependency, options, version.to_owned(), progress)
+            .await;
+        session.commit(prepared).await.unwrap();
+    }
+
+    /// Lays out `first` as installed at `v1` with `LICENSE`.
+    fn installed(dir: &Path) {
+        let folder = dir.join("vendor/first");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("LICENSE"), "text").unwrap();
+        let lock = format!(
+            r#"{{"first":{{"repository":"{REPOSITORY}","version":"v1","files":{{"LICENSE":"LICENSE"}}}}}}"#
+        );
+        std::fs::write(folder.join("vendor-lock.json"), lock).unwrap();
+    }
+
+    async fn stale(session: &Session, dependency: Dependency) -> bool {
+        let progress = Arc::new(session.progress.dependency(&dependency.name));
+        session
+            .prepare(
+                dependency,
+                InstallOptions::default(),
+                "v1".to_owned(),
+                progress,
+            )
+            .await
+            .needs_update
+    }
+
+    fn first_config(extra: &str) -> String {
+        format!(
+            r#"{{"vendorDependencies":{{"first":{{
+                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]{extra}
+            }}}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn an_installed_dependency_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+
+        assert!(!stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn files_the_lockfile_does_not_record_are_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+
+        assert!(stale(&session, dependency("first", "v1", "README.md")).await);
+    }
+
+    #[tokio::test]
+    async fn an_install_the_config_does_not_describe_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let config = first_config("").replace("LICENSE", "README.md");
+        let session = session(dir.path(), &config).await;
+
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_install_is_stale_and_cleared_by_the_next() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+        let forced = || InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let progress = Arc::new(session.progress.dependency("first"));
+        let interrupted = session
+            .prepare(
+                dependency("first", "v2", "README.md"),
+                forced(),
+                "v2".to_owned(),
+                progress,
+            )
+            .await;
+        // The old file goes and new ones land, one under the old name, then the run stops.
+        super::clear_previous(&interrupted).await.unwrap();
+        std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
+        std::fs::write(dir.path().join("vendor/first/README.md"), "half").unwrap();
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+
+        let progress = Arc::new(session.progress.dependency("first"));
+        let next = session
+            .prepare(
+                dependency("first", "v1", "LICENSE"),
+                forced(),
+                "v1".to_owned(),
+                progress,
+            )
+            .await;
+        super::clear_previous(&next).await.unwrap();
+
+        assert!(!dir.path().join("vendor/first/README.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_reinstall_keeps_its_place_in_the_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let lockfile = dir.path().join("vendor/first/vendor-lock.json");
+        let lock = std::fs::read_to_string(&lockfile).unwrap();
+        let second =
+            format!(r#","second":{{"repository":"{REPOSITORY}","version":"v1","files":{{}}}}}}"#);
+        std::fs::write(
+            &lockfile,
+            lock.trim_end().strip_suffix('}').unwrap().to_owned() + &second,
+        )
+        .unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+        let progress = Arc::new(session.progress.dependency("first"));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(
+                dependency("first", "v1", "LICENSE"),
+                options,
+                "v2".to_owned(),
+                progress,
+            )
+            .await;
+
+        super::clear_previous(&prepared).await.unwrap();
+        session.commit(prepared).await.unwrap();
+
+        let names: Vec<_> = read_lockfile(&lockfile)
+            .await
+            .unwrap()
+            .into_keys()
+            .collect();
+        assert_eq!(names, ["first", "second"]);
+    }
+
+    #[tokio::test]
+    async fn a_lock_entry_the_config_does_not_list_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), r#"{"vendorDependencies":{}}"#).await;
+
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn a_name_field_does_not_change_where_files_are_looked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let config = first_config(r#","name":"other""#);
+        let session = session(dir.path(), &config).await;
+        let dependency = session.workspace.dependencies["first"]
+            .resolve("first")
+            .unwrap();
+
+        assert!(!stale(&session, dependency).await);
+    }
+
+    #[tokio::test]
+    async fn a_new_entry_is_saved_when_it_starts_at_the_installed_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), r#"{"vendorDependencies":{}}"#).await;
+
+        commit(&mut session, dependency("second", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["second"].version.as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn changed_files_are_saved_and_the_rest_of_the_entry_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = first_config(r#", /* note */ "custom": 1"#);
+        let mut session = session(dir.path(), &config).await;
+
+        commit(&mut session, dependency("first", "v1", "README.md"), "v2").await;
+
+        let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+        let expected = config
+            .replace("LICENSE", "README.md")
+            .replace("\"v1\"", "\"v2\"");
+        assert_eq!(text, expected);
+    }
+
+    #[tokio::test]
+    async fn an_entry_without_a_repository_gets_the_installed_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"vendorDependencies":{"first":{"version":"v1","files":["LICENSE"]}}}"#;
+        let mut session = session(dir.path(), config).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        let first = &saved.dependencies["first"];
+        assert_eq!(first.repository.as_deref(), Some(REPOSITORY));
+    }
+
+    #[tokio::test]
+    async fn a_second_install_in_one_run_is_saved_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v2").await;
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["first"].version.as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn the_config_is_saved_before_the_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+        // A folder in the lockfile's place makes writing it fail.
+        std::fs::create_dir_all(dir.path().join("vendor/first/vendor-lock.json")).unwrap();
+
+        let dependency = dependency("first", "v1", "LICENSE");
+        let progress = Arc::new(session.progress.dependency("first"));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(dependency, options, "v2".to_owned(), progress)
+            .await;
+
+        assert!(session.commit(prepared).await.is_err());
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["first"].version.as_deref(), Some("v2"));
+    }
+
+    #[tokio::test]
+    async fn a_version_bump_rewrites_only_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            r#"{{"vendorDependencies":{{"first":{{ /* keep */
+                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]
+            }}}}}}"#
+        );
+        let mut session = session(dir.path(), &config).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v2").await;
+
+        let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+        assert_eq!(text, config.replace(r#""v1""#, r#""v2""#));
+        let locked = read_lockfile(&dir.path().join("vendor/first/vendor-lock.json"))
+            .await
+            .unwrap();
+        assert_eq!(locked["first"].version, "v2");
+    }
 }

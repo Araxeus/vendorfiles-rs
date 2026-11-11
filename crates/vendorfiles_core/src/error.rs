@@ -69,6 +69,24 @@ pub enum VendorError {
     #[error("No package names provided")]
     NoPackageNames,
 
+    #[error(
+        "{repository} is already vendored as '{name}'. {advice}, or pass -n <name> to add a second entry"
+    )]
+    AlreadyVendored {
+        repository: String,
+        name: String,
+        advice: String,
+    },
+
+    #[error(
+        "'{name}' already vendors {held}. Pass -n <name> to add {repository} under another name"
+    )]
+    NameTaken {
+        name: String,
+        held: String,
+        repository: String,
+    },
+
     #[error("{0} describes one dependency, so it cannot be used with more than one source")]
     SingleSourceOption(&'static str),
 

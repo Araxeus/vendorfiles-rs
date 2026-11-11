@@ -1118,45 +1118,54 @@ const NEIGHBOURED: &str = "https://github.com/vendorfiles-rs-tests/not-a-real-re
 
 #[test]
 fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
-    // The trap: without `--files`, the new entry silently takes the neighbour's files *and* its
-    // version, and when that version already matches nothing is written at all.
-    let dir = described_neighbour(NEIGHBOURED);
-
-    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
-    let warning = stderr(&out);
-
-    assert_eq!(code(&out), 0, "stderr: {warning}");
-    assert!(warning.contains("'first' already vendors"), "{warning}");
-    assert!(
-        warning.contains("inherits its files and version"),
-        "{warning}"
-    );
-    assert!(warning.contains("--files"), "{warning}");
-}
-
-#[test]
-fn describing_it_with_files_still_borrows_the_version() {
-    // `--files` describes the files, but the neighbour is still the base of the new entry, so its
-    // version comes along - and that is the half that can skip the config write entirely.
     let dir = described_neighbour(NEIGHBOURED);
 
     let out = vendor(
         dir.path(),
-        &["add", NEIGHBOURED, "--dry-run", "-f", "README.md"],
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
     );
     let warning = stderr(&out);
 
     assert_eq!(code(&out), 0, "stderr: {warning}");
-    assert!(warning.contains("inherits its version."), "{warning}");
-    assert!(
-        !warning.contains("its files"),
-        "the files were described, not borrowed: {warning}"
+    assert!(warning.contains("'first' already vendors"), "{warning}");
+    assert!(warning.contains("inherits its files."), "{warning}");
+    assert!(warning.contains("--files"), "{warning}");
+}
+
+#[test]
+fn a_second_name_borrows_only_the_files() {
+    let dir = neighbour_project(&format!(
+        r#""repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],
+           "vendorFolder":"./vendor/first","locked":true"#
+    ));
+
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
     );
-    // And it really is borrowed: the entry a dry run prints says so.
+    let report = stdout(&out);
+
+    assert!(report.contains("LICENSE"), "{report}");
+    for setting in ["version", "first", "locked"] {
+        assert!(!report.contains(setting), "{report}");
+    }
+
+    // With its own files it borrows nothing, so there is nothing to warn about.
+    let args = [
+        "add",
+        NEIGHBOURED,
+        "--dry-run",
+        "-n",
+        "second",
+        "-f",
+        "README.md",
+    ];
+    let out = vendor(dir.path(), &args);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
     assert!(
-        stdout(&out).contains(r#""version": "v1.0.0""#),
+        !stderr(&out).contains("already vendors"),
         "{}",
-        stdout(&out)
+        stderr(&out)
     );
 }
 
@@ -1183,13 +1192,105 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
     // borrowed would be the worst of both.
     let dir = neighbour_project(&format!(r#""repository":"{NEIGHBOURED}""#));
 
-    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let out = vendor(
+        dir.path(),
+        &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
+    );
     assert_ne!(code(&out), 0);
     assert!(
         !stderr(&out).contains("already vendors"),
         "nothing was inherited: {}",
         stderr(&out)
     );
+}
+
+#[test]
+fn a_known_name_does_not_move_the_entry_already_under_it() {
+    let dir = project(
+        r#"{"vendorDependencies":{"vendorfiles-rs":{
+            "repository":"https://github.com/Araxeus/vendorfiles-rs",
+            "version":"v1.0.0",
+            "files":["LICENSE"]
+        }}}"#,
+    );
+
+    let out = vendor(dir.path(), &["add", "vendor", "--dry-run"]);
+
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(!stdout(&out).contains("vendorFolder"), "{}", stdout(&out));
+}
+
+#[test]
+fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
+    let pinned = format!("{NEIGHBOURED}@v1.0.0");
+    for args in [
+        vec!["add", NEIGHBOURED],
+        vec!["add", pinned.as_str()],
+        vec!["add", NEIGHBOURED, "-f", "README.md"],
+        vec!["add", NEIGHBOURED, "--dry-run"],
+        // Any spelling of the repository finds the entry.
+        vec!["add", "VENDORFILES-RS-TESTS/Not-A-Real-Repository"],
+        vec![
+            "add",
+            "https://www.github.com/vendorfiles-rs-tests/not-a-real-repository",
+        ],
+    ] {
+        let dir = described_neighbour(NEIGHBOURED);
+        let config = dir.path().join("vendor.json");
+        let before = std::fs::read_to_string(&config).unwrap();
+
+        let out = vendor(dir.path(), &args);
+
+        assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
+        let said = stderr(&out);
+        assert!(said.contains("already vendored as 'first'"), "{said}");
+        assert!(said.contains("vendor update first"), "{said}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(!dir.path().join("vendor").exists(), "{args:?} wrote files");
+    }
+}
+
+#[test]
+fn a_locked_entry_is_not_sent_to_update() {
+    let dir = neighbour_project(&format!(
+        r#""repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],"locked":true"#
+    ));
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let said = stderr(&out);
+
+    assert!(said.contains("'first' is locked"), "{said}");
+    assert!(!said.contains("vendor update"), "{said}");
+}
+
+#[test]
+fn a_name_holding_another_repository_stops_before_writing() {
+    let other = "https://github.com/someone-else/not-a-real-repository";
+    for args in [
+        vec!["add", NEIGHBOURED, "-f", "README.md"],
+        vec!["add", NEIGHBOURED, "-n", "not-a-real-repository"],
+        vec!["add", NEIGHBOURED, "--dry-run"],
+    ] {
+        let dir = project(&format!(
+            r#"{{"vendorDependencies":{{"not-a-real-repository":{{
+                "repository":"{other}","version":"v1.0.0","files":["LICENSE"]
+            }}}}}}"#
+        ));
+        let config = dir.path().join("vendor.json");
+        let before = std::fs::read_to_string(&config).unwrap();
+
+        let out = vendor(dir.path(), &args);
+
+        assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
+        let said = stderr(&out);
+        assert!(
+            said.contains(&format!("'not-a-real-repository' already vendors {other}")),
+            "{said}"
+        );
+        assert!(said.contains("-n <name>"), "{said}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(!dir.path().join("vendor").exists(), "{args:?} wrote files");
+    }
 }
 
 /// A registry with one program, written next to the project.

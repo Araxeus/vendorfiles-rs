@@ -70,7 +70,7 @@ impl Session {
     ///    [`MAX_CONCURRENT_DOWNLOADS`] at a time, collecting the log lines instead of
     ///    printing them. Before the first one starts, what the previous installs left behind
     ///    is cleared for every dependency, since they may swap folders.
-    /// 3. **Commit** in config order: write each lockfile, update the config, and settle that
+    /// 3. **Commit** in config order: update the config, write each lockfile, and settle that
     ///    dependency's line. Awaiting the tasks in order is what keeps piped output ordered
     ///    while later dependencies are still downloading.
     ///

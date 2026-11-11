@@ -3,7 +3,7 @@
 //! Write-back must keep everything the tool does not touch: keys it does not model
 //! (`package.json` is a config file too), comments, quoting, blank lines. Each format is edited
 //! through a lossless syntax tree, so an edit rewrites only the entry it names. The mutation
-//! surface is three operations wide.
+//! surface is four operations wide.
 
 use std::path::Path;
 
@@ -13,6 +13,7 @@ use crate::config::format::{ConfigFormat, Indent, json5_options};
 use crate::config::yaml_emit;
 use crate::error::{Result, VendorError};
 use crate::model::RawDependency;
+use serde::Serialize;
 
 const DEPENDENCIES_KEY: &str = "vendorDependencies";
 
@@ -81,9 +82,7 @@ impl ConfigDocument {
                 Ok(())
             }),
             Self::Yaml(text) => edit_yaml(text, name, |doc| {
-                let entry = doc
-                    .as_mapping()
-                    .and_then(|root| root.get_mapping(DEPENDENCIES_KEY))
+                let entry = dependencies(doc)
                     .and_then(|deps| deps.get_mapping(name))
                     .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))?;
                 let style = yaml_version_style(entry.get("version").as_ref(), version);
@@ -104,6 +103,57 @@ impl ConfigDocument {
                         *existing.decor_mut() = decor;
                     }
                     None => *slot = toml_edit::value(version),
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Sets `vendorDependencies.<name>.<key>`, leaving the rest of the entry as written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::SerializeConfig`] when the value cannot be encoded or the entry
+    /// cannot be edited in place.
+    pub fn set_dependency_value(
+        &mut self,
+        name: &str,
+        key: &str,
+        value: &impl Serialize,
+    ) -> Result<()> {
+        let json = serde_json::to_value(value).map_err(|e| unwritable(name, e))?;
+        match self {
+            Self::Json(text) => edit_json(text, name, |root| {
+                let entry = root
+                    .object_value_or_set()
+                    .object_value_or_set(DEPENDENCIES_KEY)
+                    .object_value_or_set(name);
+                match entry.get(key) {
+                    Some(prop) => prop.set_value(cst_value(&json)),
+                    None => {
+                        entry.append(key, cst_value(&json));
+                    }
+                }
+                Ok(())
+            }),
+            Self::Yaml(text) => set_yaml_block(text, name, |doc| {
+                let entry = dependencies(doc)
+                    .and_then(|deps| deps.get_mapping(name))
+                    .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))?;
+                Ok((entry, key, &json))
+            }),
+            Self::Toml(doc) => {
+                let value = value
+                    .serialize(toml_edit::ser::ValueSerializer::new())
+                    .map_err(|e| unwritable(name, e))?;
+                let slot = &mut doc[DEPENDENCIES_KEY][name][key];
+                match slot.as_value_mut() {
+                    Some(existing) => {
+                        let decor = existing.decor().clone();
+                        *existing = value;
+                        *existing.decor_mut() = decor;
+                    }
+                    None => *slot = toml_edit::Item::Value(value),
                 }
                 Ok(())
             }
@@ -139,16 +189,20 @@ impl ConfigDocument {
                     .map_err(|e| unwritable(name, e))?
                     .as_table()
                     .clone();
-                let deps = doc
-                    .entry(DEPENDENCIES_KEY)
-                    .or_insert_with(|| {
-                        let mut t = toml_edit::Table::new();
-                        t.set_implicit(true);
-                        toml_edit::Item::Table(t)
-                    })
-                    .as_table_mut()
-                    .ok_or_else(|| unwritable(name, "vendorDependencies is not a table"))?;
-                deps.insert(name, toml_edit::Item::Table(table));
+                let deps = doc.entry(DEPENDENCIES_KEY).or_insert_with(|| {
+                    let mut t = toml_edit::Table::new();
+                    t.set_implicit(true);
+                    toml_edit::Item::Table(t)
+                });
+                if let Some(deps) = deps.as_table_mut() {
+                    deps.insert(name, toml_edit::Item::Table(table));
+                } else if let Some(deps) = deps.as_inline_table_mut() {
+                    let mut entry = table.into_inline_table();
+                    entry.fmt();
+                    deps.insert(name, toml_edit::Value::InlineTable(entry));
+                } else {
+                    return Err(unwritable(name, "vendorDependencies is not a table"));
+                }
                 Ok(())
             }
         }
@@ -173,10 +227,7 @@ impl ConfigDocument {
                 Ok(())
             }),
             Self::Yaml(text) => edit_yaml(text, name, |doc| {
-                if let Some(deps) = doc
-                    .as_mapping()
-                    .and_then(|root| root.get_mapping(DEPENDENCIES_KEY))
-                {
+                if let Some(deps) = dependencies(doc) {
                     deps.remove(name);
                 }
                 Ok(())
@@ -184,7 +235,7 @@ impl ConfigDocument {
             Self::Toml(doc) => {
                 if let Some(deps) = doc
                     .get_mut(DEPENDENCIES_KEY)
-                    .and_then(toml_edit::Item::as_table_mut)
+                    .and_then(toml_edit::Item::as_table_like_mut)
                 {
                     deps.remove(name);
                 }
@@ -234,36 +285,50 @@ fn edit_yaml(
 
 /// Writes a dependency into YAML text, in the reference emitter's style and the file's indent.
 fn upsert_yaml(text: &mut String, name: &str, serialized: &serde_json::Value) -> Result<()> {
-    let width = Indent::detect(text).width();
     let wrapped = serde_json::json!({ name: serialized });
     if text.trim().is_empty() {
+        let width = Indent::detect(text).width();
         *text = yaml_emit::to_string(&serde_json::json!({ DEPENDENCIES_KEY: wrapped }), width);
         return Ok(());
     }
 
-    // `yaml-edit` indents an inserted block two columns past its key, so the entry is written in
+    set_yaml_block(text, name, |doc| match dependencies(doc) {
+        Some(deps) if !deps.is_empty() => Ok((deps, name, serialized)),
+        // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
+        _ => {
+            let root = doc
+                .as_mapping()
+                .ok_or_else(|| unwritable(name, "config root is not a table"))?;
+            Ok((root, DEPENDENCIES_KEY, &wrapped))
+        }
+    })
+}
+
+/// The `vendorDependencies` mapping, when it is one.
+fn dependencies(doc: &yaml_edit::Document) -> Option<yaml_edit::Mapping> {
+    doc.as_mapping()?.get_mapping(DEPENDENCIES_KEY)
+}
+
+/// Sets a key on the mapping `place` picks out to the value it gives, in the reference
+/// emitter's style and the file's indent.
+fn set_yaml_block<'a>(
+    text: &mut String,
+    name: &str,
+    place: impl FnOnce(
+        &yaml_edit::Document,
+    ) -> Result<(yaml_edit::Mapping, &'a str, &'a serde_json::Value)>,
+) -> Result<()> {
+    // `yaml-edit` indents an inserted block two columns past its key, so the block is written in
     // two-space steps and widened to the file's step once it is in place.
-    let entry = yaml_document(&yaml_emit::to_string(&wrapped[name], 2), name)?;
-    let wrapped = yaml_document(&yaml_emit::to_string(&wrapped, 2), name)?;
+    let width = Indent::detect(text).width();
     let mut inserted = None;
     edit_yaml(text, name, |doc| {
-        let root = doc
-            .as_mapping()
-            .ok_or_else(|| unwritable(name, "config root is not a table"))?;
-        let (parent, key) = match root.get_mapping(DEPENDENCIES_KEY) {
-            Some(deps) if !deps.is_empty() => {
-                deps.set(name, &entry);
-                (deps, name)
-            }
-            // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
-            _ => {
-                root.set(DEPENDENCIES_KEY, &wrapped);
-                (root, DEPENDENCIES_KEY)
-            }
-        };
+        let (parent, key, value) = place(doc)?;
+        let block = yaml_document(&yaml_emit::to_string(value, 2), name)?;
+        parent.set(key, &block);
         inserted = parent
-            .get_mapping(key)
-            .map(|value| (parent.detect_indentation_level(), value.byte_range()));
+            .get(key)
+            .map(|node| (parent.detect_indentation_level(), node.byte_range()));
         Ok(())
     })?;
     if let Some((column, range)) = inserted {
@@ -369,7 +434,7 @@ fn unwritable(name: &str, message: impl std::fmt::Display) -> VendorError {
 mod tests {
     use super::ConfigDocument;
     use crate::config::format::ConfigFormat;
-    use crate::model::RawDependency;
+    use crate::model::{FileEntry, RawDependency};
     use std::path::Path;
 
     fn doc(format: ConfigFormat, text: &str) -> ConfigDocument {
@@ -624,6 +689,107 @@ vendorDependencies:
         d.remove_dependency("a").unwrap();
         d.remove_dependency("b").unwrap();
         assert_eq!(d.render(), "");
+    }
+
+    fn readme() -> Vec<FileEntry> {
+        serde_json::from_str(r#"["README.md"]"#).unwrap()
+    }
+
+    #[test]
+    fn json_files_change_touches_only_the_files() {
+        let mut d = doc(ConfigFormat::Json, JSON5);
+        d.set_dependency_value("a", "files", &readme()).unwrap();
+        assert_eq!(
+            d.render(),
+            JSON5
+                .replace(r#"files: ["LICENSE",]"#, r#"files: ["README.md"]"#)
+                .trim_end()
+        );
+    }
+
+    #[test]
+    fn json_files_are_added_to_an_entry_without_them() {
+        let mut d = doc(ConfigFormat::Json, JSON5);
+        d.set_dependency_value("b", "files", &readme()).unwrap();
+        let out = d.render();
+        assert!(out.contains(r#""files": ["README.md"]"#), "{out}");
+        assert!(out.contains(r#""version": "v1", // pinned"#), "{out}");
+    }
+
+    #[test]
+    fn yaml_files_change_touches_only_the_files() {
+        let mut d = doc(ConfigFormat::Yml, YAML);
+        d.set_dependency_value("a", "files", &readme()).unwrap();
+        assert_eq!(
+            d.render(),
+            YAML.replace(
+                "            - LICENSE\n            - '{vendorFolder}/x'\n",
+                "            - README.md\n"
+            )
+            .trim_end()
+        );
+    }
+
+    #[test]
+    fn toml_files_change_keeps_unmodelled_keys_and_comments() {
+        let source = "[vendorDependencies.a]\nversion = \"v1\" # pinned\nfiles = [\"LICENSE\"]\n\
+                      custom = 1\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.set_dependency_value("a", "files", &readme()).unwrap();
+        assert_eq!(
+            d.render(),
+            source.replace("LICENSE", "README.md").trim_end()
+        );
+    }
+
+    #[test]
+    fn toml_files_change_in_an_inline_table() {
+        let source = "vendorDependencies = { a = { version = \"v1\", files = [\"LICENSE\"] } }\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.set_dependency_value("a", "files", &readme()).unwrap();
+        assert_eq!(
+            d.render(),
+            source.replace("LICENSE", "README.md").trim_end()
+        );
+    }
+
+    #[test]
+    fn yaml_value_is_added_to_an_entry() {
+        let mut d = doc(ConfigFormat::Yml, YAML);
+        d.set_dependency_value("b", "repository", &"https://github.com/a/b")
+            .unwrap();
+        let out = d.render();
+        assert!(
+            out.ends_with("files: [README.md]\n        repository: https://github.com/a/b"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn toml_removal_from_an_inline_table() {
+        let source =
+            "vendorDependencies = { a = { version = \"v1\" }, b = { version = \"v2\" } }\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.remove_dependency("a").unwrap();
+        assert_eq!(
+            d.render(),
+            "vendorDependencies = { b = { version = \"v2\" } }"
+        );
+    }
+
+    #[test]
+    fn toml_upsert_into_an_inline_table() {
+        let source = "vendorDependencies = { a = { version = \"v1\" } }\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.upsert_dependency("b", &dependency()).unwrap();
+        let out = d.render();
+        assert!(out.contains("a = { version = \"v1\" }"), "{out}");
+        assert!(out.contains("b = { version = \"v1\""), "{out}");
+        let parsed: toml_edit::DocumentMut = out.parse().unwrap();
+        assert_eq!(
+            parsed["vendorDependencies"]["b"]["files"][0].as_str(),
+            Some("LICENSE")
+        );
     }
 
     #[test]

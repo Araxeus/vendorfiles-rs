@@ -12,13 +12,8 @@ use crate::{known, source};
 
 /// What a `source` argument turned out to name.
 struct Source {
-    /// The URL the reference builds, warts and all - `owner/repo` becomes
-    /// `https://www.github.com/owner/repo`, and that exact string is what config entries are
-    /// compared against.
-    lookup: String,
-    /// The same repository without the `www.`, the form every documented example uses and the
-    /// form the search path returns.
-    stored: String,
+    /// The repository's URL.
+    repository: String,
     /// A name this tool knows describes itself.
     known: Option<known::Known>,
     /// A name the hosted registry describes.
@@ -59,26 +54,22 @@ async fn resolve_source(
     };
 
     let mut searched = None;
-    let (lookup, stored) = if let Some(known) = known.as_ref() {
-        (known.repository.to_owned(), known.repository.to_owned())
+    let repository = if let Some(known) = known.as_ref() {
+        known.repository.to_owned()
     } else if let Some(listed) = listed.as_ref() {
-        (listed.repository.clone(), listed.repository.clone())
+        listed.repository.clone()
     } else if is_github_url(source) {
-        (source.to_owned(), source.to_owned())
+        source.to_owned()
     } else if is_owner_repo_shorthand(source) {
-        (
-            format!("https://www.github.com/{source}"),
-            format!("https://github.com/{source}"),
-        )
+        format!("https://github.com/{source}")
     } else {
         let found = search_github(session, source, unlisted).await?;
         searched = Some(unlisted);
-        (found.clone(), found)
+        found
     };
 
     Ok(Source {
-        lookup,
-        stored,
+        repository,
         known,
         listed,
         searched,
@@ -250,31 +241,63 @@ async fn install(
     preview: Preview,
 ) -> Result<()> {
     let Source {
-        lookup,
-        stored,
+        repository,
         known,
         listed,
         searched,
     } = resolve_source(session, source, files.is_some(), preview.refresh).await?;
 
-    if !is_github_url(&lookup) {
-        bail!(VendorError::InvalidGitHubUrlQuoted(lookup));
+    if !is_github_url(&repository) {
+        bail!(VendorError::InvalidGitHubUrlQuoted(repository));
     }
 
-    let name = match name.filter(|n| !n.is_empty()) {
+    let name = name.filter(|n| !n.is_empty());
+    let named = name.is_some();
+    let name = match name {
         Some(name) => name,
         // A registry entry names itself, so `vendor add rg` keys the entry `ripgrep` - the
         // canonical name, not the alias that was typed.
         None => match listed.as_ref() {
             Some(listed) => listed.name.clone(),
-            None => owner_and_name_from_repo_url(&lookup)?.name,
+            None => owner_and_name_from_repo_url(&repository)?.name,
         },
     };
+
+    // `add` never repoints an entry, so a name holding another repository is a clash.
+    if let Some(held) = session
+        .workspace
+        .dependencies
+        .get(&name)
+        .and_then(|entry| entry.repository.as_deref())
+        && !same_repository(held, &repository)
+    {
+        bail!(VendorError::NameTaken {
+            name,
+            held: held.to_owned(),
+            repository,
+        });
+    }
 
     let Base {
         existing,
         neighbour,
-    } = Base::find(&session.workspace, &name, &lookup, files.is_some());
+    } = Base::find(&session.workspace, &name, &repository, files.is_some());
+
+    // Only `-n` asks for a second entry. Any other name was derived from the source.
+    if !named && let Some(neighbour) = neighbour.as_ref() {
+        let name = neighbour.name.clone();
+        // `update` refuses a locked entry, so it is no advice for one.
+        let advice = if neighbour.locked {
+            format!("'{name}' is locked, so unlock it to update it")
+        } else {
+            format!("Run `vendor update {name}` to update it")
+        };
+        bail!(VendorError::AlreadyVendored {
+            repository,
+            name,
+            advice,
+        });
+    }
 
     let files = chosen_files(files, &existing, known.as_ref(), listed.as_ref());
     if files.as_ref().is_none_or(Vec::is_empty) {
@@ -283,25 +306,21 @@ async fn install(
             bail!(VendorError::SearchedRepositoryNeedsFiles {
                 typed: source.to_owned(),
                 why,
-                repository: lookup.clone(),
+                repository: repository.clone(),
             });
         }
         bail!(VendorError::MissingFilesOption);
     }
 
-    // Say what the neighbour handed over, now that the whole precedence chain has run and the
-    // command is known to have something to install. Borrowing from an entry the user never
-    // named is the surprising half of `install`, and the borrowed `version` is the sharp edge:
-    // the new entry starts out claiming it, so when it already matches what gets installed the
-    // entry is never written at all - which looks like nothing happening for no reason.
-    if let Some((neighbour, inherited)) = neighbour
-        && let Some(warning) = inherited.warning(&neighbour, &name, &lookup)
-    {
+    // Said only now, once the command is known to have something to install.
+    if let Some(warning) = neighbour.and_then(|n| n.warning(&name, &repository)) {
         ui::warning(warning);
     }
 
-    let mut entry = merge_install_entry(existing, &session.workspace.defaults, stored, files);
-    fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
+    let mut entry = merge_install_entry(existing, &session.workspace.defaults, repository, files);
+    if !session.workspace.dependencies.contains_key(&name) {
+        fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
+    }
     let dependency = entry.resolve(&name)?;
 
     if preview.dry_run {
@@ -326,11 +345,10 @@ async fn install(
 /// Files may be inherited from an entry under this name, or from any entry pointing at the same
 /// repository - the reference looks in both places.
 struct Base {
-    /// The entry under this name, else the neighbour, else an empty entry.
+    /// The entry under this name, else the neighbour's files, else an empty entry.
     existing: RawDependency,
-    /// The neighbour's name and what it hands over, when there is no entry under this name.
-    /// Inheriting from an entry the user did not name is the surprising half, so it is kept apart.
-    neighbour: Option<(String, Inherited)>,
+    /// The entry already vendoring this repository, when there is none under this name.
+    neighbour: Option<Neighbour>,
 }
 
 impl Base {
@@ -341,23 +359,44 @@ impl Base {
                 neighbour: None,
             };
         }
-        let neighbour = workspace
-            .dependencies
-            .iter()
-            .find(|(_, dependency)| dependency.repository.as_deref() == Some(repository));
+        let neighbour = workspace.dependencies.iter().find(|(_, dependency)| {
+            dependency
+                .repository
+                .as_deref()
+                .is_some_and(|url| same_repository(url, repository))
+        });
         match neighbour {
+            // Only the files carry over. The rest places and pins the neighbour's own install.
             Some((key, dependency)) => Self {
-                existing: dependency.clone(),
-                neighbour: Some((
-                    key.clone(),
-                    Inherited::from_neighbour(dependency, files_given),
-                )),
+                existing: RawDependency {
+                    files: dependency.files.clone(),
+                    ..RawDependency::default()
+                },
+                neighbour: Some(Neighbour {
+                    name: key.clone(),
+                    locked: dependency.locked == Some(true),
+                    lends_files: !files_given
+                        && dependency.files.as_deref().is_some_and(|f| !f.is_empty()),
+                }),
             },
             None => Self {
                 existing: RawDependency::default(),
                 neighbour: None,
             },
         }
+    }
+}
+
+/// Whether two GitHub URLs name one repository, however each is spelled.
+fn same_repository(a: &str, b: &str) -> bool {
+    match (
+        owner_and_name_from_repo_url(a),
+        owner_and_name_from_repo_url(b),
+    ) {
+        (Ok(a), Ok(b)) => {
+            a.owner.eq_ignore_ascii_case(&b.owner) && a.name.eq_ignore_ascii_case(&b.name)
+        }
+        _ => false,
     }
 }
 
@@ -381,7 +420,7 @@ fn chosen_files(
         .or_else(|| listed.map(|listed| listed.files.clone()))
 }
 
-/// Fills in what a known name or registry entry says and the config does not yet.
+/// Fills in what a known name or registry entry says about a new entry.
 fn fill_from_source(
     entry: &mut RawDependency,
     known: Option<&known::Known>,
@@ -403,65 +442,25 @@ fn fill_from_source(
     }
 }
 
-/// What a new entry takes from a *neighbour* - an entry under a different name that already
-/// vendors the same repository.
-///
-/// The whole neighbour is used as the base of the new entry, so in principle everything unset on
-/// the new one comes from it. Only two of those fields are worth naming, because only they change
-/// what the command visibly does:
-///
-/// * `files`, but only when the command was given none and the neighbour has some. A neighbour
-///   with no files leaves a known name or the registry to describe them, and nothing is borrowed.
-/// * `version`, always: the new entry starts out claiming the neighbour's, so when that already
-///   matches what gets installed the entry is never written to the config at all. An explicit
-///   version on the command line does not stop this - it decides what to install, not what the
-///   entry starts out at.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Inherited {
-    files: bool,
-    version: bool,
+/// An entry under a different name that already vendors the same repository.
+#[derive(Debug)]
+struct Neighbour {
+    name: String,
+    locked: bool,
+    /// Whether the new entry takes its files from this one.
+    lends_files: bool,
 }
 
-impl Inherited {
-    /// What `neighbour` hands over, given whether the command supplied its own `--files`.
-    fn from_neighbour(neighbour: &RawDependency, files_given: bool) -> Self {
-        Self {
-            files: !files_given
-                && neighbour
-                    .files
-                    .as_deref()
-                    .is_some_and(|files| !files.is_empty()),
-            version: neighbour
-                .version
-                .as_deref()
-                .is_some_and(|version| !version.is_empty()),
-        }
-    }
-
-    /// What to warn about, or `None` when nothing came from the neighbour.
-    fn warning(self, neighbour: &str, name: &str, repository: &str) -> Option<String> {
-        let (borrowed, advice) = match (self.files, self.version) {
-            // `--files` replaces the files and only the files. Saying it describes the new entry
-            // "separately" would promise more than it delivers, since the version - the half that
-            // can swallow the config write - comes from the neighbour whatever the command says.
-            (true, true) => (
-                "its files and version",
-                format!(
-                    " Pass --files to give '{name}' its own files; the version comes from \
-                     '{neighbour}' either way."
-                ),
-            ),
-            (true, false) => (
-                "its files",
-                format!(" Pass --files to describe '{name}' separately."),
-            ),
-            // Nothing to pass: this is the half no argument overrides.
-            (false, true) => ("its version", String::new()),
-            (false, false) => return None,
-        };
-        Some(format!(
-            "'{neighbour}' already vendors {repository}, so '{name}' inherits {borrowed}.{advice}"
-        ))
+impl Neighbour {
+    /// What to warn about, or `None` when the new entry borrows nothing.
+    fn warning(&self, name: &str, repository: &str) -> Option<String> {
+        let neighbour = &self.name;
+        self.lends_files.then(|| {
+            format!(
+                "'{neighbour}' already vendors {repository}, so '{name}' inherits its files. \
+                 Pass --files to describe '{name}' separately."
+            )
+        })
     }
 }
 
@@ -531,7 +530,7 @@ fn report_entry(
 
 #[cfg(test)]
 mod tests {
-    use super::{Inherited, merge_install_entry};
+    use super::{Neighbour, merge_install_entry};
     use vendorfiles_core::model::{DefaultOptions, RawDependency};
 
     fn defaults(json: &str) -> DefaultOptions {
@@ -628,91 +627,32 @@ mod tests {
         );
         assert_eq!(entry.files, Some(files(&["LICENSE"])));
     }
-    // -----------------------------------------------------------------------------------
-    // What a neighbouring entry hands over, and what gets said about it
-    // -----------------------------------------------------------------------------------
 
-    /// A neighbour: an entry under some other name already vendoring the same repository.
-    fn neighbour(version: Option<&str>, list: Option<&[&str]>) -> RawDependency {
-        RawDependency {
-            version: version.map(str::to_owned),
-            repository: Some("https://github.com/a/b".to_owned()),
-            files: list.map(files),
-            ..RawDependency::default()
+    fn neighbour(lends_files: bool) -> Neighbour {
+        Neighbour {
+            name: "first".to_owned(),
+            locked: false,
+            lends_files,
         }
     }
 
-    /// What `install` would print, given that neighbour and `--files` state.
-    fn warning(existing: &RawDependency, files_given: bool) -> Option<String> {
-        Inherited::from_neighbour(existing, files_given).warning(
-            "first",
-            "second",
-            "https://github.com/a/b",
-        )
-    }
-
     #[test]
-    fn a_neighbour_with_files_and_a_version_hands_over_both() {
-        let said = warning(&neighbour(Some("v1.0.0"), Some(&["LICENSE"])), false)
-            .expect("both halves were borrowed");
+    fn a_neighbour_lending_files_is_named() {
         assert_eq!(
-            said,
-            "'first' already vendors https://github.com/a/b, so 'second' inherits its files and \
-             version. Pass --files to give 'second' its own files; the version comes from 'first' \
-             either way."
-        );
-        // The advice must not promise that `--files` separates the whole entry.
-        assert!(!said.contains("separately"), "{said}");
-    }
-
-    #[test]
-    fn an_explicit_files_list_still_leaves_the_version_borrowed() {
-        // The `--files` half is described by the command, but the entry still starts out at the
-        // neighbour's version, so the config write can still be skipped.
-        let said = warning(&neighbour(Some("v1.0.0"), Some(&["LICENSE"])), true)
-            .expect("the version is borrowed regardless");
-        assert_eq!(
-            said,
-            "'first' already vendors https://github.com/a/b, so 'second' inherits its version."
-        );
-        // Advice that would not help is not given.
-        assert!(!said.contains("--files"), "{said}");
-    }
-
-    #[test]
-    fn a_neighbour_with_no_files_does_not_claim_to_have_supplied_them() {
-        // Files come from a known name or the registry here, not from the neighbour.
-        let said = warning(&neighbour(Some("v1.0.0"), None), false).expect("the version is still");
-        assert!(said.ends_with("inherits its version."), "{said}");
-    }
-
-    #[test]
-    fn an_empty_files_list_counts_as_none() {
-        let said = warning(&neighbour(Some("v1.0.0"), Some(&[])), false).expect("the version");
-        assert!(said.ends_with("inherits its version."), "{said}");
-    }
-
-    #[test]
-    fn a_neighbour_with_no_version_hands_over_only_its_files() {
-        let said =
-            warning(&neighbour(None, Some(&["LICENSE"])), false).expect("the files are borrowed");
-        assert_eq!(
-            said,
-            "'first' already vendors https://github.com/a/b, so 'second' inherits its files. \
-             Pass --files to describe 'second' separately."
+            neighbour(true).warning("second", "https://github.com/a/b"),
+            Some(
+                "'first' already vendors https://github.com/a/b, so 'second' inherits its files. \
+                 Pass --files to describe 'second' separately."
+                    .to_owned()
+            )
         );
     }
 
     #[test]
-    fn an_empty_version_counts_as_none() {
-        assert_eq!(warning(&neighbour(Some(""), None), false), None);
-    }
-
-    #[test]
-    fn a_neighbour_that_hands_over_nothing_is_not_worth_mentioning() {
-        // Bare `repository`, and `--files` on the command line: everything about the new entry
-        // was decided elsewhere.
-        assert_eq!(warning(&neighbour(None, Some(&["LICENSE"])), true), None);
-        assert_eq!(warning(&neighbour(None, None), false), None);
+    fn a_neighbour_lending_nothing_is_not_mentioned() {
+        assert_eq!(
+            neighbour(false).warning("second", "https://github.com/a/b"),
+            None
+        );
     }
 }
