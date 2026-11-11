@@ -947,33 +947,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_interrupted_install_is_stale() {
-        let dir = tempfile::tempdir().unwrap();
-        installed(dir.path());
-        let session = session(dir.path(), &first_config("")).await;
-        let progress = Arc::new(session.progress.dependency("first"));
-        let options = InstallOptions {
-            force: true,
-            ..InstallOptions::default()
-        };
-        let prepared = session
-            .prepare(
-                dependency("first", "v1", "LICENSE"),
-                options,
-                "v2".to_owned(),
-                progress,
-            )
-            .await;
-
-        // The old files go and a new one lands, then the run stops before `commit`.
-        super::clear_previous(&prepared).await.unwrap();
-        std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
-
-        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
-    }
-
-    #[tokio::test]
-    async fn the_next_install_clears_what_an_interrupted_one_wrote() {
+    async fn an_interrupted_install_is_stale_and_cleared_by_the_next() {
         let dir = tempfile::tempdir().unwrap();
         installed(dir.path());
         let session = session(dir.path(), &first_config("")).await;
@@ -990,8 +964,11 @@ mod tests {
                 progress,
             )
             .await;
+        // The old file goes and new ones land, one under the old name, then the run stops.
         super::clear_previous(&interrupted).await.unwrap();
+        std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
         std::fs::write(dir.path().join("vendor/first/README.md"), "half").unwrap();
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
 
         let progress = Arc::new(session.progress.dependency("first"));
         let next = session
