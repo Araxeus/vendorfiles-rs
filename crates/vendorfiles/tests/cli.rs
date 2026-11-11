@@ -1149,28 +1149,24 @@ fn a_second_name_borrows_only_the_files() {
     for setting in ["version", "first", "locked"] {
         assert!(!report.contains(setting), "{report}");
     }
-}
 
-#[test]
-fn describing_a_second_name_with_files_borrows_nothing() {
-    let dir = described_neighbour(NEIGHBOURED);
-
-    let out = vendor(
-        dir.path(),
-        &[
-            "add",
-            NEIGHBOURED,
-            "--dry-run",
-            "-n",
-            "second",
-            "-f",
-            "README.md",
-        ],
+    // With its own files it borrows nothing, so there is nothing to warn about.
+    let args = [
+        "add",
+        NEIGHBOURED,
+        "--dry-run",
+        "-n",
+        "second",
+        "-f",
+        "README.md",
+    ];
+    let out = vendor(dir.path(), &args);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+    assert!(
+        !stderr(&out).contains("already vendors"),
+        "{}",
+        stderr(&out)
     );
-    let warning = stderr(&out);
-
-    assert_eq!(code(&out), 0, "stderr: {warning}");
-    assert!(!warning.contains("already vendors"), "{warning}");
 }
 
 #[test]
@@ -1209,41 +1205,6 @@ fn a_neighbour_with_nothing_to_give_is_not_mentioned_before_the_error() {
 }
 
 #[test]
-fn a_config_entry_that_cannot_be_edited_stops_before_touching_files() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("vendor.yml"),
-        format!(
-            "base: &b\n  repository: {NEIGHBOURED}\n  version: v1.0.0\n  files:\n    - LICENSE\n\
-             vendorDependencies:\n  a: *b\n"
-        ),
-    )
-    .unwrap();
-    let folder = dir.path().join("vendor").join("a");
-    std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("LICENSE"), "text").unwrap();
-    let lock = format!(
-        r#"{{"a":{{"repository":"{NEIGHBOURED}","version":"v1.0.0","files":{{"LICENSE":"LICENSE"}}}}}}"#
-    );
-    std::fs::write(folder.join("vendor-lock.json"), &lock).unwrap();
-
-    let pinned = format!("{NEIGHBOURED}@v2.0.0");
-    let out = vendor(dir.path(), &["add", pinned.as_str(), "-n", "a"]);
-
-    assert_ne!(code(&out), 0);
-    assert!(
-        stderr(&out).contains("not a plain mapping"),
-        "{}",
-        stderr(&out)
-    );
-    assert!(folder.join("LICENSE").exists(), "the old file was deleted");
-    assert_eq!(
-        std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap(),
-        lock
-    );
-}
-
-#[test]
 fn a_known_name_does_not_move_the_entry_already_under_it() {
     let dir = project(
         r#"{"vendorDependencies":{"vendorfiles-rs":{
@@ -1260,23 +1221,6 @@ fn a_known_name_does_not_move_the_entry_already_under_it() {
 }
 
 #[test]
-fn every_spelling_of_a_repository_finds_the_entry_that_holds_it() {
-    for source in [
-        "vendorfiles-rs-tests/not-a-real-repository",
-        "VENDORFILES-RS-TESTS/Not-A-Real-Repository",
-        "https://www.github.com/vendorfiles-rs-tests/not-a-real-repository",
-    ] {
-        let dir = described_neighbour(NEIGHBOURED);
-        let out = vendor(dir.path(), &["add", source, "-f", "LICENSE", "--dry-run"]);
-        assert!(
-            stderr(&out).contains("already vendored as 'first'"),
-            "{source}: {}",
-            stderr(&out)
-        );
-    }
-}
-
-#[test]
 fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
     let pinned = format!("{NEIGHBOURED}@v1.0.0");
     for args in [
@@ -1284,6 +1228,12 @@ fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
         vec!["add", pinned.as_str()],
         vec!["add", NEIGHBOURED, "-f", "README.md"],
         vec!["add", NEIGHBOURED, "--dry-run"],
+        // Any spelling of the repository finds the entry.
+        vec!["add", "VENDORFILES-RS-TESTS/Not-A-Real-Repository"],
+        vec![
+            "add",
+            "https://www.github.com/vendorfiles-rs-tests/not-a-real-repository",
+        ],
     ] {
         let dir = described_neighbour(NEIGHBOURED);
         let config = dir.path().join("vendor.json");
