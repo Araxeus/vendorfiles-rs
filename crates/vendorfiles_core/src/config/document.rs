@@ -229,7 +229,7 @@ impl ConfigDocument {
             Self::Toml(doc) => {
                 if let Some(deps) = doc
                     .get_mut(DEPENDENCIES_KEY)
-                    .and_then(toml_edit::Item::as_table_mut)
+                    .and_then(toml_edit::Item::as_table_like_mut)
                 {
                     deps.remove(name);
                 }
@@ -744,6 +744,18 @@ vendorDependencies:
         assert_eq!(
             d.render(),
             source.replace("LICENSE", "README.md").trim_end()
+        );
+    }
+
+    #[test]
+    fn toml_removal_from_an_inline_table() {
+        let source =
+            "vendorDependencies = { a = { version = \"v1\" }, b = { version = \"v2\" } }\n";
+        let mut d = doc(ConfigFormat::Toml, source);
+        d.remove_dependency("a").unwrap();
+        assert_eq!(
+            d.render(),
+            "vendorDependencies = { b = { version = \"v2\" } }"
         );
     }
 
