@@ -1268,12 +1268,10 @@ fn adding_to_a_locked_entry_stops_before_writing() {
     for args in [
         vec!["add", NEIGHBOURED, "--dry-run"],
         vec!["add", NEIGHBOURED, "-f", "README.md", "--dry-run"],
+        vec!["add", NEIGHBOURED, "-n", "not-a-real-repository"],
         vec![
             "add",
-            NEIGHBOURED,
-            "-n",
-            "not-a-real-repository",
-            "--dry-run",
+            "https://github.com/vendorfiles-rs-tests/not-a-real-repository@v2.0.0",
         ],
     ] {
         let dir = project(&format!(
@@ -1281,12 +1279,16 @@ fn adding_to_a_locked_entry_stops_before_writing() {
                 "repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],"locked":true
             }}}}}}"#
         ));
+        let config = dir.path().join("vendor.json");
+        let before = std::fs::read_to_string(&config).unwrap();
 
         let out = vendor(dir.path(), &args);
 
         assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
         let said = stderr(&out);
         assert!(said.contains("not-a-real-repository is locked"), "{said}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(!dir.path().join("vendor").exists(), "{args:?} wrote files");
     }
 }
 
