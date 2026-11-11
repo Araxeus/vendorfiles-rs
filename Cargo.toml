@@ -61,7 +61,7 @@ linux-keyutils-keyring-store = "1.0.0"
 # `.tar.xz` releases. Pure Rust, like every other codec here - `xz2`/`liblzma` would bind the C
 # library and put a build toolchain between a user and `cargo install`. Its `xz` feature verifies
 # every check type xz defines, SHA-256 included, which `upx` ships. The encoder is for tests only.
-lzma-rust2 = { version = "0.24.0", default-features = false, features = ["std", "xz"] }
+lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
