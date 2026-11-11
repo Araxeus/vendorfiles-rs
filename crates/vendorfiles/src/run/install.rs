@@ -278,6 +278,15 @@ async fn install(
         });
     }
 
+    if session
+        .workspace
+        .dependencies
+        .get(&name)
+        .is_some_and(|entry| entry.locked == Some(true))
+    {
+        bail!(VendorError::DependencyLocked(name));
+    }
+
     let Base {
         existing,
         neighbour,

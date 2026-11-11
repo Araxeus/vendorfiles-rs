@@ -1264,6 +1264,33 @@ fn a_locked_entry_is_not_sent_to_update() {
 }
 
 #[test]
+fn adding_to_a_locked_entry_stops_before_writing() {
+    for args in [
+        vec!["add", NEIGHBOURED, "--dry-run"],
+        vec!["add", NEIGHBOURED, "-f", "README.md", "--dry-run"],
+        vec![
+            "add",
+            NEIGHBOURED,
+            "-n",
+            "not-a-real-repository",
+            "--dry-run",
+        ],
+    ] {
+        let dir = project(&format!(
+            r#"{{"vendorDependencies":{{"not-a-real-repository":{{
+                "repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],"locked":true
+            }}}}}}"#
+        ));
+
+        let out = vendor(dir.path(), &args);
+
+        assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
+        let said = stderr(&out);
+        assert!(said.contains("not-a-real-repository is locked"), "{said}");
+    }
+}
+
+#[test]
 fn a_name_holding_another_repository_stops_before_writing() {
     let other = "https://github.com/someone-else/not-a-real-repository";
     for args in [
