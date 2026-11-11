@@ -255,6 +255,13 @@ fn upsert_yaml(text: &mut String, name: &str, serialized: &serde_json::Value) ->
                 deps.set(name, &entry);
                 (deps, name)
             }
+            // Anything else under the key, such as an alias, holds entries a replacement would lose.
+            _ if !holds_nothing(root.get(DEPENDENCIES_KEY)) => {
+                return Err(unwritable(
+                    name,
+                    "vendorDependencies is not a plain mapping",
+                ));
+            }
             // An empty `{}` would take the new entry in flow style; a block mapping replaces it.
             _ => {
                 root.set(DEPENDENCIES_KEY, &wrapped);
@@ -275,6 +282,16 @@ fn upsert_yaml(text: &mut String, name: &str, serialized: &serde_json::Value) ->
         );
     }
     Ok(())
+}
+
+/// Whether a YAML value is missing, null or an empty mapping.
+fn holds_nothing(node: Option<yaml_edit::YamlNode>) -> bool {
+    match node {
+        None => true,
+        Some(yaml_edit::YamlNode::Mapping(mapping)) => mapping.is_empty(),
+        Some(yaml_edit::YamlNode::Scalar(scalar)) => scalar.is_null(),
+        Some(_) => false,
+    }
 }
 
 /// Rescales the indent of the lines touching `range` from two-space steps to `width`-space
@@ -538,6 +555,25 @@ vendorDependencies:
             "base: &b\n  version: v1\nvendorDependencies:\n  a: *b\n",
         );
         assert!(d.set_dependency_version("a", "v2").is_err());
+    }
+
+    #[test]
+    fn yaml_upsert_refuses_dependencies_written_as_an_alias() {
+        let text = "deps: &d\n  a:\n    version: v1\nvendorDependencies: *d\n";
+        let mut d = doc(ConfigFormat::Yml, text);
+        assert!(d.upsert_dependency("c", &dependency()).is_err());
+        assert_eq!(d.render(), text.trim_end());
+    }
+
+    #[test]
+    fn yaml_upsert_fills_a_null_dependencies_key() {
+        let mut d = doc(ConfigFormat::Yml, "vendorDependencies:\n");
+        d.upsert_dependency("c", &dependency()).unwrap();
+        assert!(
+            d.render().contains("  c:\n    version: v1"),
+            "{}",
+            d.render()
+        );
     }
 
     #[test]
