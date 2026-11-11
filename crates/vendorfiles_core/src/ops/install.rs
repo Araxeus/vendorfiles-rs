@@ -18,7 +18,7 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, flat_files, forget_files, previous_entry,
+    VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
     retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
@@ -243,6 +243,7 @@ impl Session {
                 version: version.clone(),
                 files: config_files_to_lock_files(&dependency.files, &version),
                 save_path,
+                pending: false,
             },
             &lockfile_path,
         )
@@ -413,9 +414,9 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
 /// dependencies can swap folders, and a cleanup that ran inside a download task could delete a
 /// file another task had already written into the folder it is clearing.
 ///
-/// The lock entry's file list is emptied before any file goes, and `commit` writes it back last.
-/// A run that stops anywhere in between leaves an entry that reads as stale, so the next `sync`
-/// reinstalls instead of trusting files it never finished.
+/// The lock entry is marked pending before any file goes, listing the files this install may
+/// write as well, and `commit` writes the finished entry last. A run that stops anywhere in
+/// between leaves a pending entry, so the next install reinstalls and clears all of it.
 ///
 /// # Errors
 ///
@@ -425,7 +426,9 @@ pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
         return Ok(());
     }
     prepared.progress.status("clearing previous install");
-    let cleared = match forget_files(&prepared.dependency.name, &prepared.lockfile_path).await {
+    let incoming = config_files_to_lock_files(&prepared.dependency.files, &prepared.version);
+    let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
+    let cleared = match marked {
         Ok(()) => {
             remove_previously_installed(
                 &prepared.folder,
@@ -967,6 +970,41 @@ mod tests {
         std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
 
         assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn the_next_install_clears_what_an_interrupted_one_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+        let forced = || InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let progress = Arc::new(session.progress.dependency("first"));
+        let interrupted = session
+            .prepare(
+                dependency("first", "v2", "README.md"),
+                forced(),
+                "v2".to_owned(),
+                progress,
+            )
+            .await;
+        super::clear_previous(&interrupted).await.unwrap();
+        std::fs::write(dir.path().join("vendor/first/README.md"), "half").unwrap();
+
+        let progress = Arc::new(session.progress.dependency("first"));
+        let next = session
+            .prepare(
+                dependency("first", "v1", "LICENSE"),
+                forced(),
+                "v1".to_owned(),
+                progress,
+            )
+            .await;
+        super::clear_previous(&next).await.unwrap();
+
+        assert!(!dir.path().join("vendor/first/README.md").exists());
     }
 
     #[tokio::test]

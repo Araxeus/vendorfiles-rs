@@ -68,8 +68,8 @@ impl Session {
 
     /// Whether the dependency folder is out of step with what is being installed.
     ///
-    /// Any inconsistency - missing lockfile, version drift, a file that vanished, a changed
-    /// `files` declaration - means "yes". Every failure path is also "yes", matching the
+    /// Any inconsistency - missing lockfile, an unfinished install, version drift, a file that
+    /// vanished, a changed `files` declaration - means "yes". Every failure path is also "yes", matching the
     /// reference's blanket `catch`.
     pub(crate) async fn needs_update(
         &self,
@@ -81,7 +81,10 @@ impl Session {
         let Ok(lockfile) = read_lockfile(lockfile_path).await else {
             return true;
         };
-        let Some(locked) = lockfile.get(&dependency.name) else {
+        let Some(locked) = lockfile
+            .get(&dependency.name)
+            .filter(|locked| !locked.pending)
+        else {
             return true;
         };
         if locked.version != new_version {

@@ -239,9 +239,10 @@ changing what the user sees required splitting an install into three stages, in 
 | `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
 | `Session::commit` | `&mut self` | strictly ordered: write config, write lockfile, settle the line |
 
-Before a dependency's old files are cleared, its lock entry's file list is emptied, and `commit`
-writes the full entry back last. A run that stops in between leaves an entry that reads as
-stale, so the lockfile never vouches for files an install did not finish.
+Before a dependency's old files are cleared, its lock entry is marked `pending` and lists the
+files the install may write as well. `commit` writes the finished entry last. A run that stops in
+between leaves a pending entry, which reads as stale, so the next install clears everything the
+interrupted one touched and the lockfile never vouches for unfinished files.
 
 `sync` then:
 

@@ -33,6 +33,10 @@ pub struct VendorLock {
     /// close to it or inside the project, absolute otherwise.
     #[serde(rename = "savePath", default, skip_serializing_if = "Option::is_none")]
     pub save_path: Option<String>,
+    /// An install of this entry started and has not finished. Its `files` then list everything
+    /// that install may have written, so the next one can clear it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 /// The `savePath` to record for `folder`, given the folder holding the lockfile.
@@ -122,14 +126,16 @@ pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFil
 /// Every path written into the dependency folder, relative to it.
 #[must_use]
 pub fn flat_files(files: &LockFiles) -> Vec<String> {
-    files
-        .values()
-        .flat_map(|target| match target {
-            FileTarget::Rename(s) => vec![s.clone()],
-            FileTarget::ExtractList(list) => list.clone(),
-            FileTarget::ExtractMap(map) => map.values().cloned().collect(),
-        })
-        .collect()
+    files.values().flat_map(outputs).collect()
+}
+
+/// The paths one target writes into the dependency folder.
+fn outputs(target: &FileTarget) -> Vec<String> {
+    match target {
+        FileTarget::Rename(s) => vec![s.clone()],
+        FileTarget::ExtractList(list) => list.clone(),
+        FileTarget::ExtractMap(map) => map.values().cloned().collect(),
+    }
 }
 
 /// Reads and parses a lockfile.
@@ -177,26 +183,40 @@ pub async fn write_lockfile(name: &str, lock: VendorLock, path: &Path) -> Result
     write_string(path, &data).await
 }
 
-/// Empties the file list of `name`'s entry in the lockfile at `path`. A missing file or entry
-/// leaves nothing to do.
+/// Marks `name`'s entry in the lockfile at `path` as pending and adds `incoming` to its files.
+/// A missing file or entry leaves nothing to mark.
 ///
-/// Every dependency lists at least one file, so an empty list always reads as stale. The entry
-/// keeps its place, which keeps the lockfile's order stable across reinstalls.
+/// The entry keeps its place, which keeps the lockfile's order stable across reinstalls.
 ///
 /// # Errors
 ///
 /// Returns [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
-pub async fn forget_files(name: &str, path: &Path) -> Result<()> {
+pub async fn mark_pending(name: &str, path: &Path, incoming: LockFiles) -> Result<()> {
     let Ok(mut lockfile) = read_lockfile(path).await else {
         return Ok(());
     };
-    let Some(entry) = lockfile
-        .get_mut(name)
-        .filter(|entry| !entry.files.is_empty())
-    else {
+    let Some(entry) = lockfile.get_mut(name) else {
         return Ok(());
     };
-    entry.files.clear();
+    entry.pending = true;
+    for (file, target) in incoming {
+        match entry.files.get_mut(&file) {
+            None => {
+                entry.files.insert(file, target);
+            }
+            // One archive key can name different outputs across versions. Both sets are listed.
+            Some(existing) if *existing != target => {
+                let mut both = outputs(existing);
+                for output in outputs(&target) {
+                    if !both.contains(&output) {
+                        both.push(output);
+                    }
+                }
+                *existing = FileTarget::ExtractList(both);
+            }
+            Some(_) => {}
+        }
+    }
     write_string(path, &format!("{}\n", to_json(&lockfile)?)).await
 }
 
@@ -291,10 +311,38 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Lockfile, VendorLock, config_files_to_lock_files, flat_files, previous_entry,
+        Lockfile, VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
         read_lockfile, retire_folder_entry, save_path, saved_folder, to_json,
     };
     use crate::model::{FileEntry, FileTarget};
+
+    #[tokio::test]
+    async fn a_pending_entry_lists_both_versions_of_a_shared_archive_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vendor-lock.json");
+        let files: Vec<FileEntry> =
+            serde_json::from_str(r#"[{"a-{version}.zip": ["a-{version}"]}]"#).unwrap();
+        let mut lockfile = Lockfile::new();
+        lockfile.insert(
+            "a".to_owned(),
+            VendorLock {
+                repository: "https://github.com/o/a".to_owned(),
+                version: "1".to_owned(),
+                files: config_files_to_lock_files(&files, "1"),
+                save_path: None,
+                pending: false,
+            },
+        );
+        std::fs::write(&path, to_json(&lockfile).unwrap()).unwrap();
+
+        mark_pending("a", &path, config_files_to_lock_files(&files, "2"))
+            .await
+            .unwrap();
+
+        let entry = &read_lockfile(&path).await.unwrap()["a"];
+        assert!(entry.pending);
+        assert_eq!(flat_files(&entry.files), ["a-1", "a-2"]);
+    }
 
     #[tokio::test]
     async fn a_per_folder_entry_is_found_and_retired_when_moving_to_a_shared_lockfile() {
@@ -306,6 +354,7 @@ mod tests {
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
             save_path: None,
+            pending: false,
         };
         let mut folder_lock = Lockfile::new();
         folder_lock.insert("a".to_owned(), entry("1"));
@@ -342,6 +391,7 @@ mod tests {
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 save_path: Some(".".to_owned()),
+                pending: false,
             },
         );
         std::fs::write(&shared, to_json(&lockfile).unwrap()).unwrap();
@@ -390,6 +440,7 @@ mod tests {
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 save_path: Some(".".to_owned()),
+                pending: false,
             },
         );
         std::fs::write(folder.join("vendor-lock.json"), to_json(&earlier).unwrap()).unwrap();
@@ -457,6 +508,7 @@ mod tests {
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
                 save_path: None,
+                pending: false,
             },
         );
         assert_eq!(
