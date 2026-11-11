@@ -285,9 +285,17 @@ async fn install(
 
     // Only `-n` asks for a second entry. Any other name was derived from the source.
     if !named && let Some(neighbour) = neighbour.as_ref() {
+        let name = neighbour.name.clone();
+        // `update` refuses a locked entry, so it is no advice for one.
+        let advice = if neighbour.locked {
+            format!("'{name}' is locked, so unlock it to update it")
+        } else {
+            format!("Run `vendor update {name}` to update it")
+        };
         bail!(VendorError::AlreadyVendored {
             repository,
-            name: neighbour.name.clone(),
+            name,
+            advice,
         });
     }
 
@@ -366,6 +374,7 @@ impl Base {
                 },
                 neighbour: Some(Neighbour {
                     name: key.clone(),
+                    locked: dependency.locked == Some(true),
                     lends_files: !files_given
                         && dependency.files.as_deref().is_some_and(|f| !f.is_empty()),
                 }),
@@ -437,6 +446,7 @@ fn fill_from_source(
 #[derive(Debug)]
 struct Neighbour {
     name: String,
+    locked: bool,
     /// Whether the new entry takes its files from this one.
     lends_files: bool,
 }
@@ -621,6 +631,7 @@ mod tests {
     fn neighbour(lends_files: bool) -> Neighbour {
         Neighbour {
             name: "first".to_owned(),
+            locked: false,
             lends_files,
         }
     }

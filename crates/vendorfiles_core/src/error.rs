@@ -70,9 +70,13 @@ pub enum VendorError {
     NoPackageNames,
 
     #[error(
-        "{repository} is already vendored as '{name}'. Run `vendor update {name}` to update it, or pass -n <name> to add a second entry"
+        "{repository} is already vendored as '{name}'. {advice}, or pass -n <name> to add a second entry"
     )]
-    AlreadyVendored { repository: String, name: String },
+    AlreadyVendored {
+        repository: String,
+        name: String,
+        advice: String,
+    },
 
     #[error(
         "'{name}' already vendors {held}. Pass -n <name> to add {repository} under another name"

@@ -1251,6 +1251,19 @@ fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
 }
 
 #[test]
+fn a_locked_entry_is_not_sent_to_update() {
+    let dir = neighbour_project(&format!(
+        r#""repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],"locked":true"#
+    ));
+
+    let out = vendor(dir.path(), &["add", NEIGHBOURED, "--dry-run"]);
+    let said = stderr(&out);
+
+    assert!(said.contains("'first' is locked"), "{said}");
+    assert!(!said.contains("vendor update"), "{said}");
+}
+
+#[test]
 fn a_name_holding_another_repository_stops_before_writing() {
     let other = "https://github.com/someone-else/not-a-real-repository";
     for args in [
