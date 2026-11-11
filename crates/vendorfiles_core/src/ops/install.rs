@@ -332,20 +332,15 @@ impl Session {
             document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
             return Ok(true);
         };
-        if configured.files.as_deref() != Some(dependency.files.as_slice()) {
-            let entry = RawDependency {
-                version: Some(version.to_owned()),
-                files: Some(dependency.files.clone()),
-                ..configured.clone()
-            };
-            document.upsert_dependency(name, &self.written(entry))?;
-            return Ok(true);
+        let files_changed = configured.files.as_deref() != Some(dependency.files.as_slice());
+        if files_changed {
+            document.set_dependency_files(name, &dependency.files)?;
         }
-        if configured.version.as_deref() == Some(version) {
-            return Ok(false);
+        let version_changed = configured.version.as_deref() != Some(version);
+        if version_changed {
+            document.set_dependency_version(name, version)?;
         }
-        document.set_dependency_version(name, version)?;
-        Ok(true)
+        Ok(files_changed || version_changed)
     }
 
     /// `entry` without the values the `default` block supplies, which `load` folds back in.
@@ -981,6 +976,18 @@ mod tests {
             first.files,
             serde_json::from_value(serde_json::json!(["README.md"])).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn a_files_change_keeps_the_rest_of_the_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = first_config(r#", /* note */ "custom": 1"#);
+        let mut session = session(dir.path(), &config).await;
+
+        commit(&mut session, dependency("first", "v1", "README.md"), "v1").await;
+
+        let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+        assert_eq!(text, config.replace("LICENSE", "README.md"));
     }
 
     #[tokio::test]
