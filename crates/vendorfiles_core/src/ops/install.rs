@@ -296,6 +296,9 @@ impl Session {
             .or_insert_with(|| new_entry(dependency, version));
         entry.version = Some(version.to_owned());
         entry.files = Some(dependency.files.clone());
+        entry
+            .repository
+            .get_or_insert_with(|| dependency.repository.clone());
         self.workspace.file.write().await
     }
 
@@ -311,15 +314,20 @@ impl Session {
             document.upsert_dependency(name, &self.written(new_entry(dependency, version)))?;
             return Ok(true);
         };
+        // An existing URL stays as written; a missing one is filled so `sync` can find it again.
+        let repository_missing = configured.repository.is_none();
+        if repository_missing {
+            document.set_dependency_value(name, "repository", &dependency.repository)?;
+        }
         let files_changed = configured.files.as_deref() != Some(dependency.files.as_slice());
         if files_changed {
-            document.set_dependency_files(name, &dependency.files)?;
+            document.set_dependency_value(name, "files", &dependency.files)?;
         }
         let version_changed = configured.version.as_deref() != Some(version);
         if version_changed {
             document.set_dependency_version(name, version)?;
         }
-        Ok(files_changed || version_changed)
+        Ok(repository_missing || files_changed || version_changed)
     }
 
     /// `entry` without the values the `default` block supplies, which `load` folds back in.
@@ -949,6 +957,19 @@ mod tests {
             .replace("LICENSE", "README.md")
             .replace("\"v1\"", "\"v2\"");
         assert_eq!(text, expected);
+    }
+
+    #[tokio::test]
+    async fn an_entry_without_a_repository_gets_the_installed_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"vendorDependencies":{"first":{"version":"v1","files":["LICENSE"]}}}"#;
+        let mut session = session(dir.path(), config).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        let first = &saved.dependencies["first"];
+        assert_eq!(first.repository.as_deref(), Some(REPOSITORY));
     }
 
     #[tokio::test]

@@ -12,7 +12,7 @@ use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use crate::config::format::{ConfigFormat, Indent, json5_options};
 use crate::config::yaml_emit;
 use crate::error::{Result, VendorError};
-use crate::model::{FileEntry, RawDependency};
+use crate::model::RawDependency;
 use serde::Serialize;
 
 const DEPENDENCIES_KEY: &str = "vendorDependencies";
@@ -109,38 +109,43 @@ impl ConfigDocument {
         }
     }
 
-    /// Sets `vendorDependencies.<name>.files`, leaving the rest of the entry as written.
+    /// Sets `vendorDependencies.<name>.<key>`, leaving the rest of the entry as written.
     ///
     /// # Errors
     ///
-    /// Returns [`VendorError::SerializeConfig`] when the files cannot be encoded or the entry
+    /// Returns [`VendorError::SerializeConfig`] when the value cannot be encoded or the entry
     /// cannot be edited in place.
-    pub fn set_dependency_files(&mut self, name: &str, files: &[FileEntry]) -> Result<()> {
-        let value = serde_json::to_value(files).map_err(|e| unwritable(name, e))?;
+    pub fn set_dependency_value(
+        &mut self,
+        name: &str,
+        key: &str,
+        value: &impl Serialize,
+    ) -> Result<()> {
+        let json = serde_json::to_value(value).map_err(|e| unwritable(name, e))?;
         match self {
             Self::Json(text) => edit_json(text, name, |root| {
                 let entry = root
                     .object_value_or_set()
                     .object_value_or_set(DEPENDENCIES_KEY)
                     .object_value_or_set(name);
-                match entry.get("files") {
-                    Some(prop) => prop.set_value(cst_value(&value)),
+                match entry.get(key) {
+                    Some(prop) => prop.set_value(cst_value(&json)),
                     None => {
-                        entry.append("files", cst_value(&value));
+                        entry.append(key, cst_value(&json));
                     }
                 }
                 Ok(())
             }),
-            Self::Yaml(text) => set_yaml_block(text, name, "files", &value, |doc| {
+            Self::Yaml(text) => set_yaml_block(text, name, key, &json, |doc| {
                 dependencies(doc)
                     .and_then(|deps| deps.get_mapping(name))
                     .ok_or_else(|| unwritable(name, "the entry is not a plain mapping"))
             }),
             Self::Toml(doc) => {
-                let value = files
+                let value = value
                     .serialize(toml_edit::ser::ValueSerializer::new())
                     .map_err(|e| unwritable(name, e))?;
-                let slot = &mut doc[DEPENDENCIES_KEY][name]["files"];
+                let slot = &mut doc[DEPENDENCIES_KEY][name][key];
                 match slot.as_value_mut() {
                     Some(existing) => {
                         let decor = existing.decor().clone();
@@ -692,7 +697,7 @@ vendorDependencies:
     #[test]
     fn json_files_change_touches_only_the_files() {
         let mut d = doc(ConfigFormat::Json, JSON5);
-        d.set_dependency_files("a", &readme()).unwrap();
+        d.set_dependency_value("a", "files", &readme()).unwrap();
         assert_eq!(
             d.render(),
             JSON5
@@ -704,7 +709,7 @@ vendorDependencies:
     #[test]
     fn json_files_are_added_to_an_entry_without_them() {
         let mut d = doc(ConfigFormat::Json, JSON5);
-        d.set_dependency_files("b", &readme()).unwrap();
+        d.set_dependency_value("b", "files", &readme()).unwrap();
         let out = d.render();
         assert!(out.contains(r#""files": ["README.md"]"#), "{out}");
         assert!(out.contains(r#""version": "v1", // pinned"#), "{out}");
@@ -713,7 +718,7 @@ vendorDependencies:
     #[test]
     fn yaml_files_change_touches_only_the_files() {
         let mut d = doc(ConfigFormat::Yml, YAML);
-        d.set_dependency_files("a", &readme()).unwrap();
+        d.set_dependency_value("a", "files", &readme()).unwrap();
         assert_eq!(
             d.render(),
             YAML.replace(
@@ -729,7 +734,7 @@ vendorDependencies:
         let source = "[vendorDependencies.a]\nversion = \"v1\" # pinned\nfiles = [\"LICENSE\"]\n\
                       custom = 1\n";
         let mut d = doc(ConfigFormat::Toml, source);
-        d.set_dependency_files("a", &readme()).unwrap();
+        d.set_dependency_value("a", "files", &readme()).unwrap();
         assert_eq!(
             d.render(),
             source.replace("LICENSE", "README.md").trim_end()
@@ -740,10 +745,22 @@ vendorDependencies:
     fn toml_files_change_in_an_inline_table() {
         let source = "vendorDependencies = { a = { version = \"v1\", files = [\"LICENSE\"] } }\n";
         let mut d = doc(ConfigFormat::Toml, source);
-        d.set_dependency_files("a", &readme()).unwrap();
+        d.set_dependency_value("a", "files", &readme()).unwrap();
         assert_eq!(
             d.render(),
             source.replace("LICENSE", "README.md").trim_end()
+        );
+    }
+
+    #[test]
+    fn yaml_value_is_added_to_an_entry() {
+        let mut d = doc(ConfigFormat::Yml, YAML);
+        d.set_dependency_value("b", "repository", &"https://github.com/a/b")
+            .unwrap();
+        let out = d.render();
+        assert!(
+            out.ends_with("files: [README.md]\n        repository: https://github.com/a/b"),
+            "{out}"
         );
     }
 
