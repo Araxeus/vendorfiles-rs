@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, VendorError};
-use crate::fsx::anchor;
+use crate::fsx::{self, anchor};
 use crate::model::{FileEntry, FileTarget};
 use crate::template::{basename, replace_version};
 
@@ -220,7 +220,7 @@ pub async fn mark_pending(name: &str, path: &Path, incoming: LockFiles) -> Resul
     write_string(path, &format!("{}\n", to_json(&lockfile)?)).await
 }
 
-/// Writes raw lockfile contents, creating parent directories as needed.
+/// Writes raw lockfile contents atomically, creating parent directories as needed.
 ///
 /// # Errors
 ///
@@ -234,7 +234,7 @@ pub async fn write_string(path: &Path, data: &str) -> Result<()> {
                 source,
             })?;
     }
-    tokio::fs::write(path, data)
+    fsx::write_atomic(path, data)
         .await
         .map_err(|source| VendorError::WriteFile {
             path: path.to_path_buf(),

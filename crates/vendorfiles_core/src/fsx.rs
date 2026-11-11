@@ -353,6 +353,34 @@ async fn write_stream(
     write_bytes(response, save_path, transfer).await
 }
 
+/// Writes `data` through a file beside `path` and renames it into place, so a write that fails
+/// or is cut short leaves the old contents.
+///
+/// A symlink is followed, so the file it points to is replaced and the link kept.
+///
+/// # Errors
+///
+/// Returns the error of the write or the rename.
+pub async fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
+    let target = tokio::fs::canonicalize(path)
+        .await
+        .unwrap_or_else(|_| path.to_path_buf());
+    let staged = staged_beside(&target);
+    let written = async {
+        tokio::fs::write(&staged, data).await?;
+        #[cfg(unix)]
+        if let Ok(metadata) = tokio::fs::metadata(&target).await {
+            tokio::fs::set_permissions(&staged, metadata.permissions()).await?;
+        }
+        tokio::fs::rename(&staged, &target).await
+    }
+    .await;
+    if written.is_err() {
+        let _ = tokio::fs::remove_file(&staged).await;
+    }
+    written
+}
+
 /// A temporary path next to `target`, so the swap never crosses a filesystem.
 fn staged_beside(target: &Path) -> PathBuf {
     let directory = target.parent().unwrap_or_else(|| Path::new("."));
@@ -408,9 +436,34 @@ async fn write_bytes(
 mod tests {
     use super::{
         anchor, expand_home, home_dir, is_running_executable, join_normalized, normalize, simplify,
-        staged_beside, stream_to_file,
+        staged_beside, stream_to_file, write_atomic,
     };
     use std::path::{Path, PathBuf};
+
+    #[tokio::test]
+    async fn a_failed_write_leaves_the_old_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vendor.json");
+        std::fs::write(&path, "old").unwrap();
+
+        // A folder in the staging file's place makes the write fail.
+        std::fs::create_dir(staged_beside(&path)).unwrap();
+
+        assert!(write_atomic(&path, "new").await.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+    }
+
+    #[tokio::test]
+    async fn a_write_replaces_the_contents_and_leaves_nothing_beside() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vendor.json");
+        std::fs::write(&path, "old").unwrap();
+
+        write_atomic(&path, "new").await.unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[cfg(unix)]
     #[test]
