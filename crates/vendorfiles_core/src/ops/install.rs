@@ -281,19 +281,21 @@ impl Session {
     /// Registering a new dependency is a deliberate divergence: the reference crashes here
     /// because it never inserts the entry the `install` command was asked to create.
     ///
-    /// The in-memory `dependencies` map is left alone for entries that already existed. The
-    /// reference keeps a deep copy of them, so a version written mid-run is never visible to
-    /// the staleness checks of later dependencies - and neither is it here.
+    /// The in-memory entry follows the file, so a later install of the same name in one run
+    /// compares against what was saved.
     async fn record(&mut self, dependency: &Dependency, version: &str) -> Result<()> {
         let mut document = self.workspace.file.document.clone();
         if !self.edit_config(&mut document, dependency, version)? {
             return Ok(());
         }
         self.workspace.file.document = document;
-        self.workspace
+        let entry = self
+            .workspace
             .dependencies
             .entry(dependency.name.clone())
             .or_insert_with(|| new_entry(dependency, version));
+        entry.version = Some(version.to_owned());
+        entry.files = Some(dependency.files.clone());
         self.workspace.file.write().await
     }
 
@@ -947,6 +949,18 @@ mod tests {
             .replace("LICENSE", "README.md")
             .replace("\"v1\"", "\"v2\"");
         assert_eq!(text, expected);
+    }
+
+    #[tokio::test]
+    async fn a_second_install_in_one_run_is_saved_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v2").await;
+        commit(&mut session, dependency("first", "v1", "LICENSE"), "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(saved.dependencies["first"].version.as_deref(), Some("v1"));
     }
 
     #[tokio::test]
