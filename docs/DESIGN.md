@@ -239,6 +239,10 @@ changing what the user sees required splitting an install into three stages, in 
 | `install::download` | none (`Arc<GitHubClient>` + owned `Prepared`) | one task per dependency, ≤8 at a time |
 | `Session::commit` | `&mut self` | strictly ordered: write config, write lockfile, settle the line |
 
+Before a dependency's old files are cleared, its lock entry's file list is emptied, and `commit`
+writes the full entry back last. A run that stops in between leaves an entry that reads as
+stale, so the lockfile never vouches for files an install did not finish.
+
 `sync` then:
 
 1. resolves every version with one `join_all` - single-flight per release key, so two

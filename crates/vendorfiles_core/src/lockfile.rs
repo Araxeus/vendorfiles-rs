@@ -177,6 +177,29 @@ pub async fn write_lockfile(name: &str, lock: VendorLock, path: &Path) -> Result
     write_string(path, &data).await
 }
 
+/// Empties the file list of `name`'s entry in the lockfile at `path`. A missing file or entry
+/// leaves nothing to do.
+///
+/// Every dependency lists at least one file, so an empty list always reads as stale. The entry
+/// keeps its place, which keeps the lockfile's order stable across reinstalls.
+///
+/// # Errors
+///
+/// Returns [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
+pub async fn forget_files(name: &str, path: &Path) -> Result<()> {
+    let Ok(mut lockfile) = read_lockfile(path).await else {
+        return Ok(());
+    };
+    let Some(entry) = lockfile
+        .get_mut(name)
+        .filter(|entry| !entry.files.is_empty())
+    else {
+        return Ok(());
+    };
+    entry.files.clear();
+    write_string(path, &format!("{}\n", to_json(&lockfile)?)).await
+}
+
 /// Writes raw lockfile contents, creating parent directories as needed.
 ///
 /// # Errors

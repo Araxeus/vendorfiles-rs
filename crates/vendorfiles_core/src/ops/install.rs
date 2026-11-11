@@ -18,8 +18,8 @@ use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, flat_files, previous_entry, retire_folder_entry,
-    save_path, saved_folder, write_lockfile,
+    VendorLock, config_files_to_lock_files, flat_files, forget_files, previous_entry,
+    retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
 use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
 use crate::ops::{OpResult, Session};
@@ -216,8 +216,7 @@ impl Session {
             return Ok(None);
         }
 
-        // The config is written first. A lockfile left behind by a failed write reads as stale
-        // and reinstalls forward, but a config left behind would pull `sync` back a version.
+        // The lock entry is written last because it marks the install complete.
         let old_version = dependency.version.clone();
         progress.committing("updating config");
         self.record(&dependency, &version)
@@ -414,21 +413,30 @@ pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<P
 /// dependencies can swap folders, and a cleanup that ran inside a download task could delete a
 /// file another task had already written into the folder it is clearing.
 ///
+/// The lock entry's file list is emptied before any file goes, and `commit` writes it back last.
+/// A run that stops anywhere in between leaves an entry that reads as stale, so the next `sync`
+/// reinstalls instead of trusting files it never finished.
+///
 /// # Errors
 ///
-/// Returns the error of the first file that could not be deleted.
+/// Returns the error of the lockfile write, or of the first file that could not be deleted.
 pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
     if !prepared.has_work() {
         return Ok(());
     }
     prepared.progress.status("clearing previous install");
-    remove_previously_installed(
-        &prepared.folder,
-        &prepared.lockfile_path,
-        prepared.previous.as_ref(),
-    )
-    .await
-    .map_err(|error| blame(&prepared.progress, error))
+    let cleared = match forget_files(&prepared.dependency.name, &prepared.lockfile_path).await {
+        Ok(()) => {
+            remove_previously_installed(
+                &prepared.folder,
+                &prepared.lockfile_path,
+                prepared.previous.as_ref(),
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    cleared.map_err(|error| blame(&prepared.progress, error))
 }
 
 /// Fetches every file into the dependency folder.
@@ -933,6 +941,71 @@ mod tests {
         let session = session(dir.path(), &config).await;
 
         assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_install_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let session = session(dir.path(), &first_config("")).await;
+        let progress = Arc::new(session.progress.dependency("first"));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(
+                dependency("first", "v1", "LICENSE"),
+                options,
+                "v2".to_owned(),
+                progress,
+            )
+            .await;
+
+        // The old files go and a new one lands, then the run stops before `commit`.
+        super::clear_previous(&prepared).await.unwrap();
+        std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
+
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
+    }
+
+    #[tokio::test]
+    async fn a_reinstall_keeps_its_place_in_the_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let lockfile = dir.path().join("vendor/first/vendor-lock.json");
+        let lock = std::fs::read_to_string(&lockfile).unwrap();
+        let second =
+            format!(r#","second":{{"repository":"{REPOSITORY}","version":"v1","files":{{}}}}}}"#);
+        std::fs::write(
+            &lockfile,
+            lock.trim_end().strip_suffix('}').unwrap().to_owned() + &second,
+        )
+        .unwrap();
+        let mut session = session(dir.path(), &first_config("")).await;
+        let progress = Arc::new(session.progress.dependency("first"));
+        let options = InstallOptions {
+            force: true,
+            ..InstallOptions::default()
+        };
+        let prepared = session
+            .prepare(
+                dependency("first", "v1", "LICENSE"),
+                options,
+                "v2".to_owned(),
+                progress,
+            )
+            .await;
+
+        super::clear_previous(&prepared).await.unwrap();
+        session.commit(prepared).await.unwrap();
+
+        let names: Vec<_> = read_lockfile(&lockfile)
+            .await
+            .unwrap()
+            .into_keys()
+            .collect();
+        assert_eq!(names, ["first", "second"]);
     }
 
     #[tokio::test]
