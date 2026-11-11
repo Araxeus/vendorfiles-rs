@@ -74,6 +74,15 @@ pub enum VendorError {
     )]
     AlreadyVendored { repository: String, name: String },
 
+    #[error(
+        "'{name}' already vendors {held}. Pass -n <name> to add {repository} under another name"
+    )]
+    NameTaken {
+        name: String,
+        held: String,
+        repository: String,
+    },
+
     #[error("{0} describes one dependency, so it cannot be used with more than one source")]
     SingleSourceOption(&'static str),
 

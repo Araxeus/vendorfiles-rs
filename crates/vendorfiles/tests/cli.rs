@@ -1300,6 +1300,36 @@ fn adding_a_vendored_repository_without_a_name_stops_before_writing() {
     }
 }
 
+#[test]
+fn a_name_holding_another_repository_stops_before_writing() {
+    let other = "https://github.com/someone-else/not-a-real-repository";
+    for args in [
+        vec!["add", NEIGHBOURED, "-f", "README.md"],
+        vec!["add", NEIGHBOURED, "-n", "not-a-real-repository"],
+        vec!["add", NEIGHBOURED, "--dry-run"],
+    ] {
+        let dir = project(&format!(
+            r#"{{"vendorDependencies":{{"not-a-real-repository":{{
+                "repository":"{other}","version":"v1.0.0","files":["LICENSE"]
+            }}}}}}"#
+        ));
+        let config = dir.path().join("vendor.json");
+        let before = std::fs::read_to_string(&config).unwrap();
+
+        let out = vendor(dir.path(), &args);
+
+        assert_ne!(code(&out), 0, "exit code for `vendor {args:?}`");
+        let said = stderr(&out);
+        assert!(
+            said.contains(&format!("'not-a-real-repository' already vendors {other}")),
+            "{said}"
+        );
+        assert!(said.contains("-n <name>"), "{said}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+        assert!(!dir.path().join("vendor").exists(), "{args:?} wrote files");
+    }
+}
+
 /// A registry with one program, written next to the project.
 fn registry(dir: &Path) -> std::path::PathBuf {
     let path = dir.join("registry.yml");

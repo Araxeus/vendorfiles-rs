@@ -263,6 +263,21 @@ async fn install(
         },
     };
 
+    // `add` never repoints an entry, so a name holding another repository is a clash.
+    if let Some(held) = session
+        .workspace
+        .dependencies
+        .get(&name)
+        .and_then(|entry| entry.repository.as_deref())
+        && !same_repository(held, &repository)
+    {
+        bail!(VendorError::NameTaken {
+            name,
+            held: held.to_owned(),
+            repository,
+        });
+    }
+
     let Base {
         existing,
         neighbour,
