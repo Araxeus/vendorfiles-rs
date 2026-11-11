@@ -163,6 +163,7 @@ impl Session {
             .dependency_folder(dependency.vendor_folder.as_deref(), &dependency.name);
         let lockfile_path = self.workspace.lockfile_path(&folder);
         let needs_update = options.force
+            || (!options.show_outdated_only && self.changes_config(&dependency, &version))
             || self
                 .needs_update(&dependency, &lockfile_path, &folder, &version)
                 .await;
@@ -287,6 +288,15 @@ impl Session {
         )
         .map(drop)
         .map_err(|error| blame(&prepared.progress, error))
+    }
+
+    /// Whether installing `dependency` at `version` would edit its config entry.
+    ///
+    /// An entry that cannot be edited counts as a change, so `check_recordable` reports it.
+    fn changes_config(&self, dependency: &Dependency, version: &str) -> bool {
+        let mut document = self.workspace.file.document.clone();
+        self.edit_config(&mut document, dependency, version)
+            .unwrap_or(true)
     }
 
     /// Saves what this install changed about the dependency's config entry, if anything.
@@ -907,6 +917,16 @@ mod tests {
         let session = session(dir.path(), &first_config("")).await;
 
         assert!(stale(&session, dependency("first", "v1", "README.md")).await);
+    }
+
+    #[tokio::test]
+    async fn an_install_the_config_does_not_describe_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        installed(dir.path());
+        let config = first_config("").replace("LICENSE", "README.md");
+        let session = session(dir.path(), &config).await;
+
+        assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
     }
 
     #[tokio::test]
