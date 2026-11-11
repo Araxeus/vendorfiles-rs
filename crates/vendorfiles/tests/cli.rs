@@ -1133,15 +1133,22 @@ fn adding_a_second_name_for_one_repository_says_it_is_inheriting() {
 }
 
 #[test]
-fn a_second_name_starts_with_no_version_of_its_own() {
-    let dir = described_neighbour(NEIGHBOURED);
+fn a_second_name_borrows_only_the_files() {
+    let dir = neighbour_project(&format!(
+        r#""repository":"{NEIGHBOURED}","version":"v1.0.0","files":["LICENSE"],
+           "vendorFolder":"./vendor/first","locked":true"#
+    ));
 
     let out = vendor(
         dir.path(),
         &["add", NEIGHBOURED, "--dry-run", "-n", "second"],
     );
+    let report = stdout(&out);
 
-    assert!(!stdout(&out).contains("version"), "{}", stdout(&out));
+    assert!(report.contains("LICENSE"), "{report}");
+    for setting in ["version", "first", "locked"] {
+        assert!(!report.contains(setting), "{report}");
+    }
 }
 
 #[test]

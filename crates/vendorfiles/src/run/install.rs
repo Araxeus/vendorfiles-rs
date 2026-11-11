@@ -322,7 +322,7 @@ async fn install(
 /// Files may be inherited from an entry under this name, or from any entry pointing at the same
 /// repository - the reference looks in both places.
 struct Base {
-    /// The entry under this name, else the neighbour, else an empty entry.
+    /// The entry under this name, else the neighbour's files, else an empty entry.
     existing: RawDependency,
     /// The entry already vendoring this repository, when there is none under this name.
     neighbour: Option<Neighbour>,
@@ -343,11 +343,11 @@ impl Base {
                 .is_some_and(|url| same_repository(url, repository))
         });
         match neighbour {
-            // A version describes what the neighbour has installed, so it stays behind.
+            // Only the files carry over. The rest places and pins the neighbour's own install.
             Some((key, dependency)) => Self {
                 existing: RawDependency {
-                    version: None,
-                    ..dependency.clone()
+                    files: dependency.files.clone(),
+                    ..RawDependency::default()
                 },
                 neighbour: Some(Neighbour {
                     name: key.clone(),
