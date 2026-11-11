@@ -627,5 +627,5 @@ code and the complete resulting file tree (including binary payloads). Covered:
    asks for a second entry. The reference borrows that entry's files and version and, when the
    version already matches, writes the lockfile and never the config. A second entry borrows files
    only. A name that already holds another repository is refused too, where the reference keeps
-   the entry's own repository and installs that one instead. The lockfile is written only alongside a config that describes the same install, and an
-   entry the config cannot record fails before any file is touched.
+   the entry's own repository and installs that one instead. The lockfile is written only
+   alongside a config that describes the same install.

@@ -108,11 +108,7 @@ impl Session {
         self.progress.reserve_rows(usize::from(prepared.has_work()));
 
         // The two stages below report their own failures, so there is nothing to add here.
-        let ready = match self.check_recordable(&prepared) {
-            Ok(()) => clear_previous(&prepared).await,
-            Err(error) => Err(error),
-        };
-        let outcome = match ready {
+        let outcome = match clear_previous(&prepared).await {
             Ok(()) => download(Arc::clone(&self.github), prepared).await,
             Err(error) => Err(error),
         };
@@ -271,28 +267,9 @@ impl Session {
         Ok(None)
     }
 
-    /// Confirms the config can take this install's change, before any file is touched.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VendorError::SerializeConfig`] when the entry cannot be edited, such as a YAML
-    /// entry written as an alias.
-    pub fn check_recordable(&self, prepared: &Prepared) -> Result<()> {
-        if !prepared.has_work() {
-            return Ok(());
-        }
-        self.edit_config(
-            &mut self.workspace.file.document.clone(),
-            &prepared.dependency,
-            &prepared.version,
-        )
-        .map(drop)
-        .map_err(|error| blame(&prepared.progress, error))
-    }
-
     /// Whether installing `dependency` at `version` would edit its config entry.
     ///
-    /// An entry that cannot be edited counts as a change, so `check_recordable` reports it.
+    /// An entry that cannot be edited counts as a change, so `commit` reports why.
     fn changes_config(&self, dependency: &Dependency, version: &str) -> bool {
         let mut document = self.workspace.file.document.clone();
         self.edit_config(&mut document, dependency, version)
@@ -958,36 +935,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn changed_files_are_saved_on_an_existing_entry() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = format!(
-            r#"{{"vendorDependencies":{{"first":{{
-                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]
-            }}}}}}"#
-        );
-        let mut session = session(dir.path(), &config).await;
-
-        commit(&mut session, dependency("first", "v1", "README.md"), "v2").await;
-
-        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
-        let first = &saved.dependencies["first"];
-        assert_eq!(first.version.as_deref(), Some("v2"));
-        assert_eq!(
-            first.files,
-            serde_json::from_value(serde_json::json!(["README.md"])).unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn a_files_change_keeps_the_rest_of_the_entry() {
+    async fn changed_files_are_saved_and_the_rest_of_the_entry_kept() {
         let dir = tempfile::tempdir().unwrap();
         let config = first_config(r#", /* note */ "custom": 1"#);
         let mut session = session(dir.path(), &config).await;
 
-        commit(&mut session, dependency("first", "v1", "README.md"), "v1").await;
+        commit(&mut session, dependency("first", "v1", "README.md"), "v2").await;
 
         let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
-        assert_eq!(text, config.replace("LICENSE", "README.md"));
+        let expected = config
+            .replace("LICENSE", "README.md")
+            .replace("\"v1\"", "\"v2\"");
+        assert_eq!(text, expected);
     }
 
     #[tokio::test]
