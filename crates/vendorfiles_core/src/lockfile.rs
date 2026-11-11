@@ -177,10 +177,25 @@ pub fn to_json(lockfile: &Lockfile) -> Result<String> {
 ///
 /// Returns [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
 pub async fn write_lockfile(name: &str, lock: VendorLock, path: &Path) -> Result<()> {
-    let mut lockfile = read_lockfile(path).await.unwrap_or_default();
+    let mut lockfile = read_existing(path).await?;
     lockfile.insert(name.to_owned(), lock);
     let data = format!("{}\n", to_json(&lockfile)?);
     write_string(path, &data).await
+}
+
+/// Reads the lockfile at `path` for a write, as empty when there is none yet.
+///
+/// A lockfile that cannot be parsed is an error, so the write never replaces the entries it
+/// could not read.
+async fn read_existing(path: &Path) -> Result<Lockfile> {
+    match read_lockfile(path).await {
+        Err(VendorError::ReadFile { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Ok(Lockfile::new())
+        }
+        read => read,
+    }
 }
 
 /// Marks `name`'s entry in the lockfile at `path` as pending and adds `incoming` to its files.
@@ -190,11 +205,10 @@ pub async fn write_lockfile(name: &str, lock: VendorLock, path: &Path) -> Result
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
+/// Returns [`VendorError::ParseConfig`] for a lockfile that cannot be parsed, or
+/// [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
 pub async fn mark_pending(name: &str, path: &Path, incoming: LockFiles) -> Result<()> {
-    let Ok(mut lockfile) = read_lockfile(path).await else {
-        return Ok(());
-    };
+    let mut lockfile = read_existing(path).await?;
     let Some(entry) = lockfile.get_mut(name) else {
         return Ok(());
     };
@@ -311,10 +325,47 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Lockfile, VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
-        read_lockfile, retire_folder_entry, save_path, saved_folder, to_json,
+        LockFiles, Lockfile, VendorLock, config_files_to_lock_files, flat_files, mark_pending,
+        previous_entry, read_lockfile, retire_folder_entry, save_path, saved_folder, to_json,
+        write_lockfile,
     };
     use crate::model::{FileEntry, FileTarget};
+
+    #[tokio::test]
+    async fn a_lockfile_that_cannot_be_parsed_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vendor-lock.json");
+        std::fs::write(&path, "{ broken").unwrap();
+        let entry = VendorLock {
+            repository: "r".to_owned(),
+            version: "1".to_owned(),
+            files: LockFiles::new(),
+            save_path: None,
+            pending: false,
+        };
+
+        assert!(write_lockfile("a", entry, &path).await.is_err());
+        assert!(mark_pending("a", &path, LockFiles::new()).await.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+    }
+
+    #[tokio::test]
+    async fn a_missing_lockfile_is_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vendor-lock.json");
+        let entry = VendorLock {
+            repository: "r".to_owned(),
+            version: "1".to_owned(),
+            files: LockFiles::new(),
+            save_path: None,
+            pending: false,
+        };
+
+        mark_pending("a", &path, LockFiles::new()).await.unwrap();
+        write_lockfile("a", entry, &path).await.unwrap();
+
+        assert!(read_lockfile(&path).await.unwrap().contains_key("a"));
+    }
 
     #[tokio::test]
     async fn a_pending_entry_lists_both_versions_of_a_shared_archive_key() {
