@@ -175,7 +175,8 @@ pub fn to_json(lockfile: &Lockfile) -> Result<String> {
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
+/// Returns [`VendorError::UnreadableLockfile`] for a lockfile that cannot be parsed, or
+/// [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
 pub async fn write_lockfile(name: &str, lock: VendorLock, path: &Path) -> Result<()> {
     let mut lockfile = read_existing(path).await?;
     lockfile.insert(name.to_owned(), lock);
@@ -194,6 +195,9 @@ async fn read_existing(path: &Path) -> Result<Lockfile> {
         {
             Ok(Lockfile::new())
         }
+        Err(VendorError::ParseConfig { path, message }) => {
+            Err(VendorError::UnreadableLockfile { path, message })
+        }
         read => read,
     }
 }
@@ -205,7 +209,7 @@ async fn read_existing(path: &Path) -> Result<Lockfile> {
 ///
 /// # Errors
 ///
-/// Returns [`VendorError::ParseConfig`] for a lockfile that cannot be parsed, or
+/// Returns [`VendorError::UnreadableLockfile`] for a lockfile that cannot be parsed, or
 /// [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
 pub async fn mark_pending(name: &str, path: &Path, incoming: LockFiles) -> Result<()> {
     let mut lockfile = read_existing(path).await?;
@@ -344,7 +348,11 @@ mod tests {
             pending: false,
         };
 
-        assert!(write_lockfile("a", entry, &path).await.is_err());
+        let error = write_lockfile("a", entry, &path).await.unwrap_err();
+        assert!(
+            error.to_string().contains("delete it to reinstall"),
+            "{error}"
+        );
         assert!(mark_pending("a", &path, LockFiles::new()).await.is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
     }
