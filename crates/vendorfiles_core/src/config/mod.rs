@@ -42,7 +42,7 @@ pub struct ConfigFile {
 }
 
 impl ConfigFile {
-    /// Renders and writes the document, restoring the original trailing newline.
+    /// Renders and writes the document atomically, restoring the original trailing newline.
     ///
     /// # Errors
     ///
@@ -50,7 +50,7 @@ impl ConfigFile {
     pub async fn write(&self) -> Result<()> {
         let body = self.document.render();
         let data = format!("{body}{}", self.settings.final_newline);
-        tokio::fs::write(&self.settings.path, data)
+        crate::fsx::write_atomic(&self.settings.path, &data)
             .await
             .map_err(|source| VendorError::WriteFile {
                 path: self.settings.path.clone(),
