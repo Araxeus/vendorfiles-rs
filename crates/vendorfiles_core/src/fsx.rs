@@ -357,7 +357,7 @@ async fn write_stream(
 /// or is cut short leaves the old contents.
 ///
 /// The data reaches the disk before the rename, so a power cut can't leave the new name on
-/// an empty file. A symlink is followed, so the file it points to is replaced and the link kept.
+/// an empty file. On Unix the rename is flushed as well, so writes stay in order. A symlink is followed, so the file it points to is replaced and the link kept.
 ///
 /// # Errors
 ///
@@ -381,6 +381,16 @@ pub async fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
     .await;
     if written.is_err() {
         let _ = tokio::fs::remove_file(&staged).await;
+    }
+
+    // The rename is a change to the folder, so the folder is flushed too. The file is in place
+    // by now, and some filesystems can't flush a folder, so a failure here is ignored.
+    #[cfg(unix)]
+    if written.is_ok()
+        && let Some(folder) = target.parent()
+        && let Ok(folder) = tokio::fs::File::open(folder).await
+    {
+        let _ = folder.sync_all().await;
     }
     written
 }
