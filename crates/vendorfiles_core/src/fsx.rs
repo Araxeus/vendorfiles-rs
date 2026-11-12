@@ -356,7 +356,8 @@ async fn write_stream(
 /// Writes `data` through a file beside `path` and renames it into place, so a write that fails
 /// or is cut short leaves the old contents.
 ///
-/// A symlink is followed, so the file it points to is replaced and the link kept.
+/// The data reaches the disk before the rename, so a power cut can't leave the new name on
+/// an empty file. A symlink is followed, so the file it points to is replaced and the link kept.
 ///
 /// # Errors
 ///
@@ -367,7 +368,10 @@ pub async fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
         .unwrap_or_else(|_| path.to_path_buf());
     let staged = staged_beside(&target);
     let written = async {
-        tokio::fs::write(&staged, data).await?;
+        let mut file = tokio::fs::File::create(&staged).await?;
+        file.write_all(data.as_bytes()).await?;
+        file.sync_all().await?;
+        drop(file);
         #[cfg(unix)]
         if let Ok(metadata) = tokio::fs::metadata(&target).await {
             tokio::fs::set_permissions(&staged, metadata.permissions()).await?;
