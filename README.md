@@ -3,6 +3,18 @@
 [![crates.io Version](https://img.shields.io/crates/v/vendorfiles)](https://crates.io/crates/vendorfiles)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Araxeus/vendorfiles-rs/blob/main/LICENSE)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Araxeus/vendorfiles-rs)
+[![Docs](https://img.shields.io/badge/docs-araxeus.github.io-blue)](https://araxeus.github.io/vendorfiles-rs/)
+
+<p align="center">
+  <a href="https://araxeus.github.io/vendorfiles-rs/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)"
+              srcset="https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/site/public/readme-banner-dark.svg">
+      <img alt="Read the vendorfiles docs at araxeus.github.io/vendorfiles-rs" width="800"
+           src="https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/site/public/readme-banner-light.svg">
+    </picture>
+  </a>
+</p>
 
 A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
 GitHub repositories and keep them up to date. Think of it like a package manager, but for
