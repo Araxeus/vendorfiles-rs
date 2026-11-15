@@ -42,7 +42,7 @@ pub struct Converted {
 }
 
 /// Rewrites Markdown lines as MDX.
-pub fn convert(lines: &[String], links: &Links) -> Result<Converted> {
+pub fn convert(source: &[String], links: &Links) -> Result<Converted> {
     let mut out = Converted {
         lines: Vec::new(),
         has_tabs: false,
@@ -51,8 +51,8 @@ pub fn convert(lines: &[String], links: &Links) -> Result<Converted> {
     let mut in_fence = false;
     let mut at = 0;
 
-    while at < lines.len() {
-        let line = &lines[at];
+    while at < source.len() {
+        let line = &source[at];
         at += 1;
 
         if line.trim_start().starts_with("```") {
@@ -66,18 +66,18 @@ pub fn convert(lines: &[String], links: &Links) -> Result<Converted> {
         }
 
         if let Some(marker) = parse_open(line)? {
-            let close = find(lines, at, CLOSE)?;
-            out.lines.extend(tabs(&lines[at..close], &marker)?);
+            let close = find(source, at, CLOSE)?;
+            out.lines.extend(tabs(&source[at..close], &marker)?);
             out.has_tabs = true;
             at = close + 1;
             continue;
         }
 
         if line.trim() == REGISTRY_OPEN {
-            let close = find(lines, at, REGISTRY_CLOSE)?;
+            let close = find(source, at, REGISTRY_CLOSE)?;
             out.lines
                 .extend(["<ProgramFilter />".to_owned(), String::new()]);
-            for row in &lines[at..close] {
+            for row in &source[at..close] {
                 if !row.starts_with("<details")
                     && !row.starts_with("<summary")
                     && !row.starts_with("</details")

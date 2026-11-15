@@ -10,7 +10,7 @@
 
 mod jsonc;
 mod registry;
-pub(crate) mod render;
+pub mod render;
 mod toml;
 mod yaml;
 
@@ -20,10 +20,10 @@ use crate::sh;
 
 const OPEN_PREFIX: &str = "<!-- formats";
 const OPEN_SUFFIX: &str = "-->";
-pub(crate) const CLOSE: &str = "<!-- /formats -->";
+pub const CLOSE: &str = "<!-- /formats -->";
 
 /// What a region's opening marker asks for.
-pub(crate) struct Marker {
+pub struct Marker {
     /// The example is about creating the file, so its name is the useful label.
     pub files: bool,
     /// The format that leads and is open.
@@ -36,7 +36,7 @@ pub(crate) struct Marker {
 ///
 /// - `files` labels the tabs by file name, for an example about creating the file
 /// - `json first` (the default), `yml first` or `toml first` picks the tab that leads and is open
-pub(crate) fn parse_open(line: &str) -> Result<Option<Marker>> {
+pub fn parse_open(line: &str) -> Result<Option<Marker>> {
     let marker = line
         .trim()
         .strip_prefix(OPEN_PREFIX)
@@ -107,7 +107,7 @@ pub fn regenerate(markdown: &str) -> Result<String> {
 
 /// The first `json` or `jsonc` block in a region: the one example everything else is derived
 /// from.
-pub(crate) fn source_block(region: &[&str]) -> Result<(String, String)> {
+pub fn source_block(region: &[&str]) -> Result<(String, String)> {
     let opened = region.iter().enumerate().find_map(|(idx, line)| {
         let info = line.trim_start().strip_prefix("```")?.trim();
         matches!(info, "json" | "jsonc").then(|| (idx, info.to_owned()))

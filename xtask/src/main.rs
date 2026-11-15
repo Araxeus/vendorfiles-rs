@@ -30,6 +30,8 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Generate the docs site's pages from README.md into site/src/content/docs.
+    Site,
     /// Bump the workspace version, commit and tag `v{version}`, then push, publish and open a
     /// draft release - each one asked about, or taken as read from its flag.
     Release(release::Options),
@@ -39,6 +41,7 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Ci => ci::run(),
         Command::Readme { check } => readme::run(check),
+        Command::Site => site::run(),
         Command::Release(options) => release::run(&options),
     }
 }

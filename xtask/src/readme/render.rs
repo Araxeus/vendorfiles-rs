@@ -19,7 +19,7 @@ pub struct Labels {
 
 /// A config format, used to choose the tab a region opens on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Format {
+pub enum Format {
     Json,
     Yaml,
     Toml,
@@ -42,7 +42,7 @@ pub const FILES: Labels = Labels {
 const SCHEMA: &str = "$schema";
 
 /// One example in all three formats, checked to describe the same config.
-pub(crate) struct Texts {
+pub struct Texts {
     pub json: String,
     pub json_fence: String,
     pub yaml: String,
@@ -53,7 +53,7 @@ pub(crate) struct Texts {
 ///
 /// `fence` is the info string of the source block, kept so a `jsonc` example keeps its
 /// comment-aware highlighting.
-pub(crate) fn texts(json_source: &str, fence: &str) -> Result<Texts> {
+pub fn texts(json_source: &str, fence: &str) -> Result<Texts> {
     let node = jsonc::parse(json_source)?;
     let (body, schema) = split_schema(node);
 
