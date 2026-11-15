@@ -1,0 +1,81 @@
+name: Site
+
+# The docs site is generated from README.md at build time, so a README edit rebuilds it, and so
+# does a change to the generator in `xtask/`. `registry.yml` needs no trigger of its own: a
+# registry change has to regenerate the README's program list to pass the README workflow.
+on:
+  push:
+    branches: [main]
+    paths: &sources
+      - README.md
+      - docs/add_to_registry.md
+      - site/**
+      - xtask/**
+      - .github/workflows/site.yml
+  pull_request:
+    paths: *sources
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    # A newer push to the same pull request replaces its build. Builds on main always finish.
+    concurrency:
+      group: site-build-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+
+      # `bun run build` runs `cargo xtask site` first, to write the pages from the README.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # Fails on a broken internal link or anchor.
+      - name: Build
+        run: bun run build
+
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy
+    # A push to main or a manual run on main, never a pull request.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    # One deploy at a time, and a running one is never cancelled halfway. Only deploys share
+    # this group, so a pull request can never displace a queued deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,7 +1,8 @@
 name: Check
 
 # Only for changes that reach the build. `registry.yml` is fetched at runtime, so the registry
-# and README workflows cover it, and docs need no checks at all.
+# and README workflows cover it. Docs are checked by the README workflow and built by the Site
+# workflow.
 on:
   push:
     branches: [main]
