@@ -413,8 +413,8 @@ pub async fn login_with_token(token: &str) -> Result<()> {
 
 /// Runs the OAuth device flow, storing the resulting token.
 ///
-/// The prompts reproduce the reference's wording and its "press Enter, then we open the
-/// browser" sequencing.
+/// The prompts follow `gh auth login`. The code goes to the clipboard when one is reachable,
+/// and the verification URL is always printed so a headless session can finish elsewhere.
 ///
 /// # Errors
 ///
@@ -432,20 +432,46 @@ pub async fn login_with_device_flow() -> Result<()> {
         .await
         .map_err(|e| VendorError::DeviceFlow(e.to_string()))?;
 
-    println!("First, copy your one-time code: {}", codes.user_code);
-    println!("Then press [Enter] to continue in your web browser");
+    // On X11 the clipboard empties when its owner drops, so the handle lives until login ends.
+
+    let clipboard = copy_to_clipboard(&codes.user_code);
+    let code = ui::cyan(&codes.user_code);
+    if clipboard.is_some() {
+        println!("One-time code ({code}) copied to clipboard");
+    } else {
+        println!("First copy your one-time code: {code}");
+    }
+
+    // The URL is printed because over SSH or on a headless box the opener can exit cleanly
+    // without showing anything.
+
+    print!(
+        "Press Enter to open {} in your browser...",
+        codes.verification_uri
+    );
     wait_for_enter();
-    println!("Opening your web browser...");
-    let _ = open::that_detached(&codes.verification_uri);
+    if open::that_detached(&codes.verification_uri).is_err() {
+        ui::warning("Could not open a browser. Visit the URL above on any device.");
+    }
 
     let auth = codes
         .poll_until_available(&crab, &OAUTH_CLIENT_ID.into())
         .await
         .map_err(|e| VendorError::DeviceFlow(e.to_string()))?;
 
+    drop(clipboard);
     store(Token::new(auth.access_token.expose_secret())).await;
     ui::success("Logged in successfully");
     Ok(())
+}
+
+/// Puts `text` on the system clipboard, returning the handle that keeps it there.
+///
+/// Returns `None` when no clipboard is reachable, as over SSH.
+fn copy_to_clipboard(text: &str) -> Option<arboard::Clipboard> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    clipboard.set_text(text).ok()?;
+    Some(clipboard)
 }
 
 /// [`save_token`] off the async runtime, for the same reason as [`resolve_token_async`].

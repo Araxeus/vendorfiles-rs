@@ -19,6 +19,8 @@ categories = ["command-line-utilities", "development-tools"]
 vendorfiles_core = { path = "crates/vendorfiles_core", version = "2.4.0" }
 
 anyhow = "1.0.104"
+# `vendor login` copies the one-time code. Text only: `image-data` would pull in the `image` crate.
+arboard = { version = "3.7.0", default-features = false }
 clap = { version = "4.6.7", features = ["derive", "string"] }
 clap_complete = "4.6.11"
 dialoguer = { version = "0.12.0", default-features = false }
