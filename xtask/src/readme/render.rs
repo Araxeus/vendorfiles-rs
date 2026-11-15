@@ -18,8 +18,8 @@ pub struct Labels {
 }
 
 /// A config format, used to choose the tab a region opens on.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Format {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Format {
     Json,
     Yaml,
     Toml,
@@ -41,11 +41,19 @@ pub const FILES: Labels = Labels {
 /// The key that is a language-server directive rather than config in YAML and TOML.
 const SCHEMA: &str = "$schema";
 
-/// Renders the region body: three `<details>`, with `first` at the top and open.
+/// One example in all three formats, checked to describe the same config.
+pub(crate) struct Texts {
+    pub json: String,
+    pub json_fence: String,
+    pub yaml: String,
+    pub toml: String,
+}
+
+/// Derives the YAML and TOML renderings of a JSON example.
 ///
-/// `fence` is the info string of the source block, reused verbatim so a `jsonc` example keeps
-/// its comment-aware highlighting.
-pub fn group(json_source: &str, fence: &str, labels: Labels, first: Format) -> Result<String> {
+/// `fence` is the info string of the source block, kept so a `jsonc` example keeps its
+/// comment-aware highlighting.
+pub(crate) fn texts(json_source: &str, fence: &str) -> Result<Texts> {
     let node = jsonc::parse(json_source)?;
     let (body, schema) = split_schema(node);
 
@@ -60,10 +68,22 @@ pub fn group(json_source: &str, fence: &str, labels: Labels, first: Format) -> R
         .context("the generated YAML and TOML do not round-trip to the source example")?;
     check_comments(&body, &yaml_text, &toml_text)?;
 
+    Ok(Texts {
+        json: json_source.trim_end().to_owned(),
+        json_fence: fence.to_owned(),
+        yaml: yaml_text,
+        toml: toml_text,
+    })
+}
+
+/// Renders the region body: three `<details>`, with `first` at the top and open.
+pub fn group(json_source: &str, fence: &str, labels: Labels, first: Format) -> Result<String> {
+    let texts = texts(json_source, fence)?;
+
     let mut tabs = [
-        (Format::Json, labels.json, fence, json_source.trim_end()),
-        (Format::Yaml, labels.yaml, "yml", yaml_text.trim_end()),
-        (Format::Toml, labels.toml, "toml", toml_text.trim_end()),
+        (Format::Json, labels.json, fence, texts.json.as_str()),
+        (Format::Yaml, labels.yaml, "yml", texts.yaml.trim_end()),
+        (Format::Toml, labels.toml, "toml", texts.toml.trim_end()),
     ];
 
     // The sort is stable, so the other two tabs keep their order.
@@ -236,7 +256,16 @@ fn normalize(value: Json) -> Json {
 #[cfg(test)]
 mod tests {
     use super::super::jsonc;
-    use super::{FILES, Format, NAMES, check_comments, comments_in, group, verify};
+    use super::{FILES, Format, NAMES, check_comments, comments_in, group, texts, verify};
+
+    #[test]
+    fn texts_returns_the_three_renderings() {
+        let texts = texts("{ \"a\": \"x\" }", "json").unwrap();
+        assert_eq!(texts.json, "{ \"a\": \"x\" }");
+        assert_eq!(texts.json_fence, "json");
+        assert_eq!(texts.yaml.trim_end(), "a: x");
+        assert_eq!(texts.toml.trim_end(), "a = 'x'");
+    }
 
     #[test]
     fn a_control_character_round_trips_through_both_formats() {
