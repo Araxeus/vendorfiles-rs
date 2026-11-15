@@ -982,14 +982,15 @@ GitHub Action. [Locked](#locking-a-dependency) dependencies are skipped.
 `vendor install`, or its alias `vendor add`, adds dependencies to the config. Each source can be any
 of these:
 
-| Source | Example |
+| Source | Looks like |
 | --- | --- |
-| A [program name from the registry](#installing-by-name) | `vendor add rg` |
-| A repository URL | `vendor add https://github.com/th-ch/youtube-music` |
-| `owner/repo` | `vendor add Araxeus/vendorfiles` |
-| A repository name to search GitHub for | `vendor add React` |
+| A [program name from the registry](#installing-by-name) | `rg` |
+| A repository URL | `https://github.com/th-ch/youtube-music` |
+| `owner/repo` | `Araxeus/vendorfiles` |
+| A repository name to search GitHub for | `React` |
 
-Pin any source to a version with `source@version`, like `vendor add fd@v10.2.0`.
+A registry program needs no file list. For any other source, list the files with `-f`. Pin any
+source to a version with `source@version`, like `vendor add fd@v10.2.0`.
 
 | Option | What it does |
 | --- | --- |
@@ -1030,7 +1031,7 @@ vendor cfg edit "code --wait"
 ### `vendor login` and `vendor logout`
 
 `vendor login` saves a GitHub token. With no token given, it logs you in through your browser.
-`vendor login status` shows which token is in use, whether GitHub accepts it, and how many requests
+`vendor auth status` shows which token is in use, whether GitHub accepts it, and how many requests
 are left. It exits with `1` when there is no token or GitHub rejects it.
 
 `vendor logout` deletes the saved token. [Authentication](#authentication) covers all three in detail.

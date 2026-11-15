@@ -44,7 +44,7 @@ Three placeholders fill in the host's details:
 | `{exe}` | `.exe` on Windows and nothing elsewhere |
 
 If a project's asset names don't follow one pattern, give each host its own `asset` and `member`
-instead. The examples below all do this.
+instead. The `ox`, `herdr` and `programz` entries below do this.
 
 ## Programs that ship a bare binary
 
