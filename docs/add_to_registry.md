@@ -1,6 +1,6 @@
 ### Adding a program to the registry
 
-The list lives in [`registry.yml`](./registry.yml) at the root of this repository. Open a pull
+The list lives in [`registry.yml`](../registry.yml) at the root of this repository. Open a pull
 request adding an entry and, once merged, `vendor add <name>` works for everyone - no new release
 needed. Most projects need a few lines:
 
@@ -100,7 +100,7 @@ and a file from the repository is vendored with `path` instead of an asset:
     hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
-[`registry.schema.json`](./registry.schema.json) describes the format, and `registry.yml` points
+[`registry.schema.json`](../registry.schema.json) describes the format, and `registry.yml` points
 at it, so an editor with YAML language-server support flags a wrong field or a malformed host key
 as you type - before CI, and before the PR. Test your entry too:
 

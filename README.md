@@ -8,9 +8,6 @@ A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull f
 GitHub repositories and keep them up to date. Think of it like a package manager, but for
 individual files: CSS libraries, binaries, config files, whatever you need.
 
-The CLI surface, config files and lockfiles are byte-compatible with the original
-TypeScript/Bun tool, so you can drop this binary onto an existing project and keep going.
-
 - Download files directly from any GitHub repo
 - Grab release assets, including extracting members from zip/tar/tar.gz/crx archives
 - Track versions via releases or commit hashes
