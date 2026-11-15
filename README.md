@@ -16,16 +16,19 @@
   </a>
 </p>
 
-A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
-GitHub repositories and keep them up to date. Think of it like a package manager, but for
-individual files: CSS libraries, binaries, config files, whatever you need.
+vendorfiles pulls files from GitHub repositories and keeps them up to date. It works like a
+package manager for single files, such as CSS libraries, binaries and config files. List what you
+want in a config file, run `vendor sync`, and the files land in your project.
 
-- Download files directly from any GitHub repo
-- Grab release assets, including extracting members from zip/tar/tar.gz/crx archives
-- Track versions via releases or commit hashes
-- Configure with TOML, YAML, JSON, or `package.json` (JSON5 is supported)
-- Parallel, streaming downloads on a Tokio runtime
-- Single static binary, no Node runtime
+- Download any file from any GitHub repository
+- Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
+  archives
+- Track versions by release or by commit
+- Write the config in TOML, YAML, JSON, JSON5 or `package.json`
+- Download in parallel, streaming each file straight to disk
+- Install one static binary, with no Node runtime needed
+
+vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles).
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -55,7 +58,9 @@ individual files: CSS libraries, binaries, config files, whatever you need.
 
 ## Installation
 
-**With the install script:**
+### Install script
+
+The install script is the quickest way to get `vendor`.
 
 ```bash
 # Linux (x86_64) and macOS (Apple Silicon)
@@ -67,26 +72,34 @@ curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install
 irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
 ```
 
-This sets up [Global Programs](#global-programs) for you and lists every change it makes to your
-shell or user environment. It never uses `sudo`. On Linux and macOS it installs to `/usr/local/bin`
-if that is writable and to `~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
+On Linux and macOS the script installs to `/usr/local/bin` if that folder is writable, and to
+`~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
 
-**From [GitHub Releases](https://github.com/Araxeus/vendorfiles-rs/releases):**
+The script also sets up [global programs](#global-programs), so `vendor` can install tools for your
+whole machine. It lists every change it makes to your shell or user environment, and it never uses
+`sudo`.
 
-download the archive for your platform from the
-[release](https://github.com/Araxeus/vendorfiles-rs/releases/latest) and put `vendor`/`vendor.exe` on your
-`PATH`.
-That installs a binary named `vendor`. No system libraries are needed on any platform - the
-Linux archive is statically linked against musl, so it runs on any distribution regardless of
-its glibc version.
+### Other ways to install
 
-**From [Cargo](https://crates.io/crates/vendorfiles):**
+#### From GitHub Releases
+
+Download the archive for your platform from the
+[latest release](https://github.com/Araxeus/vendorfiles-rs/releases/latest), and put `vendor`
+(`vendor.exe` on Windows) on your `PATH`. Older versions are on the
+[releases page](https://github.com/Araxeus/vendorfiles-rs/releases).
+
+The binary needs no system libraries on any platform. The Linux build is statically linked against
+musl, so it runs on any distribution, whatever its glibc version.
+
+#### With Cargo
+
+vendorfiles is [on crates.io](https://crates.io/crates/vendorfiles):
 
 ```bash
 cargo install vendorfiles
 ```
 
-**From source:**
+#### From source
 
 ```bash
 git clone https://github.com/Araxeus/vendorfiles-rs
@@ -94,15 +107,13 @@ cd vendorfiles-rs
 cargo install --path crates/vendorfiles
 ```
 
-**Build without installing:**
+To build without installing, run `cargo build --release`. The binary lands in
+`target/release/vendor`.
 
-```bash
-cargo build --release        # target/release/vendor
-```
+## Quick start
 
-## Quick Start
-
-Create a config file in your project:
+Create a config file in your project. This one asks for two files from the
+[Coloris](https://github.com/mdbassit/Coloris) repository, at release `v0.17.1`:
 
 <!-- formats: files -->
 <details open>
@@ -150,18 +161,22 @@ files = ['dist/coloris.min.js', 'dist/coloris.min.css']
 </details>
 <!-- /formats -->
 
-Run:
+Then download them:
 
 ```bash
 vendor sync
 ```
 
-Your files are now in `./vendor/Coloris/`.
+The files are now in `./vendor/Coloris/`. Later, `vendor outdated` tells you when Coloris has a
+newer release, and `vendor update` moves you to it.
 
-### Global Programs
+### Global programs
 
-To install programs for your whole machine instead of files for one project, run the
-[install script](#installation), or set it up by hand. Create a config file such as `~/vendor.yml`:
+`vendor` can also install programs for your whole machine, like `rg` and `fd`. The
+[install script](#install-script) sets this up for you, or you can do it by hand.
+
+1. Create a config file such as `~/vendor.yml`. Setting `vendorFolder` under `default` puts each
+   program straight into `/usr/local/bin`, instead of a folder of its own.
 
 <!-- formats: files, yml first -->
 <details open>
@@ -209,31 +224,45 @@ locked = false
 </details>
 <!-- /formats -->
 
-`vendorFolder` must be on your `PATH`. Then set the `DEFAULT_VENDOR_CONFIG` environment variable
-to `~/vendor.yml` or the folder containing it, so `vendor` finds the config from any directory.
+2. Make sure the `vendorFolder` you chose is on your `PATH`.
+3. Set the `DEFAULT_VENDOR_CONFIG` environment variable to `~/vendor.yml`, or to the folder that
+   holds it. `vendor` then finds this config from any folder.
+4. Install some programs:
 
-Run:
+   ```bash
+   vendor add vendorfiles rg fd
+   ```
 
-```bash
-vendor add vendorfiles rg fd
-```
-
-`vendor`, `rg` and `fd` are now in `/usr/local/bin`. `vendor update` upgrades all of them.
+`vendor`, `rg` and `fd` are now in `/usr/local/bin`, and `vendor update` upgrades all of them.
 
 ## Configuration
 
-Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, `vendor.yaml`,
-`vendor.json`, `vendor.json5`, `package.json`. Only the current directory is searched - there is
-no upward walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
+A config file lists the files you want, grouped into dependencies. Every example in these docs
+comes in JSON, YAML and TOML, and the [`examples/`](./examples/) folder has complete files in each
+format.
 
-If nothing is found, `DEFAULT_VENDOR_CONFIG` is tried last - set it to a folder or config file
-to give every directory a fallback config. Paths inside it stay relative to *it*, so its
-dependencies land next to it, not in the directory you ran from. An explicit `-c` skips this.
+### Where vendor looks for the config
 
-Every example below is shown in all three formats, JSON open by default. See
-[`examples/`](./examples/).
+`vendor` looks in the current folder for these files, in this order:
 
-### Basic Setup
+1. `vendor.toml`
+2. `vendor.yml`
+3. `vendor.yaml`
+4. `vendor.json`
+5. `vendor.json5`
+6. `package.json`
+
+It doesn't search parent folders. To use a config somewhere else, pass `-c <path>` or set
+`VENDOR_CONFIG`.
+
+If no config is found, `vendor` tries `DEFAULT_VENDOR_CONFIG` last. Set it to a config file or a
+folder to give every folder a fallback config. Paths in that config stay relative to the config
+itself, so its dependencies land next to it, not in the folder you ran `vendor` from. An explicit
+`-c` skips the fallback.
+
+### Dependency fields
+
+Each dependency names a repository, a version and the files to take from it:
 
 <!-- formats -->
 <details open>
@@ -281,13 +310,24 @@ files = ['cooltipz.min.css', 'LICENSE']
 </details>
 <!-- /formats -->
 
-By default files are saved to `./vendor/{dependency-name}/`.
+| Field | What it holds |
+| --- | --- |
+| `repository` | The GitHub repository URL |
+| `version` | A release tag like `v1.0.0`, or a commit hash when tracking commits |
+| `files` | The files to download |
+| `vendorFolder` | Where to save this dependency's files ([output folders](#output-folders)) |
+| `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
+| `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
+| `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
+
+The first three are all most dependencies need.
 
 ### Output folders and file names
 
 #### Output folders
 
-Change the base folder with `vendorConfig`:
+Files land in `./vendor/<dependency name>/` by default. To change the base folder, set
+`vendorFolder` under `vendorConfig`:
 
 <!-- formats -->
 <details open>
@@ -324,8 +364,8 @@ vendorFolder = './my-vendors'
 </details>
 <!-- /formats -->
 
-Each dependency can override its own folder. `{vendorFolder}` expands to the base folder, and
-a dependency that sets `vendorFolder` does **not** get its name appended:
+A dependency can also set its own `vendorFolder`. Inside it, `{vendorFolder}` stands for the base
+folder. A dependency with its own folder does **not** get its name added to the path:
 
 <!-- formats -->
 <details open>
@@ -401,7 +441,8 @@ vendorFolder = '{vendorFolder}' # → ./my-vendors/
 
 #### Renaming files
 
-Use an object with `source: destination`:
+To save a file under another name or in another folder, write it as an object that maps the source
+path to the destination:
 
 <!-- formats -->
 <details open>
@@ -452,14 +493,214 @@ files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
 </details>
 <!-- /formats -->
 
-An absolute destination is taken at its word, like an absolute `vendorFolder`.
+An absolute destination is used exactly as written, like an absolute `vendorFolder`.
 
 ### Versions and releases
 
+By default, `version` holds a release tag, and `vendor update` moves a dependency to the newest
+release. You can also [track commits](#tracking-commits-instead-of-releases) instead.
+
+#### Release assets
+
+A file that starts with `{release}/` comes from the release's assets instead of the repository.
+`{version}` in a path expands to the version number in the release tag. That's the first `x.y.z`
+in the tag, or the tag with its leading `v`s removed:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "files": [
+                "LICENSE",
+                "{release}/fzf-{version}-linux_amd64.tar.gz",
+                { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" }
+            ]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - LICENSE
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+      - '{release}/fzf-{version}-windows_amd64.zip': fzf-windows.zip
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  'LICENSE',
+  '{release}/fzf-{version}-linux_amd64.tar.gz',
+  { '{release}/fzf-{version}-windows_amd64.zip' = 'fzf-windows.zip' },
+]
+```
+
+</details>
+<!-- /formats -->
+
+`{version}` stays as written in your config, so the same paths keep working after
+`vendor update`.
+
+#### Extracting files from archives
+
+To take files out of an archive, map the archive to the files you want. A list keeps their names,
+and a map renames them:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "files": [
+                {
+                    "{release}/fzf-{version}-linux_amd64.tar.gz": ["fzf"],
+                    "{release}/fzf-{version}-windows_amd64.zip": {
+                        "fzf.exe": "my-custom-fzf.exe"
+                    }
+                }
+            ]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz':
+          - fzf
+        '{release}/fzf-{version}-windows_amd64.zip':
+          fzf.exe: my-custom-fzf.exe
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  { '{release}/fzf-{version}-linux_amd64.tar.gz' = ['fzf'], '{release}/fzf-{version}-windows_amd64.zip' = { 'fzf.exe' = 'my-custom-fzf.exe' } },
+]
+```
+
+</details>
+<!-- /formats -->
+
+- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`. `vendor` detects
+  the format from the file's contents, not its name.
+- Only the files you name are unpacked.
+- For a large `.zip`, only those files are downloaded, using HTTP range requests. The rest of the
+  archive never is.
+
+#### Choosing which releases count
+
+`releaseRegex` decides which releases count as the latest. `vendor` tests it against each
+release's tag and title, newest first.
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "releaseRegex": "^v\\d+\\.\\d+\\.\\d+$",
+            "files": ["{release}/fzf-{version}-linux_amd64.tar.gz"]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    releaseRegex: ^v\d+\.\d+\.\d+$
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+releaseRegex = '^v\d+\.\d+\.\d+$'
+files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
+```
+
+</details>
+<!-- /formats -->
+
+Some patterns you might use:
+
+- `"^v\\d+\\.\\d+\\.\\d+$"` accepts plain versions like `v1.2.3` and nothing else.
+- `"^v(?!.*-(?:alpha|beta)).*"` skips alpha and beta pre-releases.
+- `"stable"` accepts any release with "stable" in its title.
+
+Patterns run on [`fancy-regex`](https://docs.rs/fancy-regex), so the lookarounds and
+backreferences a JavaScript pattern may use work too.
+
+> [!TIP]
+> In a JSON string, write each backslash twice, like `\\d`.
+
 #### Tracking commits instead of releases
 
-By default versions track GitHub releases. To track a file's latest commit instead, use
-`hashVersionFile`:
+To follow a file's latest commit instead of releases, set `hashVersionFile`. `version` then holds a
+commit hash:
 
 <!-- formats -->
 <details open>
@@ -528,200 +769,14 @@ files = ['dist/coloris.min.js']
 </details>
 <!-- /formats -->
 
-- **String**: track that file's latest commit hash
-- **`true`**: track the first entry in `files`
+`hashVersionFile` takes a path or `true`.
 
-#### Release assets
+- A path tracks that file's latest commit.
+- `true` tracks the first file in `files`.
 
-Download release assets with `{release}/` in the path.<br>
-`{version}` expands to the semver core
-of the git tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
+### Locking a dependency
 
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "files": [
-                "LICENSE",
-                "{release}/fzf-{version}-linux_amd64.tar.gz",
-                { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" }
-            ]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    files:
-      - LICENSE
-      - '{release}/fzf-{version}-linux_amd64.tar.gz'
-      - '{release}/fzf-{version}-windows_amd64.zip': fzf-windows.zip
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-files = [
-  'LICENSE',
-  '{release}/fzf-{version}-linux_amd64.tar.gz',
-  { '{release}/fzf-{version}-windows_amd64.zip' = 'fzf-windows.zip' },
-]
-```
-
-</details>
-<!-- /formats -->
-
-**Extracting from archives** - give a list (keep names) or a map (rename):
-
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "files": [
-                {
-                    "{release}/fzf-{version}-linux_amd64.tar.gz": ["fzf"],
-                    "{release}/fzf-{version}-windows_amd64.zip": {
-                        "fzf.exe": "my-custom-fzf.exe"
-                    }
-                }
-            ]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    files:
-      - '{release}/fzf-{version}-linux_amd64.tar.gz':
-          - fzf
-        '{release}/fzf-{version}-windows_amd64.zip':
-          fzf.exe: my-custom-fzf.exe
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-files = [
-  { '{release}/fzf-{version}-linux_amd64.tar.gz' = ['fzf'], '{release}/fzf-{version}-windows_amd64.zip' = { 'fzf.exe' = 'my-custom-fzf.exe' } },
-]
-```
-
-</details>
-<!-- /formats -->
-
-Supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`, detected from the
-file's contents rather than its name. Only the members you name are unpacked. For a large `.zip`,
-those members are fetched with HTTP range requests, so the rest of the archive is never downloaded.
-
-#### Choosing which releases count
-
-`releaseRegex` controls which releases count as "latest". It is tested against each release's
-tag and title, newest first.
-
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "releaseRegex": "^v\\d+\\.\\d+\\.\\d+$",
-            "files": ["{release}/fzf-{version}-linux_amd64.tar.gz"]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    releaseRegex: ^v\d+\.\d+\.\d+$
-    files:
-      - '{release}/fzf-{version}-linux_amd64.tar.gz'
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-releaseRegex = '^v\d+\.\d+\.\d+$'
-files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
-```
-
-</details>
-<!-- /formats -->
-
-Common patterns:
-
-- Semver only: `"^v\\d+\\.\\d+\\.\\d+$"`
-- Exclude pre-releases: `"^v(?!.*-(?:alpha|beta)).*"`
-- Match a title containing "stable": `"stable"`
-
-Patterns are compiled with [`fancy-regex`](https://docs.rs/fancy-regex), so the lookaround and
-backreferences a JavaScript pattern may use are supported.
-
-> **Note:** Use double escaping (`\\d`) in JSON strings.
-
-### Locking Dependencies
-
-`locked: true` pins a dependency:
+Set `locked: true` to keep a dependency at its current version:
 
 <!-- formats -->
 <details open>
@@ -771,13 +826,14 @@ locked = true
 </details>
 <!-- /formats -->
 
-Locked dependencies are still downloaded by `vendor sync` if missing, are skipped by
-`vendor update`, and do not appear in `vendor outdated`.
+`vendor update` skips a locked dependency, and `vendor outdated` leaves it out. `vendor sync` still
+downloads its files if they're missing.
 
-### Default Options
+### Default options
 
-A `default` (or `defaultVendorOptions`) object supplies values for every dependency that does
-not set them:
+A `default` object sets values for every dependency that doesn't set them itself.
+`defaultVendorOptions` is another name for the same object. In this example both dependencies come
+from one repository and track commits:
 
 <!-- formats -->
 <details open>

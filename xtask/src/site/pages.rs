@@ -53,12 +53,12 @@ pub const PAGES: &[PageSpec] = &[
     page(
         "getting-started/quick-start",
         None,
-        Start::Heading("Quick Start"),
+        Start::Heading("Quick start"),
     ),
     page(
         "getting-started/global-programs",
         None,
-        Start::Heading("Global Programs"),
+        Start::Heading("Global programs"),
     ),
     page(
         "configuration/config-files",
@@ -78,12 +78,12 @@ pub const PAGES: &[PageSpec] = &[
     page(
         "configuration/locking",
         Some("Locking"),
-        Start::Heading("Locking Dependencies"),
+        Start::Heading("Locking a dependency"),
     ),
     page(
         "configuration/defaults",
         Some("Defaults"),
-        Start::Heading("Default Options"),
+        Start::Heading("Default options"),
     ),
     page("reference/commands", None, Start::Heading("Commands")),
     page(
@@ -498,9 +498,9 @@ mod tests {
 
     #[test]
     fn a_missing_start_heading_is_named() {
-        let readme = readme().replace("### Global Programs", "### Global programs");
+        let readme = readme().replace("### Global programs", "### Global tools");
         let error = format!("{:#}", generate(&readme, ADD).unwrap_err());
-        assert!(error.contains("`Global Programs`"), "{error}");
+        assert!(error.contains("`Global programs`"), "{error}");
     }
 
     #[test]
