@@ -1,8 +1,14 @@
-### Adding a program to the registry
+# Adding a program to the registry
 
-The list lives in [`registry.yml`](../registry.yml) at the root of this repository. Open a pull
-request adding an entry and, once merged, `vendor add <name>` works for everyone - no new release
-needed. Most projects need a few lines:
+The registry is the list of programs that `vendor add <name>` knows by name. It lives in
+[`registry.yml`](../registry.yml) at the root of this repository.
+
+To add a program, open a pull request with a new entry. Once it is merged, `vendor add <name>`
+works for everyone. No new release of vendorfiles is needed.
+
+## A basic entry
+
+Most programs need only a few lines. This is the entry for `fd`:
 
 ```yaml
   fd:
@@ -17,16 +23,33 @@ needed. Most projects need a few lines:
       linux-x86_64: x86_64-unknown-linux-gnu
 ```
 
-`description` is one short line on what the program does. `vendor search` matches its words, so
-use the ones someone would search for: `gdu` says "disk usage", which is how `vendor search disk`
-finds it.
+| Field | What it holds |
+| --- | --- |
+| `description` | One short line on what the program does |
+| `aliases` | Other names `vendor add` accepts for the program |
+| `repository` | The program's GitHub repository |
+| `asset` | The release asset to download |
+| `member` | The file to take out of that asset |
+| `targets` | The hosts the program supports, each mapped to its `{target}` |
 
-`{target}` is the triple your host maps to, `{ext}` is `.zip` on Windows and `.tar.gz` elsewhere,
-and `{exe}` is `.exe` on Windows. Projects that name assets some other way spell each host out
-instead, with its own `asset` and `member`.
+`vendor search` matches the words in `description`, so use the words someone would search for.
+The `gdu` entry says "disk usage", which is how `vendor search disk` finds it.
 
-Projects that publish a bare binary rather than an archive leave `member` out entirely, and use
-`as` when the asset's name is not the command you would type:
+Three placeholders fill in the host's details:
+
+| Placeholder | Becomes |
+| --- | --- |
+| `{target}` | The value the host maps to in `targets`, like `x86_64-pc-windows-msvc` |
+| `{ext}` | `.zip` on Windows and `.tar.gz` elsewhere |
+| `{exe}` | `.exe` on Windows and nothing elsewhere |
+
+If a project's asset names don't follow one pattern, give each host its own `asset` and `member`
+instead. The examples below all do this.
+
+## Programs that ship a bare binary
+
+Some projects publish the executable itself instead of an archive. Leave `member` out for these.
+Use `as` when the file's name is not the command you would type.
 
 ```yaml
   ox:
@@ -39,10 +62,13 @@ Projects that publish a bare binary rather than an archive leave `member` out en
         as: "ox"
 ```
 
-A program whose executable cannot run alone gives `member` a *list* instead, and every path in it
-is written out as it stands rather than flattened to its basename. `herdr.exe` loads the `conpty/`
-directory shipped beside it, and the two `OpenConsole.exe` builds in there would collide the moment
-the directories were dropped:
+## Programs that need more than one file
+
+Some executables can't run alone. Give `member` a list, and every path in it keeps its folders
+instead of being flattened to a file name.
+
+`herdr.exe` is one of these. It loads the `conpty/` folder shipped next to it, and that folder
+holds two builds of `OpenConsole.exe`. Without their folders, the two would overwrite each other.
 
 ```yaml
   herdr:
@@ -60,9 +86,12 @@ the directories were dropped:
         as: herdr
 ```
 
-Give `member` a *map* instead of a list to say where each file goes, which is how something
-buried in the archive arrives under the name you want. And where a release splits what one host
-needs across more than one asset, the host names them as a list:
+## Renaming files and using several assets
+
+Give `member` a map to choose where each file goes. That's how a file buried deep in the archive
+arrives under the name you want.
+
+When a release splits what one host needs across several assets, list them under that host.
 
 ```yaml
   programz:
@@ -76,13 +105,19 @@ needs across more than one asset, the host names them as a list:
         - asset: "{release}/programz-extra.dll"
 ```
 
-Every path is relative to the archive root, going in as well as coming out; one that climbs out
-of it is refused. So is `as` beside a list or a map - it renames a single downloaded file, and
-those name several. One `member` still lands under its basename, so the archive's own versioned
-directory does not end up in your vendor folder.
+A few rules apply to `member` and `as`:
 
-Repositories that publish several trains of releases need `releaseRegex` to say which tags count,
-and a file from the repository is vendored with `path` instead of an asset:
+- Every path is relative to the archive root, on both sides of a map. A path that climbs out of
+  the archive is refused.
+- `as` renames one downloaded file. It is refused next to a `member` list or map, because those
+  name several files.
+- A single `member` lands under its file name, so the archive's versioned folder doesn't end up in
+  your vendor folder.
+
+## Repositories with more than one kind of release
+
+Some repositories publish releases for several programs. `releaseRegex` says which tags belong to
+yours. The Bitwarden SDK repository, for example, tags its CLI releases `bws-v1.2.3`:
 
 ```yaml
   bitwarden-secrets-cli:
@@ -93,30 +128,32 @@ and a file from the repository is vendored with `path` instead of an asset:
     member: "bws{exe}"
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
+```
 
+## Files from the repository itself
+
+To vendor a file from the repository instead of a release asset, use `path`. With
+`hashVersionFile: true` the file is tracked by commit, so it needs no `targets`.
+
+```yaml
   some-theme:
     repository: https://github.com/example/themes
     path: themes/example.json
     hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
+## Testing your entry
+
 [`registry.schema.json`](../registry.schema.json) describes the format, and `registry.yml` points
-at it, so an editor with YAML language-server support flags a wrong field or a malformed host key
-as you type - before CI, and before the PR. Test your entry too:
+at it. An editor with YAML language-server support therefore flags a wrong field or a malformed
+host key as you type, before CI and before the pull request.
+
+Then try the entry. `--dry-run` shows what `vendor add` would put in your config. It doesn't
+contact GitHub or touch a file, so it's the quickest check:
 
 ```bash
-VENDOR_REGISTRY=./registry.yml vendor add <name> --dry-run   # what it resolves to
-VENDOR_REGISTRY=./registry.yml vendor add <name>             # the real thing
+VENDOR_REGISTRY=./registry.yml vendor add <name> --dry-run
 ```
-
-Then regenerate the README's list of programs, which CI checks is current:
-
-```bash
-cargo xtask readme
-```
-
-`--dry-run` answers "what would this put in my config" without contacting GitHub or touching a
-file, which makes it the quickest way to check an entry:
 
 ```console
 $ vendor add bws --dry-run
@@ -138,20 +175,36 @@ INFO: files would be written to /home/you/project/vendor/bitwarden-secrets-cli
 INFO: nothing was downloaded or written
 ```
 
-Two checks guard the file. Every pull request proves it parses, that each entry resolves for every
-host it lists, and that anything with a `member` is a container the extractor can open. A change to
-`registry.yml` additionally queries GitHub: the asset each entry names must exist for every host it
-claims, and the members inside it are downloaded and checked on one platform. The same checks run
-weekly, since a project can rename its assets without anyone touching this repository.
+When the entry looks right, install it for real:
 
-Members are verified on one platform rather than all of them - every platform would mean
-downloading every asset - so an entry whose layout differs *between* platforms still deserves a
-manual look. `microsoft/edit` and `sinelaw/fresh` both nest their binary on one platform and not
-another.
+```bash
+VENDOR_REGISTRY=./registry.yml vendor add <name>
+```
 
-A few notes on how it behaves. The registry is read by `install`/`add`, `search` and
-`completions`, never by `sync` or `update`. It is cached for a day, so the usual install makes no request at all; after that the
-check is conditional, and `--refresh` forces it. If it cannot be reached, `vendor` says so and
-carries on with its normal search, so being offline costs you nothing but the shorthand. And an
-entry can only say *what* to fetch - there is no `vendorFolder` in the format, and unknown keys are
-refused, so a registry can never redirect writes on your machine.
+Last, regenerate the README's list of programs. CI fails while the list is out of date.
+
+```bash
+cargo xtask readme
+```
+
+## What CI checks
+
+| When | What runs |
+| --- | --- |
+| Every pull request | The file must parse, each entry must resolve for every host it lists, and anything with a `member` must be an archive the extractor can open. |
+| A pull request that changes `registry.yml` | The checks also query GitHub. The asset each entry names must exist for every host it claims, and its members are downloaded and checked on one platform. |
+| Every week | The same checks run again, because a project can rename its assets without anyone touching this repository. |
+
+Members are checked on one platform only, because checking all of them would mean downloading
+every asset. If an entry's layout differs between platforms, check it by hand. `microsoft/edit`
+and `sinelaw/fresh` both nest their binary on one platform and not on another.
+
+## How vendor uses the registry
+
+- `install`/`add`, `search` and `completions` read the registry. `sync` and `update` never do.
+- The registry is cached for a day, so most installs make no request for it. After a day,
+  `vendor` asks whether it changed. `--refresh` forces that check.
+- If the registry can't be reached, `vendor` says so and goes on with its normal GitHub search.
+  Being offline only costs you the short names.
+- An entry can only say what to fetch. The format has no `vendorFolder`, and unknown keys are
+  refused, so a registry can never change where files are written on your machine.
