@@ -1,0 +1,44 @@
+---
+// A search box that narrows the program table that follows it.
+---
+
+<label class="program-filter">
+  <span>Filter programs</span>
+  <input type="search" placeholder="disk, git, editor…" autocomplete="off" />
+</label>
+
+<script>
+  for (const box of document.querySelectorAll<HTMLInputElement>('.program-filter input')) {
+    const table = box.closest('label')?.parentElement?.querySelector('table');
+
+    box.addEventListener('input', () => {
+      const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+      for (const row of table?.querySelectorAll<HTMLElement>('tbody tr') ?? []) {
+        const text = row.textContent?.toLowerCase() ?? '';
+        row.hidden = !words.every((word) => text.includes(word));
+      }
+    });
+  }
+</script>
+
+<style>
+  .program-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-width: 24rem;
+  }
+
+  .program-filter span {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .program-filter input {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+  }
+</style>

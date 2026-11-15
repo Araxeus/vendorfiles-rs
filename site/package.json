@@ -1,0 +1,17 @@
+{
+  "name": "vendorfiles-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen": "cargo xtask site",
+    "dev": "cargo xtask site && bun --bun astro dev",
+    "build": "cargo xtask site && bun --bun astro build",
+    "preview": "bun --bun astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.43.1",
+    "astro": "7.4.12",
+    "starlight-links-validator": "0.27.0",
+    "starlight-theme-next": "0.5.1"
+  }
+}

@@ -1,0 +1,13 @@
+/* Page changes crossfade, while the header and sidebar stay put. */
+
+@view-transition { navigation: auto; }
+
+header.header { view-transition-name: site-header; }
+#starlight__sidebar { view-transition-name: site-sidebar; }
+
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
