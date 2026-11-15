@@ -4,6 +4,7 @@
 //! [`pages::PAGES`], turns every format region into synced Starlight tabs, and writes the result
 //! under `site/`, where it is gitignored.
 
+mod mdx;
 mod sections;
 
 /// The path the site is served under on GitHub Pages.
