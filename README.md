@@ -283,7 +283,9 @@ files = ['cooltipz.min.css', 'LICENSE']
 
 By default files are saved to `./vendor/{dependency-name}/`.
 
-### Custom Output Paths
+### Output folders and file names
+
+#### Output folders
 
 Change the base folder with `vendorConfig`:
 
@@ -397,7 +399,7 @@ vendorFolder = '{vendorFolder}' # → ./my-vendors/
 </details>
 <!-- /formats -->
 
-### Renaming Files
+#### Renaming files
 
 Use an object with `source: destination`:
 
@@ -452,7 +454,9 @@ files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
 
 An absolute destination is taken at its word, like an absolute `vendorFolder`.
 
-### Commit-Based Versioning
+### Versions and releases
+
+#### Tracking commits instead of releases
 
 By default versions track GitHub releases. To track a file's latest commit instead, use
 `hashVersionFile`:
@@ -527,7 +531,7 @@ files = ['dist/coloris.min.js']
 - **String**: track that file's latest commit hash
 - **`true`**: track the first entry in `files`
 
-### GitHub Releases
+#### Release assets
 
 Download release assets with `{release}/` in the path.<br>
 `{version}` expands to the semver core
@@ -651,7 +655,7 @@ Supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`, dete
 file's contents rather than its name. Only the members you name are unpacked. For a large `.zip`,
 those members are fetched with HTTP range requests, so the rest of the archive is never downloaded.
 
-### Filtering Releases
+#### Choosing which releases count
 
 `releaseRegex` controls which releases count as "latest". It is tested against each release's
 tag and title, newest first.

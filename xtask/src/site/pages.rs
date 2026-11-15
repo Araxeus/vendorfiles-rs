@@ -67,13 +67,13 @@ pub const PAGES: &[PageSpec] = &[
     ),
     page(
         "configuration/paths",
-        Some("Output paths and renaming"),
-        Start::Heading("Custom Output Paths"),
+        None,
+        Start::Heading("Output folders and file names"),
     ),
     page(
         "configuration/versions",
-        Some("Versions and releases"),
-        Start::Heading("Commit-Based Versioning"),
+        None,
+        Start::Heading("Versions and releases"),
     ),
     page(
         "configuration/locking",
@@ -169,8 +169,17 @@ struct Owned<'a> {
 
 /// Builds every page and the sidebar JSON from the README and the files that are pages.
 pub fn generate(readme: &str, add_to_registry: &str) -> Result<(Vec<Page>, String)> {
+    build(readme, add_to_registry, PAGES)
+}
+
+/// [`generate`] against any page map, so tests can use a small one.
+fn build(
+    readme: &str,
+    add_to_registry: &str,
+    pages_map: &'static [PageSpec],
+) -> Result<(Vec<Page>, String)> {
     let (_, sections) = sections::split(readme).context("reading README.md")?;
-    let owned = assign(sections)?;
+    let owned = assign(sections, pages_map)?;
     let anchors = anchor_map(&owned);
 
     let mut pages = Vec::new();
@@ -182,7 +191,7 @@ pub fn generate(readme: &str, add_to_registry: &str) -> Result<(Vec<Page>, Strin
         pages.push(render(page, &links).with_context(|| format!("the `{}` page", page.spec.slug))?);
     }
 
-    for spec in PAGES
+    for spec in pages_map
         .iter()
         .filter(|spec| matches!(spec.starts_at, Start::File(_)))
     {
@@ -212,13 +221,16 @@ pub fn generate(readme: &str, add_to_registry: &str) -> Result<(Vec<Page>, Strin
 }
 
 /// Hands each README section to the page whose start comes last before it.
-fn assign(sections: Vec<Section>) -> Result<Vec<Owned<'static>>> {
+///
+/// A section joins that page only as a child of the page's own heading. One at the same level
+/// would read as a sibling of the page's title, so it needs a page of its own.
+fn assign(sections: Vec<Section>, pages_map: &'static [PageSpec]) -> Result<Vec<Owned<'static>>> {
     let mut owned: Vec<Owned> = Vec::new();
     let mut dropping = false;
 
     for (idx, section) in sections.into_iter().enumerate() {
         if idx == 0 && section.level == 1 {
-            let spec = PAGES
+            let spec = pages_map
                 .iter()
                 .find(|spec| matches!(spec.starts_at, Start::Intro))
                 .expect("an intro page");
@@ -230,7 +242,7 @@ fn assign(sections: Vec<Section>) -> Result<Vec<Owned<'static>>> {
             continue;
         }
 
-        let start = PAGES.iter().find(|spec| match spec.starts_at {
+        let start = pages_map.iter().find(|spec| match spec.starts_at {
             Start::Heading(title) | Start::Drop(title) => title == section.title,
             Start::Intro | Start::File(_) => false,
         });
@@ -250,15 +262,26 @@ fn assign(sections: Vec<Section>) -> Result<Vec<Owned<'static>>> {
                 section.title
             ),
             None if dropping => {}
-            None => owned
-                .last_mut()
-                .expect("the intro comes first")
-                .sections
-                .push(section),
+            None => {
+                let page = owned.last_mut().expect("the intro comes first");
+                let head = &page.sections[0];
+                if section.level <= head.level {
+                    bail!(
+                        "README heading `{} {}` sits beside `{} {}`, which starts the `{}` page; \
+                         nest it one level deeper or add it to PAGES in xtask/src/site/pages.rs",
+                        "#".repeat(section.level),
+                        section.title,
+                        "#".repeat(head.level),
+                        head.title,
+                        page.spec.slug
+                    );
+                }
+                page.sections.push(section);
+            }
         }
     }
 
-    for spec in PAGES {
+    for spec in pages_map {
         if let Start::Heading(title) | Start::Drop(title) = spec.starts_at {
             let found = owned.iter().any(|page| page.sections[0].title == title)
                 || matches!(spec.starts_at, Start::Drop(_));
@@ -291,13 +314,19 @@ fn anchor_map(pages: &[Owned]) -> HashMap<String, Target> {
 }
 
 /// One page as MDX: frontmatter, imports, then the converted body.
+///
+/// The page's own heading becomes its title, and the headings under it move up so the
+/// shallowest one is an `h2`, however deep the page starts in the README.
 fn render(page: &Owned, links: &Links) -> Result<Page> {
+    let shallowest = page.sections[1..].iter().map(|section| section.level).min();
+    let lift = shallowest.map_or(0, |level| level - 2);
+
     let mut body: Vec<String> = Vec::new();
     for (idx, section) in page.sections.iter().enumerate() {
         if idx > 0 {
             body.push(format!(
                 "{} {}",
-                "#".repeat(section.level - 1),
+                "#".repeat(section.level - lift),
                 section.title
             ));
         }
@@ -402,6 +431,40 @@ mod tests {
 
     const ADD: &str = "### Adding a program to the registry\n";
 
+    const TEST_PAGES: &[super::PageSpec] = &[
+        super::page("index", None, Start::Intro),
+        super::page("group", None, Start::Heading("Group")),
+        super::page("start", None, Start::Heading("Start")),
+    ];
+
+    #[test]
+    fn children_of_a_deep_page_start_at_h2() {
+        let readme = "# T\n\n## Group\n\n### Start\n\ntext\n\n#### Child\n\nbody\n\n##### Grandchild\n\nmore\n";
+        let (pages, _) = super::build(readme, "", TEST_PAGES).unwrap();
+        let start = pages.iter().find(|p| p.path == "start.mdx").unwrap();
+        assert!(
+            start.content.contains("\ntitle: Start\n"),
+            "{}",
+            start.content
+        );
+        assert!(start.content.contains("\n## Child\n"), "{}", start.content);
+        assert!(
+            start.content.contains("\n### Grandchild\n"),
+            "{}",
+            start.content
+        );
+    }
+
+    #[test]
+    fn a_sibling_heading_needs_its_own_page() {
+        let readme = "# T\n\n## Group\n\n### Start\n\ntext\n\n### Other\n\nmore\n";
+        let error = format!("{:#}", super::build(readme, "", TEST_PAGES).unwrap_err());
+        assert!(
+            error.contains("`### Other`") && error.contains("xtask/src/site/pages.rs"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn the_committed_readme_generates_every_page() {
         let root = crate::sh::workspace_root().unwrap();
@@ -441,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn headings_move_up_one_level() {
+    fn readme_pages_start_their_children_at_h2() {
         let (pages, _) = generate(&readme(), ADD).unwrap();
         let paths = pages
             .iter()
@@ -450,10 +513,10 @@ mod tests {
         assert!(
             paths
                 .content
-                .contains("\ntitle: Output paths and renaming\n")
+                .contains("\ntitle: Output folders and file names\n")
         );
         assert!(
-            paths.content.contains("\n## Renaming Files\n"),
+            paths.content.contains("\n## Renaming files\n"),
             "{}",
             paths.content
         );
