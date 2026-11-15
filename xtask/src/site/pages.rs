@@ -151,7 +151,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
     ("About", &["about/differences", "about/development"]),
 ];
 
-const TAGLINE: &str = "Pull files from GitHub repositories and keep them up to date.";
+const TAGLINE: &str = "Like a package manager, but for single files.";
 
 /// One generated page, at a path under `site/src/content/docs/`.
 #[derive(Debug)]

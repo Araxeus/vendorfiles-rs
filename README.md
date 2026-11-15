@@ -16,9 +16,9 @@
   </a>
 </p>
 
-vendorfiles pulls files from GitHub repositories and keeps them up to date. It works like a
-package manager for single files, such as CSS libraries, binaries and config files. List what you
-want in a config file, run `vendor sync`, and the files land in your project.
+vendorfiles pulls files from GitHub repositories and keeps them up to date. List the CSS libraries,
+binaries or config files you want in a config file, run `vendor sync`, and they land in your
+project.
 
 - Download any file from any GitHub repository
 - Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
@@ -33,27 +33,40 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
 ## Table of Contents <!-- omit from toc -->
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [Global Programs](#global-programs)
+  - [Install script](#install-script)
+  - [Other ways to install](#other-ways-to-install)
+- [Quick start](#quick-start)
+  - [Global programs](#global-programs)
 - [Configuration](#configuration)
-  - [Basic Setup](#basic-setup)
-  - [Custom Output Paths](#custom-output-paths)
-  - [Renaming Files](#renaming-files)
-  - [Commit-Based Versioning](#commit-based-versioning)
-  - [GitHub Releases](#github-releases)
-  - [Filtering Releases](#filtering-releases)
-  - [Locking Dependencies](#locking-dependencies)
-  - [Default Options](#default-options)
+  - [Where vendor looks for the config](#where-vendor-looks-for-the-config)
+  - [Dependency fields](#dependency-fields)
+  - [Output folders and file names](#output-folders-and-file-names)
+  - [Versions and releases](#versions-and-releases)
+  - [Locking a dependency](#locking-a-dependency)
+  - [Default options](#default-options)
 - [Commands](#commands)
+  - [Options for every command](#options-for-every-command)
+  - [Command list](#command-list)
 - [Installing by name](#installing-by-name)
+  - [What gets written](#what-gets-written)
   - [Finding a program](#finding-a-program)
+  - [Programs you can add by name](#programs-you-can-add-by-name)
   - [Adding a program to the registry](#adding-a-program-to-the-registry)
 - [Keeping vendorfiles updated](#keeping-vendorfiles-updated)
 - [Authentication](#authentication)
+  - [Where the token comes from](#where-the-token-comes-from)
+  - [Logging in](#logging-in)
+  - [Checking your login](#checking-your-login)
+  - [Where the token is stored](#where-the-token-is-stored)
 - [Lockfile](#lockfile)
+  - [One lockfile for everything](#one-lockfile-for-everything)
 - [JSON Schema](#json-schema)
 - [Differences from the TypeScript version](#differences-from-the-typescript-version)
 - [Development](#development)
+  - [Checks](#checks)
+  - [Workspace layout](#workspace-layout)
+  - [Automation](#automation)
+  - [Docs site](#docs-site)
 - [License](#license)
 
 ## Installation
@@ -685,7 +698,7 @@ files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
 </details>
 <!-- /formats -->
 
-Some patterns you might use:
+These patterns cover the common cases:
 
 - `"^v\\d+\\.\\d+\\.\\d+$"` accepts plain versions like `v1.2.3` and nothing else.
 - `"^v(?!.*-(?:alpha|beta)).*"` skips alpha and beta pre-releases.
@@ -911,60 +924,124 @@ version = 'afde2592a6254be7c14ccac520cb608bd1adbaf9'
 
 ## Commands
 
-```text
-Usage: vendor command [options]
+Every command has short aliases, like `vendor s` for `vendor sync`. Run `vendor help <command>` to
+see a command's options in your terminal.
 
-Options:
-  -c, --config <file/folder path>                Config file path / Folder containing the config file
-  -p, --plain                                    Print plain lines instead of a live display
-  -v, --version                                  output the current version
-  -h, --help                                     display help for command
+### Options for every command
 
-Commands:
-  sync|s [options]                               Sync config file
-  update|upgrade|bump|up|u [options] [names...]  Update outdated dependencies
-  outdated|o                                     List outdated dependencies
-  install|add|i|a [options] <url/name...>        Install dependencies
-  search|find [options] [terms...]               Find programs to install by name
-  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
-  list|ls                                        List dependencies in the config file
-  config|cfg [command]                           Show or edit the config file
-  login|auth [token]                             Login to GitHub, or check it with auth status
-  logout                                         Log out of GitHub
-  completions <shell>                            Print a shell completion script
-  help [command]                                 display help for command
+These go before or after the command name.
+
+| Option | What it does |
+| --- | --- |
+| `-c, --config <file/folder path>` | Use this config file, or the config in this folder |
+| `-p, --plain` | Print plain lines instead of the live display |
+| `-v, --version` | Print the version |
+| `-h, --help` | Print help |
+
+`VENDOR_CONFIG` sets the config path too, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config
+is found. [Where vendor looks for the config](#where-vendor-looks-for-the-config) has the details.
+
+### Command list
+
+| Command | Aliases | What it does |
+| --- | --- | --- |
+| `sync` | `s` | Download everything the config lists |
+| `update [names...]` | `upgrade`, `bump`, `up`, `u` | Move dependencies to their latest version |
+| `outdated` | `o` | List dependencies that have a newer version |
+| `install <url/name...>` | `add`, `i`, `a` | Add dependencies |
+| `search [terms...]` | `find` | Find programs you can add by name |
+| `uninstall <names...>` | `remove`, `delete`, `del`, `rm` | Delete dependencies and their files |
+| `list` | `ls` | Print the dependencies in the config |
+| `config [edit]` | `cfg` | Print the config file's path, or open it in an editor |
+| `login [token]` | `auth` | Log in to GitHub, or check the login |
+| `logout` | | Delete the saved GitHub token |
+| `completions <shell>` | | Print a shell completion script |
+| `help [command]` | | Print help for a command |
+
+### `vendor sync`
+
+`vendor sync` downloads every dependency whose files are missing or out of date. `-f`/`--force`
+downloads them again even when they're up to date. `vendor` checks the [lockfile](#lockfile) to see
+what's out of date.
+
+### `vendor update`
+
+`vendor update` installs the latest version of every dependency. Name dependencies to update only
+those:
+
+```bash
+vendor update
+vendor update React Express
 ```
 
-Root options work on either side of the subcommand. The config location can also come from
-`VENDOR_CONFIG`, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config is found.
+`--pr` prints a Markdown summary of the changes, ready to use as a pull request description from a
+GitHub Action. [Locked](#locking-a-dependency) dependencies are skipped.
 
-| Command | What it does |
+### `vendor install`
+
+`vendor install`, or its alias `vendor add`, adds dependencies to the config. Each source can be any
+of these:
+
+| Source | Example |
 | --- | --- |
-| `vendor sync\|s` | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date. |
-| `vendor update\|upgrade\|bump\|up\|u [names...]` | Install the latest version of each dependency, or only the named ones.<br>`--pr` prints a Markdown summary. |
-| `vendor outdated\|o` | List dependencies with a newer version available. |
-| `vendor install\|add\|i\|a <url/name...>` | Add dependencies. A source is a [program name from the registry](#installing-by-name) (`vendor add rg`), a repo URL, `owner/repo`, or a repo name to search GitHub for. Any source can be pinned as `source@version`.<br>A registry program needs no `-f`; for anything else, `-f`/`--files` lists the files.<br>`-n`/`--name` sets the config key.<br>`--dry-run` prints what it would add and changes nothing.<br>`--list` does the same as `vendor search`. |
-| `vendor search\|find [terms...]` | Find registry programs by name, alias or description. |
-| `vendor uninstall\|remove\|delete\|del\|rm <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
-| `vendor list\|ls` | Print the config's dependencies. Also spelled `vendor config list\|ls`. |
-| `vendor config\|cfg` | Print the config file path. |
-| `vendor config\|cfg edit [editor]` | Open the config file in `editor`, `$EDITOR`, or the OS default. |
-| `vendor login\|auth [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
-| `vendor login\|auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. |
-| `vendor logout` | Delete the stored token. |
-| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
+| A [program name from the registry](#installing-by-name) | `vendor add rg` |
+| A repository URL | `vendor add https://github.com/th-ch/youtube-music` |
+| `owner/repo` | `vendor add Araxeus/vendorfiles` |
+| A repository name to search GitHub for | `vendor add React` |
 
-**Examples:**
+Pin any source to a version with `source@version`, like `vendor add fd@v10.2.0`.
+
+| Option | What it does |
+| --- | --- |
+| `-f, --files <files...>` | The files to download. A registry program needs none. |
+| `-n, --name [name]` | The name to give the dependency in the config |
+| `--dry-run` | Print the entry it would add, and change nothing |
+| `--list` | List the programs you can add by name, like `vendor search` |
+| `--refresh` | Check the program registry for changes now |
 
 ```bash
 vendor add rg fd
 vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
-vendor update
+```
+
+### `vendor search`
+
+`vendor search` finds programs you can add by name. [Finding a program](#finding-a-program) shows how
+the search works. `--refresh` checks the registry for changes first.
+
+### `vendor uninstall`
+
+`vendor uninstall` deletes a dependency's files and removes it from the config and the lockfile.
+
+### `vendor list`
+
+`vendor list` prints the dependencies in the config. `vendor config list` does the same.
+
+### `vendor config`
+
+`vendor config` prints the path of the config file it found. `vendor config edit` opens that file in
+the editor you name, or in `$EDITOR`, or in your system's default editor:
+
+```bash
 vendor cfg edit "code --wait"
 ```
 
-**Completions:**
+### `vendor login` and `vendor logout`
+
+`vendor login` saves a GitHub token. With no token given, it logs you in through your browser.
+`vendor login status` shows which token is in use, whether GitHub accepts it, and how many requests
+are left. It exits with `1` when there is no token or GitHub rejects it.
+
+`vendor logout` deletes the saved token. [Authentication](#authentication) covers all three in detail.
+
+### `vendor completions`
+
+`vendor completions <shell>` prints a completion script for `bash`, `elvish`, `fish`, `powershell`
+or `zsh`. The bash and zsh scripts also complete program names after `vendor add`, as the registry
+stood when you made the script.
+
+Save the script where your shell loads it:
 
 ```bash
 vendor completions bash > /etc/bash_completion.d/vendor
@@ -975,8 +1052,8 @@ vendor completions powershell >> $PROFILE
 
 ## Installing by name
 
-Some programs are known by name, so you do not have to look up the repository or work out what its
-release assets are called:
+`vendor` knows some programs by name. For those, you don't have to look up the repository or work
+out what its release assets are called:
 
 ```bash
 vendor add fd          # or fdfind, or fd-find
@@ -985,8 +1062,10 @@ vendor add rg fd       # both at once
 vendor add fd@v10.2.0  # pin a version
 ```
 
-That writes an ordinary entry - nothing registry-specific, so it keeps working whatever happens to
-the registry later:
+### What gets written
+
+`vendor add` writes an ordinary config entry. Nothing in it depends on the registry, so it keeps
+working whatever happens to the registry later:
 
 <!-- formats -->
 <details open>
@@ -1042,14 +1121,14 @@ files = [
 </details>
 <!-- /formats -->
 
-The asset picked is the one for your platform, and `{version}` stays symbolic so `vendor update`
+`vendor add` picks the asset for your platform. `{version}` stays as written, so `vendor update`
 keeps working afterwards.
 
 ### Finding a program
 
-`vendor search` lists every program the registry knows, and `vendor add --list` does the same.
-Words narrow the list. Each one has to match a name, an alias, a word in the description or the
-repository, and name matches rank first:
+`vendor search` lists every program the registry knows, and `vendor add --list` does the same. Add
+words to narrow the list. Each word has to match a program's name, an alias, a word in its
+description, or its repository. Name matches come first.
 
 ```bash
 vendor search          # everything
@@ -1057,8 +1136,10 @@ vendor search disk     # bottom, btop, dust, dysk and gdu
 vendor search git      # delta, gh, lazygit and actionlint
 ```
 
-A name the registry nearly knows gets a hint before the GitHub search runs, so `vendor add ripgreb`
-asks whether you meant `ripgrep`.
+If you mistype a name the registry nearly knows, `vendor` suggests the right one before it searches
+GitHub. `vendor add ripgreb` asks whether you meant `ripgrep`.
+
+### Programs you can add by name
 
 <!-- registry -->
 <details>
@@ -1121,18 +1202,21 @@ asks whether you meant `ripgrep`.
 
 ### Adding a program to the registry
 
-See [`docs/add_to_registry.md`](./docs/add_to_registry.md). After changing `registry.yml`, run
-`cargo xtask readme` to regenerate the list above. CI fails while it is out of date.
+Anyone can add a program with a pull request. The
+[registry guide](./docs/add_to_registry.md) walks through writing and testing an entry. After
+changing `registry.yml`, run `cargo xtask readme` to regenerate the list above. CI fails while the
+list is out of date.
 
 ## Keeping vendorfiles updated
 
-`vendor` can vendor itself:
+`vendor` can keep itself up to date. Add it like any other program:
 
 ```bash
 vendor add vendorfiles
 ```
 
-That writes an entry for your platform's release asset, installed next to the running binary:
+That writes an entry for your platform's release asset, set to install next to the running `vendor`
+binary:
 
 <!-- formats -->
 <details open>
@@ -1187,22 +1271,28 @@ vendorFolder = 'C:/tools/bin'
 </details>
 <!-- /formats -->
 
-From then on `vendor update` upgrades the tool along with everything else, replacing the running
-binary safely. `vendor uninstall vendorfiles-rs` stops tracking it but leaves the binary in place.
+From then on, `vendor update` upgrades `vendor` along with everything else, and safely replaces the
+running binary. `vendor uninstall vendorfiles-rs` stops tracking it but leaves the binary in place.
 
 ## Authentication
 
-Anonymous requests to the GitHub API are limited to 60 per hour, so `vendor` warns when it is
-running without credentials.
+Without a token, GitHub allows 60 API requests an hour, so `vendor` warns when it runs without one.
+Log in to raise the limit.
 
-Tokens are resolved in this order:
+### Where the token comes from
 
-1. `GITHUB_TOKEN` environment variable
-2. the token `vendor login` stored in the platform's credential store
-3. anonymous
+`vendor` uses the first token it finds, in this order:
 
-`vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
-through GitHub's OAuth device flow:
+1. The `GITHUB_TOKEN` environment variable
+2. The token `vendor login` saved in your system's credential store
+3. No token, with the anonymous limit
+
+`login`, `logout` and `auth status` need no config file, so they work from any folder.
+
+### Logging in
+
+`vendor login` saves a token. Paste one with `vendor login <token>`, or run `vendor login` alone to
+log in through GitHub's device flow in your browser:
 
 ```text
 $ vendor login
@@ -1211,13 +1301,14 @@ Press Enter to open https://github.com/login/device in your browser...
 SUCCESS: Logged in successfully
 ```
 
-`vendor logout` deletes it again, and says so if something still authenticates you: a
-`GITHUB_TOKEN` in the environment, or a token the npm CLI left in its own keyring entry - that
-entry is not this tool's to delete.
+`vendor logout` deletes the saved token. If something would still log you in, it tells you. That
+can be a `GITHUB_TOKEN` in the environment, or a token the npm CLI saved in its own keyring entry.
+`vendor` leaves that entry alone, because it belongs to npm.
 
-`vendor auth status` shows which of those a run would use and asks GitHub whether it still
-works. It names the account, the requests left this hour and, for a token that has one, the
-expiry date:
+### Checking your login
+
+`vendor auth status` shows which token a run would use, and asks GitHub whether it still works. It
+prints the account name, the requests left this hour, and the token's expiry date if it has one:
 
 ```text
 $ vendor auth status
@@ -1225,41 +1316,42 @@ SUCCESS: Logged in to GitHub as octocat with the token from the credential store
 INFO: 4990 of 5000 API requests left this hour (resets in 42 min)
 ```
 
-It exits `1` when there is no token or GitHub rejects it, so CI can run it as a preflight check.
+It exits with `1` when there is no token or GitHub rejects it, so CI can run it as a check before
+anything else.
 
-Native stores are compiled in per platform - there is no cross-platform facade, and no system
-library to install:
+### Where the token is stored
 
-| Platform                 | Store                                                | Survives         |
+`vendor` has each platform's credential store built in, so there is no system library to install:
+
+| Platform                 | Store                                                | Keeps the token  |
 | ------------------------ | ---------------------------------------------------- | ---------------- |
 | Windows                  | Credential Manager (`windows-native-keyring-store`)  | until deleted    |
 | macOS                    | login Keychain (`apple-native-keyring-store`)        | until deleted    |
 | Linux                    | Secret Service (`zbus-secret-service-keyring-store`) | until deleted    |
 | Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`)     | **until reboot** |
-| anything else            | none - `GITHUB_TOKEN` only                           | -                |
+| anything else            | none, so use `GITHUB_TOKEN`                          | -                |
 
-On Linux the Secret Service is tried first, so a token persists wherever a keyring daemon is
-running - gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
-usually have none, and there the kernel keyutils store takes over: it always works, but it
-holds secrets in kernel memory.
+On Linux, `vendor` tries the Secret Service first, so the token lasts wherever a keyring daemon runs,
+like gnome-keyring, KWallet or KeePassXC. Headless machines, minimal containers and WSL usually have
+no daemon. There `vendor` falls back to the kernel keyutils store. It always works, but it keeps
+secrets in kernel memory, so they're gone after a reboot.
 
-`login` asks the store it used how long it keeps things, so when you land on the keyutils
-fallback it tells you rather than letting the next boot look mysteriously anonymous:
+When `vendor login` lands on that fallback, it warns you, so the next boot doesn't quietly log you
+out:
 
 ```text
 WARNING: this system's credential store keeps secrets in kernel memory, so the token will be gone after a reboot
 ```
 
-Two ways to get persistence if you see that: run a Secret Service daemon (installing
-`gnome-keyring` is usually enough - on a headless box it needs unlocking, see
-[this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
-your shell profile or CI secrets.
+You can keep the token across reboots in two ways.
 
-`login`, `logout` and `auth status` need no config file - they work from any directory.
+- Run a Secret Service daemon. Installing `gnome-keyring` is usually enough. On a headless machine
+  it needs unlocking, as [this note](https://docs.rs/zbus-secret-service-keyring-store) explains.
+- Set `GITHUB_TOKEN` from your shell profile or your CI secrets.
 
 ## Lockfile
 
-Each dependency folder gets a `vendor-lock.json` recording what was written:
+`vendor` records what it downloaded in a `vendor-lock.json` file in each dependency's folder:
 
 ```json
 {
@@ -1274,18 +1366,27 @@ Each dependency folder gets a `vendor-lock.json` recording what was written:
 }
 ```
 
-The keys are the inputs from your config (with `{version}` left un-expanded) and the values are
-what landed on disk. `vendor sync` treats a dependency as stale when the version differs, a
-recorded file is missing, or the `files` declaration changed.
+Under `files`, each key is a path from your config, with `{version}` left as written. Each value is
+the file that landed on disk.
 
-Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead:
-`true` puts it next to the config file, a string names the folder (relative to the config file,
-or absolute); `{vendorFolder}` expands to the base vendor folder.
+`vendor sync` downloads a dependency again when any of these is true:
+
+- Its version changed.
+- A recorded file is missing.
+- Its `files` list changed.
+
+### One lockfile for everything
+
+Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead.
+
+- `true` puts it next to the config file.
+- A string names the folder for it, relative to the config file or absolute. `{vendorFolder}` in
+  the string expands to the base vendor folder.
 
 ## JSON Schema
 
-[`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format, so editors
-can validate and autocomplete it:
+[`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format. Point your
+config at it, and your editor can check and autocomplete it as you type:
 
 <!-- formats -->
 <details open>
@@ -1328,8 +1429,9 @@ vendorDependencies:
 
 ## Differences from the TypeScript version
 
-Configs and lockfiles are interchangeable with the original. Version lookups and downloads run in
-parallel, which is where most of the speedup comes from. Measured against `vendorfiles@1.4.2` with 8 dependencies:
+Configs and lockfiles work with both versions. This version looks up versions and downloads files in
+parallel, which is where most of the speedup comes from. These timings compare the two on a config
+with 8 dependencies, against `vendorfiles@1.4.2`:
 
 |                                 | TypeScript | Rust   |
 | ------------------------------- | ---------- | ------ |
@@ -1340,12 +1442,16 @@ parallel, which is where most of the speedup comes from. Measured against `vendo
 
 ## Development
 
+### Checks
+
+`cargo xtask ci` runs every check CI runs. That's `cargo check`, rustfmt, clippy and the tests, in
+that order, and it stops at the first failure.
+
 ```bash
-cargo xtask ci   # every gate CI applies: check, rustfmt, clippy, tests
+cargo xtask ci
 ```
 
-Or one at a time. The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` is the
-same gate as the workflow; the flags below are what CI spells out and are redundant locally.
+You can also run them one at a time:
 
 ```bash
 cargo check --workspace --all-targets
@@ -1354,16 +1460,49 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
-The workspace is three crates:
+The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` applies the same lints as CI.
+The flags above are what CI spells out, and you don't need them locally.
 
-| Crate                     | Role                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process.                                                                                                                                                                                                                                                                                |
-| `crates/vendorfiles`      | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary.                                                                                                                                                                                                                                                                                                                          |
-| `xtask`                   | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest and README update, format, commit, tag, and then the push, `cargo publish --workspace` and draft GitHub release it asks about up front; `--push`, `--publish` and `--draft-release` answer those three ahead of time, for a release that never stops on a prompt. |
+### Workspace layout
 
-See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
+| Crate                     | What it holds |
+| ------------------------- | ------------- |
+| `crates/vendorfiles_core` | The library: config, lockfile, GitHub client, archive handling and operations. It returns typed errors through `thiserror` and never exits the process. |
+| `crates/vendorfiles`      | The `vendor` binary, with Commander-compatible help and errors, and `anyhow` at the boundary. |
+| `xtask`                   | Repository automation, run as `cargo xtask <command>` |
+
+See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, the ownership model and the full
 parity contract.
+
+### Automation
+
+| Command               | What it does |
+| --------------------- | ------------ |
+| `cargo xtask ci`      | Runs the four checks above |
+| `cargo xtask readme`  | Regenerates the YAML and TOML versions of the README's examples, and its list of programs. `--check` fails instead of writing. |
+| `cargo xtask site`    | Writes the docs site's pages from this README |
+| `cargo xtask release` | Makes a release |
+
+`cargo xtask release` checks that the working tree is clean and asks for the new version. It then
+updates the manifests and the README, formats, commits and tags. It asks up front whether to push,
+run `cargo publish --workspace` and draft a GitHub release. `--push`, `--publish` and
+`--draft-release` answer those questions ahead of time, so a release never stops on a prompt.
+
+### Docs site
+
+The [docs site](https://araxeus.github.io/vendorfiles-rs/) is built from this README and
+[`docs/add_to_registry.md`](./docs/add_to_registry.md), so edit those files, not the site's pages.
+To preview the site, install [Bun](https://bun.sh) and run:
+
+```bash
+cd site
+bun install
+bun run dev
+```
+
+`bun run dev` writes the pages first. After you edit the README, `bun run gen` writes them again. A
+new `##` section in the README needs a page in `xtask/src/site/pages.rs`, and the build names any
+section that has none.
 
 ## License
 
