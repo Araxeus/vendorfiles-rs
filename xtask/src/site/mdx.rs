@@ -90,13 +90,82 @@ pub fn convert(source: &[String], links: &Links) -> Result<Converted> {
             continue;
         }
 
+        if let Some(kind) = alert(line)? {
+            let mut quoted = Vec::new();
+            while at < source.len() && source[at].trim_start().starts_with('>') {
+                let rest = &source[at].trim_start()[1..];
+                quoted.push(rest.strip_prefix(' ').unwrap_or(rest).to_owned());
+                at += 1;
+            }
+            let inner = convert(&quoted, links)?;
+            out.has_tabs |= inner.has_tabs;
+            out.has_registry |= inner.has_registry;
+            out.lines.push(format!(":::{kind}"));
+            out.lines.extend(inner.lines);
+            out.lines.push(":::".to_owned());
+            continue;
+        }
+
         let trimmed = line.trim();
         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
             continue;
         }
-        out.lines.push(prose(line, links)?);
+
+        // A paragraph's lines go through together, so a code span can wrap. A table row or a
+        // heading stands alone.
+        let mut end = at;
+        if !starts_block(line) || is_list_item(line) {
+            while end < source.len() && !starts_block(&source[end]) {
+                end += 1;
+            }
+        }
+        let paragraph = std::iter::once(line.as_str())
+            .chain(source[at..end].iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.lines
+            .extend(prose(&paragraph, links)?.split('\n').map(str::to_owned));
+        at = end;
     }
     Ok(out)
+}
+
+/// Whether a line ends the paragraph before it.
+fn starts_block(line: &str) -> bool {
+    let line = line.trim_start();
+    line.is_empty()
+        || ["|", "#", "```", ">", "<!--"]
+            .iter()
+            .any(|start| line.starts_with(start))
+        || is_list_item(line)
+}
+
+fn is_list_item(line: &str) -> bool {
+    let line = line.trim_start();
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    ["- ", "* ", "+ "]
+        .iter()
+        .any(|bullet| line.starts_with(bullet))
+        || (digits > 0 && (line[digits..].starts_with(". ") || line[digits..].starts_with(") ")))
+}
+
+/// The Starlight aside a GitHub alert line opens, like `> [!NOTE]`.
+fn alert(line: &str) -> Result<Option<&'static str>> {
+    let Some(kind) = line
+        .trim()
+        .strip_prefix("> [!")
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return Ok(None);
+    };
+    Ok(Some(match kind {
+        "NOTE" => "note",
+        "TIP" => "tip",
+        "IMPORTANT" => "note[Important]",
+        "WARNING" => "caution",
+        "CAUTION" => "danger",
+        other => bail!("`> [!{other}]` is not a GitHub alert"),
+    }))
 }
 
 /// The index of the line that closes a region opened before `from`.
@@ -158,27 +227,51 @@ fn tabs(region: &[String], marker: &crate::readme::Marker) -> Result<Vec<String>
     Ok(out)
 }
 
-/// One prose line, with code spans kept verbatim and everything else made MDX-safe.
-fn prose(line: &str, links: &Links) -> Result<String> {
+/// Prose, with code spans kept verbatim and everything else made MDX-safe.
+///
+/// A code span opens with a run of backticks and closes at the next run of the same length,
+/// which may sit on a later line of the same paragraph. A run that never closes is plain text.
+fn prose(source: &str, links: &Links) -> Result<String> {
     let mut out = String::new();
-    let mut rest = line;
+    let mut plain = 0;
+    let mut at = 0;
 
-    while let Some(open) = rest.find('`') {
-        let ticks = rest[open..]
-            .bytes()
-            .take_while(|&byte| byte == b'`')
-            .count();
-        let fence = &rest[open..open + ticks];
-        let Some(close) = rest[open + ticks..].find(fence) else {
-            break;
-        };
-        out.push_str(&text(&rest[..open], links)?);
-        let end = open + ticks + close + ticks;
-        out.push_str(&rest[open..end]);
-        rest = &rest[end..];
+    while let Some(offset) = source[at..].find('`') {
+        let open = at + offset;
+        let ticks = backtick_run(source, open);
+        match closing_run(source, open + ticks, ticks) {
+            Some(close) => {
+                out.push_str(&text(&source[plain..open], links)?);
+                out.push_str(&source[open..close + ticks]);
+                plain = close + ticks;
+                at = plain;
+            }
+            None => at = open + ticks,
+        }
     }
-    out.push_str(&text(rest, links)?);
+    out.push_str(&text(&source[plain..], links)?);
     Ok(out)
+}
+
+fn backtick_run(source: &str, from: usize) -> usize {
+    source[from..]
+        .bytes()
+        .take_while(|&byte| byte == b'`')
+        .count()
+}
+
+/// Where the next run of exactly `ticks` backticks starts.
+fn closing_run(source: &str, from: usize, ticks: usize) -> Option<usize> {
+    let mut at = from;
+    while let Some(offset) = source[at..].find('`') {
+        let start = at + offset;
+        let len = backtick_run(source, start);
+        if len == ticks {
+            return Some(start);
+        }
+        at = start + len;
+    }
+    None
 }
 
 /// Text outside code: comments dropped, links resolved, then `{`, `}` and `<` escaped.
@@ -411,6 +504,44 @@ mod tests {
     fn comments_are_removed_and_stray_angles_escaped() {
         let out = convert_readme("<!-- note -->\na <b> c <!-- x --> d").unwrap();
         assert_eq!(out.lines, ["a &lt;b> c  d"]);
+    }
+
+    #[test]
+    fn a_code_span_may_wrap_inside_a_paragraph() {
+        let out = convert_readme("Use `{a\nb}` here {c}").unwrap();
+        assert_eq!(out.lines, ["Use `{a", "b}` here \\{c\\}"]);
+    }
+
+    #[test]
+    fn a_code_span_never_spans_table_rows() {
+        let out = convert_readme("| ` |\n| {c} ` |").unwrap();
+        assert_eq!(out.lines, ["| ` |", "| \\{c\\} ` |"]);
+    }
+
+    #[test]
+    fn an_unclosed_backtick_is_literal() {
+        let out = convert_readme("a `` b `{c}` {d}").unwrap();
+        assert_eq!(out.lines, ["a `` b `{c}` \\{d\\}"]);
+    }
+
+    #[test]
+    fn a_github_alert_becomes_an_aside() {
+        let out = convert_readme("> [!WARNING]\n> Mind `{x}` and {y}.\n> Second line.").unwrap();
+        assert_eq!(
+            out.lines,
+            [
+                ":::caution",
+                "Mind `{x}` and \\{y\\}.",
+                "Second line.",
+                ":::"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_important_alert_keeps_its_label() {
+        let out = convert_readme("> [!IMPORTANT]\n> Hi").unwrap();
+        assert_eq!(out.lines, [":::note[Important]", "Hi", ":::"]);
     }
 
     #[test]
