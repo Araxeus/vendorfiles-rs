@@ -22,6 +22,7 @@ export default defineConfig({
       ],
       sidebar,
       customCss: ['./src/styles/custom.css'],
+      components: { Footer: './src/components/Footer.astro' },
       plugins: [starlightThemeNext(), starlightLinksValidator()],
     }),
   ],
