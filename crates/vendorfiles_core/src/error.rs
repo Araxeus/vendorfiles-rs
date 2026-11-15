@@ -343,6 +343,11 @@ pub enum VendorError {
     #[error("Failed to parse {path}: {message}")]
     ParseConfig { path: String, message: String },
 
+    #[error(
+        "Failed to parse {path}: {message}\nFix it, or delete it to reinstall everything it lists."
+    )]
+    UnreadableLockfile { path: String, message: String },
+
     #[error("Failed to serialize {path}: {message}")]
     SerializeConfig { path: String, message: String },
 

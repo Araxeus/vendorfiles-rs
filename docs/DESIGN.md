@@ -242,7 +242,9 @@ changing what the user sees required splitting an install into three stages, in 
 Before a dependency's old files are cleared, its lock entry is marked `pending` and lists the
 files the install may write as well. `commit` writes the finished entry last. A run that stops in
 between leaves a pending entry, which reads as stale, so the next install clears everything the
-interrupted one touched and the lockfile never vouches for unfinished files.
+interrupted one touched and the lockfile never vouches for unfinished files. The config and the
+lockfile are written to a file beside them and renamed into place, so a write that is cut short
+leaves the old contents.
 
 `sync` then:
 
@@ -632,5 +634,6 @@ code and the complete resulting file tree (including binary payloads). Covered:
    asks for a second entry. The reference borrows that entry's files and version and, when the
    version already matches, writes the lockfile and never the config. A second entry borrows files
    only. A name that already holds another repository is refused too, where the reference keeps
-   the entry's own repository and installs that one instead. The lockfile is written only
-   alongside a config that describes the same install.
+   the entry's own repository and installs that one instead. A locked entry is refused, as
+   `update` refuses it. The lockfile is written only alongside a config that describes the same
+   install.

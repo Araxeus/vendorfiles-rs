@@ -31,16 +31,31 @@ macro_rules! color_fn {
     };
 }
 
-color_fn!(/// Wraps `message` in green.
-    green, "32");
-color_fn!(/// Wraps `message` in red.
-    red, "31");
-color_fn!(/// Wraps `message` in yellow.
-    yellow, "33");
-color_fn!(/// Wraps `message` in cyan.
-    cyan, "36");
-color_fn!(/// Dims `message`.
-    dim, "2");
+color_fn!(
+    /// Wraps `message` in green.
+    green,
+    "32"
+);
+color_fn!(
+    /// Wraps `message` in red.
+    red,
+    "31"
+);
+color_fn!(
+    /// Wraps `message` in yellow.
+    yellow,
+    "33"
+);
+color_fn!(
+    /// Wraps `message` in cyan.
+    cyan,
+    "36"
+);
+color_fn!(
+    /// Dims `message`.
+    dim,
+    "2"
+);
 
 /// Makes `text` a clickable link to `url` in terminals that support OSC 8.
 ///

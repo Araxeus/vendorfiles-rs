@@ -243,19 +243,13 @@ async fn get(url: &str, etag: Option<&str>) -> Result<Fetched> {
 /// Writes the registry and its `ETag`, ignoring failures - a cache that cannot be written only
 /// costs the next run a request.
 ///
-/// The registry lands via a sibling file and a rename. Writing in place truncates first, so a
-/// full disk or a killed process would leave a half-written file carrying a fresh timestamp, and
-/// nothing would look at it again for [`cache::TTL`]. The `ETag` needs no such care: a damaged
-/// one simply fails to match and costs one full download.
+/// The registry is written atomically. A half-written file would carry a fresh timestamp, and
+/// nothing would look at it again for [`cache::TTL`]. The `ETag` needs no such care, because a
+/// damaged one fails to match and costs one full download.
 async fn store(directory: &Path, file: &Path, tag: &Path, text: &str, etag: Option<&str>) {
-    if tokio::fs::create_dir_all(directory).await.is_err() {
-        return;
-    }
-    let staging = file.with_extension("yml.writing");
-    if tokio::fs::write(&staging, text).await.is_err()
-        || tokio::fs::rename(&staging, file).await.is_err()
+    if tokio::fs::create_dir_all(directory).await.is_err()
+        || crate::fsx::write_atomic(file, text).await.is_err()
     {
-        let _ = tokio::fs::remove_file(&staging).await;
         return;
     }
     match etag {
