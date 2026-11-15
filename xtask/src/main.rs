@@ -7,6 +7,7 @@ mod gh;
 mod readme;
 mod release;
 mod sh;
+mod site;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
