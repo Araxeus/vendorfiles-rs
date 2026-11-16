@@ -99,6 +99,11 @@ irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | 
     filter: blur(20px);
   }
 
+  /* Each section heading trails a hairline that fades out to the right. */
+  .sl-markdown-content .sl-heading-wrapper:has(h2) { display: flex; align-items: center; gap: 1rem; }
+  .sl-markdown-content .sl-heading-wrapper:has(h2)::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--sl-color-gray-5), transparent); }
+  .sl-markdown-content .sl-heading-wrapper:has(h2) .sl-anchor-link { display: none; }
+
   .install { max-width: 100%; }
   .install pre { white-space: pre; }
 
