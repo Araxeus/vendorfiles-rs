@@ -11,3 +11,14 @@ header.header { view-transition-name: site-header; }
 @media (prefers-reduced-motion: reduce) {
   @view-transition { navigation: none; }
 }
+
+/* A page that scrolls and one that doesn't keep the same width, so nothing shifts between them. */
+
+html { scrollbar-gutter: stable; }
+
+/* The current sidebar item looks bold without getting wider, so long labels keep their line breaks. */
+
+.sidebar-content a[aria-current='page'] {
+  font-weight: inherit;
+  text-shadow: 0.35px 0 0 currentColor;
+}
