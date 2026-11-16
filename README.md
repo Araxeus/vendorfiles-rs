@@ -1137,9 +1137,8 @@ through GitHub's OAuth device flow:
 
 ```text
 $ vendor login
-First, copy your one-time code: ABCD-1234
-Then press [Enter] to continue in your web browser
-Opening your web browser...
+One-time code (ABCD-1234) copied to clipboard
+Press Enter to open https://github.com/login/device in your browser...
 SUCCESS: Logged in successfully
 ```
 
