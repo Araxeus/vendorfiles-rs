@@ -16,6 +16,13 @@ header.header { view-transition-name: site-header; }
 
 html { scrollbar-gutter: stable; }
 
+/* Code in a heading reads as part of the heading, without the inline-code box. */
+
+.sl-markdown-content :is(h2, h3, h4, h5, h6) code {
+  background: none;
+  padding: 0;
+}
+
 /* The current sidebar item looks bold without getting wider, so long labels keep their line breaks. */
 
 .sidebar-content a[aria-current='page'] {

@@ -958,11 +958,15 @@ is found. [Where vendor looks for the config](#where-vendor-looks-for-the-config
 | `completions <shell>` | | Print a shell completion script |
 | `help [command]` | | Print help for a command |
 
+---
+
 ### `vendor sync`
 
 `vendor sync` downloads every dependency whose files are missing or out of date. `-f`/`--force`
 downloads them again even when they're up to date. `vendor` checks the [lockfile](#lockfile) to see
 what's out of date.
+
+---
 
 ### `vendor update`
 
@@ -976,6 +980,8 @@ vendor update React Express
 
 `--pr` prints a Markdown summary of the changes, ready to use as a pull request description from a
 GitHub Action. [Locked](#locking-a-dependency) dependencies are skipped.
+
+---
 
 ### `vendor install`
 
@@ -1006,18 +1012,26 @@ vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
 ```
 
+---
+
 ### `vendor search`
 
 `vendor search` finds programs you can add by name. [Finding a program](#finding-a-program) shows how
 the search works. `--refresh` checks the registry for changes first.
 
+---
+
 ### `vendor uninstall`
 
 `vendor uninstall` deletes a dependency's files and removes it from the config and the lockfile.
 
+---
+
 ### `vendor list`
 
 `vendor list` prints the dependencies in the config. `vendor config list` does the same.
+
+---
 
 ### `vendor config`
 
@@ -1028,6 +1042,8 @@ the editor you name, or in `$EDITOR`, or in your system's default editor:
 vendor cfg edit "code --wait"
 ```
 
+---
+
 ### `vendor login` and `vendor logout`
 
 `vendor login` saves a GitHub token. With no token given, it logs you in through your browser.
@@ -1035,6 +1051,8 @@ vendor cfg edit "code --wait"
 are left. It exits with `1` when there is no token or GitHub rejects it.
 
 `vendor logout` deletes the saved token. [Authentication](#authentication) covers all three in detail.
+
+---
 
 ### `vendor completions`
 
