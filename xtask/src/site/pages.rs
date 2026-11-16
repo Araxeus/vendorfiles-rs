@@ -6,14 +6,11 @@ use std::fmt::Write as _;
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
-use super::BASE;
 use super::mdx::{self, Links, Target};
 use super::sections::{self, Section};
 
 /// Where a page's content starts.
 pub enum Start {
-    /// The README's intro, under its `#` title.
-    Intro,
     /// A README heading. The page runs until the next start.
     Heading(&'static str),
     /// A whole file of its own, by repo path.
@@ -42,8 +39,9 @@ const fn drop(heading: &'static str) -> PageSpec {
 }
 
 /// Every page, in README order. Each `##` heading of the README must start one.
+///
+/// The README's intro under its `#` title stays off the site, which has a home page of its own.
 pub const PAGES: &[PageSpec] = &[
-    page("index", Some("vendorfiles"), Start::Intro),
     drop("Table of Contents"),
     page(
         "getting-started/installation",
@@ -158,8 +156,6 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
     ),
 ];
 
-const TAGLINE: &str = "Like a package manager, but for single files.";
-
 /// One generated page, at a path under `site/src/content/docs/`.
 #[derive(Debug)]
 pub struct Page {
@@ -237,21 +233,13 @@ fn assign(sections: Vec<Section>, pages_map: &'static [PageSpec]) -> Result<Vec<
 
     for (idx, section) in sections.into_iter().enumerate() {
         if idx == 0 && section.level == 1 {
-            let spec = pages_map
-                .iter()
-                .find(|spec| matches!(spec.starts_at, Start::Intro))
-                .expect("an intro page");
-            owned.push(Owned {
-                spec,
-                title: section.title.clone(),
-                sections: vec![section],
-            });
+            dropping = true;
             continue;
         }
 
         let start = pages_map.iter().find(|spec| match spec.starts_at {
             Start::Heading(title) | Start::Drop(title) => title == section.title,
-            Start::Intro | Start::File(_) => false,
+            Start::File(_) => false,
         });
         match start {
             Some(spec) if matches!(spec.starts_at, Start::Drop(_)) => dropping = true,
@@ -270,7 +258,12 @@ fn assign(sections: Vec<Section>, pages_map: &'static [PageSpec]) -> Result<Vec<
             ),
             None if dropping => {}
             None => {
-                let page = owned.last_mut().expect("the intro comes first");
+                let Some(page) = owned.last_mut() else {
+                    bail!(
+                        "README heading `{}` comes before any page starts",
+                        section.title
+                    );
+                };
                 let head = &page.sections[0];
                 if section.level <= head.level {
                     bail!(
@@ -339,9 +332,6 @@ fn render(page: &Owned, links: &Links) -> Result<Page> {
         }
         body.extend(section.body.iter().cloned());
     }
-    if matches!(page.spec.starts_at, Start::Intro) {
-        body = intro_lines(&body);
-    }
 
     let converted = mdx::convert(&body, links)?;
     let depth = page.spec.slug.matches('/').count();
@@ -369,19 +359,7 @@ fn render(page: &Owned, links: &Links) -> Result<Page> {
 
 fn frontmatter(page: &Owned) -> String {
     let title = page.spec.title.unwrap_or(&page.title);
-    let mut out = format!("---\ntitle: {}\n", yaml_string(title));
-    if matches!(page.spec.starts_at, Start::Intro) {
-        let _ = write!(
-            out,
-            "template: splash\n\
-             hero:\n  tagline: {}\n  actions:\n    \
-             - text: Get started\n      link: {BASE}getting-started/installation/\n      icon: right-arrow\n    \
-             - text: GitHub\n      link: https://github.com/Araxeus/vendorfiles-rs\n      icon: external\n      variant: minimal\n",
-            yaml_string(TAGLINE)
-        );
-    }
-    out.push_str("---\n");
-    out
+    format!("---\ntitle: {}\n---\n", yaml_string(title))
 }
 
 /// A YAML scalar: bare when it is plain words, quoted otherwise.
@@ -396,26 +374,6 @@ fn yaml_string(text: &str) -> String {
     } else {
         serde_json::Value::from(text).to_string()
     }
-}
-
-/// The intro without the badge row and the README-only banner.
-pub(super) fn intro_lines(body: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut in_banner = false;
-    for line in body {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("<p") {
-            in_banner = true;
-        }
-        if in_banner {
-            in_banner = !trimmed.contains("</p>");
-            continue;
-        }
-        if !trimmed.starts_with("[![") {
-            out.push(line.clone());
-        }
-    }
-    out
 }
 
 fn sidebar() -> String {
@@ -439,7 +397,6 @@ mod tests {
     const ADD: &str = "### Adding a program to the registry\n";
 
     const TEST_PAGES: &[super::PageSpec] = &[
-        super::page("index", None, Start::Intro),
         super::page("group", None, Start::Heading("Group")),
         super::page("start", None, Start::Heading("Start")),
     ];
@@ -478,7 +435,6 @@ mod tests {
         let add = std::fs::read_to_string(root.join("docs/add_to_registry.md")).unwrap();
         let (pages, sidebar) = generate(&readme(), &add).unwrap();
         let paths: Vec<_> = pages.iter().map(|p| p.path.as_str()).collect();
-        assert!(paths.contains(&"index.mdx"));
         assert!(paths.contains(&"configuration/versions.mdx"));
         assert_eq!(
             paths.len(),
@@ -501,6 +457,12 @@ mod tests {
             error.contains("`## Brand New`") && error.contains("xtask/src/site/pages.rs"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn the_readme_intro_stays_off_the_site() {
+        let (pages, _) = generate(&readme(), ADD).unwrap();
+        assert!(pages.iter().all(|p| p.path != "index.mdx"));
     }
 
     #[test]
@@ -527,21 +489,6 @@ mod tests {
             "{}",
             paths.content
         );
-    }
-
-    #[test]
-    fn the_splash_page_drops_badges_and_banner() {
-        let body: Vec<String> = [
-            "",
-            "[![x](y)](z)",
-            "<p align=\"center\">",
-            "  <img src=\"b.svg\">",
-            "</p>",
-            "Intro text.",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        assert_eq!(super::intro_lines(&body), ["", "Intro text."]);
     }
 
     #[test]
@@ -575,7 +522,7 @@ mod tests {
             .collect();
         let mut pages: Vec<&str> = PAGES
             .iter()
-            .filter(|p| !matches!(p.starts_at, Start::Drop(_) | Start::Intro))
+            .filter(|p| !matches!(p.starts_at, Start::Drop(_)))
             .map(|p| p.slug)
             .collect();
         listed.sort_unstable();

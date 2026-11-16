@@ -26,7 +26,7 @@ project.
 - Track versions by release or by commit
 - Write the config in TOML, YAML, JSON, JSON5 or `package.json`
 - Download in parallel, streaming each file straight to disk
-- Install one static binary, with no Node runtime needed
+- Install one static binary, with nothing else to set up
 
 vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles).
 
@@ -1510,7 +1510,9 @@ run `cargo publish --workspace` and draft a GitHub release. `--push`, `--publish
 ### Docs site
 
 The [docs site](https://araxeus.github.io/vendorfiles-rs/) is built from this README and
-[`docs/add_to_registry.md`](./docs/add_to_registry.md), so edit those files, not the site's pages.
+[`docs/add_to_registry.md`](./docs/add_to_registry.md), so edit those files, not the site's pages. The
+home page is the one exception, written by hand in `site/src/home.mdx`.
+
 To preview the site, install [Bun](https://bun.sh) and run:
 
 ```bash

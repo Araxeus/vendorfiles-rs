@@ -19,12 +19,19 @@ use pages::Page;
 pub const BASE: &str = "/vendorfiles-rs/";
 
 /// Regenerates the site's pages and sidebar from the README.
+///
+/// The home page is written by hand in `site/src/home.mdx` and copied in with the rest.
 pub fn run() -> Result<()> {
     let root = sh::workspace_root()?;
     let read = |path: &str| {
         std::fs::read_to_string(root.join(path)).with_context(|| format!("reading {path}"))
     };
-    let (pages, sidebar) = pages::generate(&read("README.md")?, &read("docs/add_to_registry.md")?)?;
+    let (mut pages, sidebar) =
+        pages::generate(&read("README.md")?, &read("docs/add_to_registry.md")?)?;
+    pages.push(Page {
+        path: "index.mdx".to_owned(),
+        content: read("site/src/home.mdx")?,
+    });
     write_site(&root.join("site"), &pages, &sidebar)?;
     println!("Wrote {} pages to site/src/content/docs.", pages.len());
     Ok(())
