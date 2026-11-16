@@ -1,4 +1,4 @@
-# Adding a program to the registry
+# Adding to the registry
 
 The registry is the list of programs that `vendor add <name>` knows by name. It lives in
 [`registry.yml`](../registry.yml) at the root of this repository.

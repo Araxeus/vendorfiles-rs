@@ -16,7 +16,7 @@ const REGISTRY_OPEN: &str = "<!-- registry -->";
 const REGISTRY_CLOSE: &str = "<!-- /registry -->";
 
 /// The repo file that is a page of its own, and that page.
-const PAGE_FILES: [(&str, &str); 1] = [("docs/add_to_registry.md", "programs/add")];
+const PAGE_FILES: [(&str, &str); 1] = [("docs/add_to_registry.md", "about/adding-to-the-registry")];
 
 /// Where a README anchor lives on the site.
 pub enum Target {
@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(
             out.lines,
             [
-                "[e](https://github.com/Araxeus/vendorfiles-rs/blob/main/examples/) [d](/vendorfiles-rs/programs/add/)"
+                "[e](https://github.com/Araxeus/vendorfiles-rs/blob/main/examples/) [d](/vendorfiles-rs/about/adding-to-the-registry/)"
             ]
         );
     }

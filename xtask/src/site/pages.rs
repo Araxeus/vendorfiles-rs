@@ -87,9 +87,9 @@ pub const PAGES: &[PageSpec] = &[
     ),
     page("reference/commands", None, Start::Heading("Commands")),
     page(
-        "programs/by-name",
+        "getting-started/program-registry",
         None,
-        Start::Heading("Installing by name"),
+        Start::Heading("Program registry"),
     ),
     page(
         "reference/self-update",
@@ -111,8 +111,8 @@ pub const PAGES: &[PageSpec] = &[
     page("about/development", None, Start::Heading("Development")),
     drop("License"),
     page(
-        "programs/add",
-        Some("Add a program"),
+        "about/adding-to-the-registry",
+        None,
         Start::File("docs/add_to_registry.md"),
     ),
 ];
@@ -125,6 +125,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "getting-started/installation",
             "getting-started/quick-start",
             "getting-started/global-programs",
+            "getting-started/program-registry",
         ],
     ),
     (
@@ -137,7 +138,6 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/defaults",
         ],
     ),
-    ("Programs by name", &["programs/by-name", "programs/add"]),
     (
         "Reference",
         &[
@@ -148,7 +148,14 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "reference/json-schema",
         ],
     ),
-    ("About", &["about/differences", "about/development"]),
+    (
+        "About",
+        &[
+            "about/differences",
+            "about/development",
+            "about/adding-to-the-registry",
+        ],
+    ),
 ];
 
 const TAGLINE: &str = "Like a package manager, but for single files.";
@@ -542,7 +549,7 @@ mod tests {
         let (pages, _) = generate(&readme(), ADD).unwrap();
         let by_name = pages
             .iter()
-            .find(|p| p.path == "programs/by-name.mdx")
+            .find(|p| p.path == "getting-started/program-registry.mdx")
             .unwrap();
         assert!(
             by_name

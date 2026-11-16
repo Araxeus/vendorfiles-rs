@@ -47,11 +47,11 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
 - [Commands](#commands)
   - [Options for every command](#options-for-every-command)
   - [Command list](#command-list)
-- [Installing by name](#installing-by-name)
+- [Program registry](#program-registry)
   - [What gets written](#what-gets-written)
   - [Finding a program](#finding-a-program)
   - [Programs you can add by name](#programs-you-can-add-by-name)
-  - [Adding a program to the registry](#adding-a-program-to-the-registry)
+  - [Adding to the registry](#adding-to-the-registry)
 - [Keeping vendorfiles updated](#keeping-vendorfiles-updated)
 - [Authentication](#authentication)
   - [Where the token comes from](#where-the-token-comes-from)
@@ -990,7 +990,7 @@ of these:
 
 | Source | Looks like |
 | --- | --- |
-| A [program name from the registry](#installing-by-name) | `rg` |
+| A [program name from the registry](#program-registry) | `rg` |
 | A repository URL | `https://github.com/th-ch/youtube-music` |
 | `owner/repo` | `Araxeus/vendorfiles` |
 | A repository name to search GitHub for | `React` |
@@ -1069,10 +1069,10 @@ vendor completions fish > ~/.config/fish/completions/vendor.fish
 vendor completions powershell >> $PROFILE
 ```
 
-## Installing by name
+## Program registry
 
-`vendor` knows some programs by name. For those, you don't have to look up the repository or work
-out what its release assets are called:
+The program registry is a list of programs `vendor` knows by name. For those, you don't have to
+look up the repository or work out what its release assets are called:
 
 ```bash
 vendor add fd          # or fdfind, or fd-find
@@ -1219,7 +1219,7 @@ GitHub. `vendor add ripgreb` asks whether you meant `ripgrep`.
 </details>
 <!-- /registry -->
 
-### Adding a program to the registry
+### Adding to the registry
 
 Anyone can add a program with a pull request. The
 [registry guide](./docs/add_to_registry.md) walks through writing and testing an entry. After
