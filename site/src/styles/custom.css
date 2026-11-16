@@ -1,0 +1,31 @@
+/* Page changes crossfade, while the header and sidebar stay put. */
+
+@view-transition { navigation: auto; }
+
+header.header { view-transition-name: site-header; }
+#starlight__sidebar { view-transition-name: site-sidebar; }
+
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
+
+/* A page that scrolls and one that doesn't keep the same width, so nothing shifts between them. */
+
+html { scrollbar-gutter: stable; }
+
+/* Code in a heading reads as part of the heading, without the inline-code box. */
+
+.sl-markdown-content :is(h2, h3, h4, h5, h6) code {
+  background: none;
+  padding: 0;
+}
+
+/* The current sidebar item looks bold without getting wider, so long labels keep their line breaks. */
+
+.sidebar-content a[aria-current='page'] {
+  font-weight: inherit;
+  text-shadow: 0.35px 0 0 currentColor;
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="120" viewBox="0 0 800 120" role="img" aria-label="Read the vendorfiles docs at araxeus.github.io/vendorfiles-rs">
+  <rect x="1" y="1" width="798" height="118" rx="14" fill="#111111" stroke="#2f2f2f" stroke-width="1.5"/>
+  <g transform="translate(32 38)" fill="none" stroke="#8aa7f7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6h10a6 6 0 0 1 6 6v22a4.5 4.5 0 0 0-4.5-4.5H4z"/>
+    <path d="M36 6H26a6 6 0 0 0-6 6v22a4.5 4.5 0 0 1 4.5-4.5H36z"/>
+  </g>
+  <text x="92" y="54" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" font-weight="650" fill="#ffffff">vendorfiles docs</text>
+  <text x="92" y="82" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="15" fill="#a8a8a8">araxeus.github.io/vendorfiles-rs</text>
+  <rect x="628" y="40" width="144" height="40" rx="20" fill="#305adf"/>
+  <text x="700" y="65.5" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#ffffff">Read the docs →</text>
+</svg>

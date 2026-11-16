@@ -1,0 +1,125 @@
+---
+title: vendorfiles
+template: splash
+hero:
+  tagline: Pull files from GitHub repositories and keep them up to date. Like a package manager, but for single files.
+  image:
+    file: ../../assets/hero-terminal.svg
+  actions:
+    - text: Get started
+      link: /vendorfiles-rs/getting-started/installation/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/Araxeus/vendorfiles-rs
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Icon, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="install">
+<Tabs syncKey="os">
+<TabItem label="Linux and macOS">
+
+```bash frame="none"
+curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.sh | bash
+```
+
+</TabItem>
+<TabItem label="Windows">
+
+```powershell frame="none"
+irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
+```
+
+</TabItem>
+</Tabs>
+</div>
+
+## What it does
+
+<div class="features not-content">
+  <div class="feature">
+    <p class="feature-title"><Icon name="document" size="1.25rem" />Any file, any repo</p>
+    <p class="feature-text">Download single files straight from any GitHub repository.</p>
+  </div>
+  <div class="feature">
+    <p class="feature-title"><Icon name="download" size="1.25rem" />Release assets</p>
+    <p class="feature-text">Unpack only the files you need from zip, tar, tar.gz and crx archives.</p>
+  </div>
+  <div class="feature">
+    <p class="feature-title"><Icon name="random" size="1.25rem" />Releases or commits</p>
+    <p class="feature-text">Track a dependency by its release tag or by its latest commit.</p>
+  </div>
+  <div class="feature">
+    <p class="feature-title"><Icon name="setting" size="1.25rem" />Your config format</p>
+    <p class="feature-text">Write the config in TOML, YAML, JSON, JSON5 or <code>package.json</code>.</p>
+  </div>
+  <div class="feature">
+    <p class="feature-title"><Icon name="rocket" size="1.25rem" />Fast</p>
+    <p class="feature-text">Downloads run in parallel and stream straight to disk.</p>
+  </div>
+  <div class="feature">
+    <p class="feature-title"><Icon name="laptop" size="1.25rem" />One binary</p>
+    <p class="feature-text">A single static binary, with nothing else to set up.</p>
+  </div>
+</div>
+
+## Next steps
+
+<div class="steps-grid">
+<CardGrid>
+  <Card title="Write a config" icon="document">
+    List the files you want in `vendor.json`, `vendor.yml` or `vendor.toml`. See [config files](/vendorfiles-rs/configuration/config-files/).
+  </Card>
+  <Card title="Sync your files" icon="rocket">
+    `vendor sync` downloads them, and `vendor update` keeps them current. Try the [quick start](/vendorfiles-rs/getting-started/quick-start/).
+  </Card>
+  <Card title="Install tools by name" icon="magnifier">
+    `vendor add rg fd` installs programs from the [program registry](/vendorfiles-rs/getting-started/program-registry/).
+  </Card>
+</CardGrid>
+</div>
+
+<style>{`
+  html, body { overflow-x: clip; }
+
+  /* One gap between every section, and a hero that doesn't grow with the screen. */
+  @media (min-width: 50rem) {
+    .hero { padding-block: clamp(1.5rem, 4vmin, 4rem) 1rem; }
+  }
+  @media (min-width: 50rem) {
+    .sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper { margin-top: 2.5em; }
+  }
+
+  .hero { position: relative; }
+  .hero::before {
+    content: ""; position: absolute; top: 0; right: -8rem; width: 34rem; height: 24rem; z-index: -1;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--sl-color-accent) 35%, transparent), transparent);
+    filter: blur(20px);
+  }
+
+  /* Each section heading trails a hairline that fades out to the right. */
+  .sl-markdown-content .sl-heading-wrapper:has(h2) { display: flex; align-items: center; gap: 1rem; }
+  .sl-markdown-content .sl-heading-wrapper:has(h2)::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--sl-color-gray-5), transparent); }
+  .sl-markdown-content .sl-heading-wrapper:has(h2) .sl-anchor-link { display: none; }
+
+  .install { max-width: 100%; }
+  .install pre { white-space: pre; }
+
+  .features { display: grid; grid-template-columns: 1fr; gap: 1.25rem 2.5rem; margin-top: 1rem; }
+  @media (min-width: 40rem) { .features { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 64rem) { .features { grid-template-columns: repeat(3, 1fr); } }
+  .feature-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--sl-color-white); margin: 0 0 0.25rem; }
+  .feature-title svg { color: var(--sl-color-accent); flex-shrink: 0; }
+  .feature-text { color: var(--sl-color-gray-2); margin: 0; line-height: 1.55; }
+  .feature-text code { font-size: 0.85em; padding: 0.1em 0.3em; border-radius: 4px; background: var(--sl-color-gray-6); }
+
+  .steps-grid { margin-top: 1rem; }
+  @media (min-width: 64rem) { .steps-grid .card-grid { grid-template-columns: repeat(3, 1fr); } }
+  .steps-grid .card { border-radius: 0.75rem; padding: 1.1rem 1.25rem; }
+  .steps-grid .card .icon { padding: 0.3rem; border-radius: 0.5rem; border: 1px solid currentColor; }
+  .steps-grid .card:nth-of-type(1) .icon { color: #4ade80; background: #4ade8022; }
+  .steps-grid .card:nth-of-type(2) .icon { color: #c084fc; background: #c084fc22; }
+  .steps-grid .card:nth-of-type(3) .icon { color: #fb7185; background: #fb718522; }
+`}</style>

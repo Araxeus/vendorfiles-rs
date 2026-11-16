@@ -1,0 +1,22 @@
+---
+// Starlight's footer, plus the license line.
+import Default from '@astrojs/starlight/components/Footer.astro';
+
+const license = 'https://github.com/Araxeus/vendorfiles-rs/blob/main/LICENSE';
+---
+
+<Default><slot /></Default>
+
+<p class="license">Released under the <a href={license}>MIT License</a>.</p>
+
+<style>
+  .license {
+    margin-top: 1.5rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .license a {
+    color: var(--sl-color-text-accent);
+  }
+</style>

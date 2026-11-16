@@ -3,50 +3,77 @@
 [![crates.io Version](https://img.shields.io/crates/v/vendorfiles)](https://crates.io/crates/vendorfiles)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Araxeus/vendorfiles-rs/blob/main/LICENSE)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Araxeus/vendorfiles-rs)
+[![Docs](https://img.shields.io/badge/docs-araxeus.github.io-blue)](https://araxeus.github.io/vendorfiles-rs/)
 
-A Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles) - pull files from
-GitHub repositories and keep them up to date. Think of it like a package manager, but for
-individual files: CSS libraries, binaries, config files, whatever you need.
+<p align="center">
+  <a href="https://araxeus.github.io/vendorfiles-rs/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)"
+              srcset="https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/site/public/readme-banner-dark.svg">
+      <img alt="Read the vendorfiles docs at araxeus.github.io/vendorfiles-rs" width="800"
+           src="https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/site/public/readme-banner-light.svg">
+    </picture>
+  </a>
+</p>
 
-The CLI surface, config files and lockfiles are byte-compatible with the original
-TypeScript/Bun tool, so you can drop this binary onto an existing project and keep going.
+vendorfiles pulls files from GitHub repositories and keeps them up to date. List the CSS libraries,
+binaries or config files you want in a config file, run `vendor sync`, and they land in your
+project.
 
-- Download files directly from any GitHub repo
-- Grab release assets, including extracting members from zip/tar/tar.gz/crx archives
-- Track versions via releases or commit hashes
-- Configure with TOML, YAML, JSON, or `package.json` (JSON5 is supported)
-- Parallel, streaming downloads on a Tokio runtime
-- Single static binary, no Node runtime
+- Download any file from any GitHub repository
+- Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
+  archives
+- Track versions by release or by commit
+- Write the config in TOML, YAML, JSON, JSON5 or `package.json`
+- Download in parallel, streaming each file straight to disk
+- Install one static binary, with nothing else to set up
+
+vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles).
 
 ## Table of Contents <!-- omit from toc -->
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [Global Programs](#global-programs)
+  - [Install script](#install-script)
+  - [Other ways to install](#other-ways-to-install)
+- [Quick start](#quick-start)
+  - [Global programs](#global-programs)
 - [Configuration](#configuration)
-  - [Basic Setup](#basic-setup)
-  - [Custom Output Paths](#custom-output-paths)
-  - [Renaming Files](#renaming-files)
-  - [Commit-Based Versioning](#commit-based-versioning)
-  - [GitHub Releases](#github-releases)
-  - [Filtering Releases](#filtering-releases)
-  - [Locking Dependencies](#locking-dependencies)
-  - [Default Options](#default-options)
+  - [Where vendor looks for the config](#where-vendor-looks-for-the-config)
+  - [Dependency fields](#dependency-fields)
+  - [Output folders and file names](#output-folders-and-file-names)
+  - [Versions and releases](#versions-and-releases)
+  - [Locking a dependency](#locking-a-dependency)
+  - [Default options](#default-options)
 - [Commands](#commands)
-- [Installing by name](#installing-by-name)
+  - [Options for every command](#options-for-every-command)
+  - [Command list](#command-list)
+- [Program registry](#program-registry)
+  - [What gets written](#what-gets-written)
   - [Finding a program](#finding-a-program)
-  - [Adding a program to the registry](#adding-a-program-to-the-registry)
+  - [Programs you can add by name](#programs-you-can-add-by-name)
+  - [Adding to the registry](#adding-to-the-registry)
 - [Keeping vendorfiles updated](#keeping-vendorfiles-updated)
 - [Authentication](#authentication)
+  - [Where the token comes from](#where-the-token-comes-from)
+  - [Logging in](#logging-in)
+  - [Checking your login](#checking-your-login)
+  - [Where the token is stored](#where-the-token-is-stored)
 - [Lockfile](#lockfile)
+  - [One lockfile for everything](#one-lockfile-for-everything)
 - [JSON Schema](#json-schema)
 - [Differences from the TypeScript version](#differences-from-the-typescript-version)
 - [Development](#development)
+  - [Checks](#checks)
+  - [Workspace layout](#workspace-layout)
+  - [Automation](#automation)
+  - [Docs site](#docs-site)
 - [License](#license)
 
 ## Installation
 
-**With the install script:**
+### Install script
+
+The install script is the quickest way to get `vendor`.
 
 ```bash
 # Linux (x86_64) and macOS (Apple Silicon)
@@ -58,26 +85,34 @@ curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install
 irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
 ```
 
-This sets up [Global Programs](#global-programs) for you and lists every change it makes to your
-shell or user environment. It never uses `sudo`. On Linux and macOS it installs to `/usr/local/bin`
-if that is writable and to `~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
+On Linux and macOS the script installs to `/usr/local/bin` if that folder is writable, and to
+`~/.local/bin` otherwise. On Windows it installs to `~\.local\bin`.
 
-**From [GitHub Releases](https://github.com/Araxeus/vendorfiles-rs/releases):**
+The script also sets up [global programs](#global-programs), so `vendor` can install tools for your
+whole machine. It lists every change it makes to your shell or user environment, and it never uses
+`sudo`.
 
-download the archive for your platform from the
-[release](https://github.com/Araxeus/vendorfiles-rs/releases/latest) and put `vendor`/`vendor.exe` on your
-`PATH`.
-That installs a binary named `vendor`. No system libraries are needed on any platform - the
-Linux archive is statically linked against musl, so it runs on any distribution regardless of
-its glibc version.
+### Other ways to install
 
-**From [Cargo](https://crates.io/crates/vendorfiles):**
+#### From GitHub Releases
+
+Download the archive for your platform from the
+[latest release](https://github.com/Araxeus/vendorfiles-rs/releases/latest), and put `vendor`
+(`vendor.exe` on Windows) on your `PATH`. Older versions are on the
+[releases page](https://github.com/Araxeus/vendorfiles-rs/releases).
+
+The binary needs no system libraries on any platform. The Linux build is statically linked against
+musl, so it runs on any distribution, whatever its glibc version.
+
+#### With Cargo
+
+vendorfiles is [on crates.io](https://crates.io/crates/vendorfiles):
 
 ```bash
 cargo install vendorfiles
 ```
 
-**From source:**
+#### From source
 
 ```bash
 git clone https://github.com/Araxeus/vendorfiles-rs
@@ -85,15 +120,13 @@ cd vendorfiles-rs
 cargo install --path crates/vendorfiles
 ```
 
-**Build without installing:**
+To build without installing, run `cargo build --release`. The binary lands in
+`target/release/vendor`.
 
-```bash
-cargo build --release        # target/release/vendor
-```
+## Quick start
 
-## Quick Start
-
-Create a config file in your project:
+Create a config file in your project. This one asks for two files from the
+[Coloris](https://github.com/mdbassit/Coloris) repository, at release `v0.17.1`:
 
 <!-- formats: files -->
 <details open>
@@ -141,18 +174,22 @@ files = ['dist/coloris.min.js', 'dist/coloris.min.css']
 </details>
 <!-- /formats -->
 
-Run:
+Then download them:
 
 ```bash
 vendor sync
 ```
 
-Your files are now in `./vendor/Coloris/`.
+The files are now in `./vendor/Coloris/`. Later, `vendor outdated` tells you when Coloris has a
+newer release, and `vendor update` moves you to it.
 
-### Global Programs
+### Global programs
 
-To install programs for your whole machine instead of files for one project, run the
-[install script](#installation), or set it up by hand. Create a config file such as `~/vendor.yml`:
+`vendor` can also install programs for your whole machine, like `rg` and `fd`. The
+[install script](#install-script) sets this up for you, or you can do it by hand.
+
+1. Create a config file such as `~/vendor.yml`. Setting `vendorFolder` under `default` puts each
+   program straight into `/usr/local/bin`, instead of a folder of its own.
 
 <!-- formats: files, yml first -->
 <details open>
@@ -200,31 +237,45 @@ locked = false
 </details>
 <!-- /formats -->
 
-`vendorFolder` must be on your `PATH`. Then set the `DEFAULT_VENDOR_CONFIG` environment variable
-to `~/vendor.yml` or the folder containing it, so `vendor` finds the config from any directory.
+2. Make sure the `vendorFolder` you chose is on your `PATH`.
+3. Set the `DEFAULT_VENDOR_CONFIG` environment variable to `~/vendor.yml`, or to the folder that
+   holds it. `vendor` then finds this config from any folder.
+4. Install some programs:
 
-Run:
+   ```bash
+   vendor add vendorfiles rg fd
+   ```
 
-```bash
-vendor add vendorfiles rg fd
-```
-
-`vendor`, `rg` and `fd` are now in `/usr/local/bin`. `vendor update` upgrades all of them.
+`vendor`, `rg` and `fd` are now in `/usr/local/bin`, and `vendor update` upgrades all of them.
 
 ## Configuration
 
-Vendorfiles looks for a config file in this order: `vendor.toml`, `vendor.yml`, `vendor.yaml`,
-`vendor.json`, `vendor.json5`, `package.json`. Only the current directory is searched - there is
-no upward walk. Point somewhere else with `-c` or `VENDOR_CONFIG`.
+A config file lists the files you want, grouped into dependencies. Every example in these docs
+comes in JSON, YAML and TOML, and the [`examples/`](./examples/) folder has complete files in each
+format.
 
-If nothing is found, `DEFAULT_VENDOR_CONFIG` is tried last - set it to a folder or config file
-to give every directory a fallback config. Paths inside it stay relative to *it*, so its
-dependencies land next to it, not in the directory you ran from. An explicit `-c` skips this.
+### Where vendor looks for the config
 
-Every example below is shown in all three formats, JSON open by default. See
-[`examples/`](./examples/).
+`vendor` looks in the current folder for these files, in this order:
 
-### Basic Setup
+1. `vendor.toml`
+2. `vendor.yml`
+3. `vendor.yaml`
+4. `vendor.json`
+5. `vendor.json5`
+6. `package.json`
+
+It doesn't search parent folders. To use a config somewhere else, pass `-c <path>` or set
+`VENDOR_CONFIG`.
+
+If no config is found, `vendor` tries `DEFAULT_VENDOR_CONFIG` last. Set it to a config file or a
+folder to give every folder a fallback config. Paths in that config stay relative to the config
+itself, so its dependencies land next to it, not in the folder you ran `vendor` from. An explicit
+`-c` skips the fallback.
+
+### Dependency fields
+
+Each dependency names a repository, a version and the files to take from it:
 
 <!-- formats -->
 <details open>
@@ -272,11 +323,24 @@ files = ['cooltipz.min.css', 'LICENSE']
 </details>
 <!-- /formats -->
 
-By default files are saved to `./vendor/{dependency-name}/`.
+| Field | What it holds |
+| --- | --- |
+| `repository` | The GitHub repository URL |
+| `version` | A release tag like `v1.0.0`, or a commit hash when tracking commits |
+| `files` | The files to download |
+| `vendorFolder` | Where to save this dependency's files ([output folders](#output-folders)) |
+| `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
+| `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
+| `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
 
-### Custom Output Paths
+The first three are all most dependencies need.
 
-Change the base folder with `vendorConfig`:
+### Output folders and file names
+
+#### Output folders
+
+Files land in `./vendor/<dependency name>/` by default. To change the base folder, set
+`vendorFolder` under `vendorConfig`:
 
 <!-- formats -->
 <details open>
@@ -313,8 +377,8 @@ vendorFolder = './my-vendors'
 </details>
 <!-- /formats -->
 
-Each dependency can override its own folder. `{vendorFolder}` expands to the base folder, and
-a dependency that sets `vendorFolder` does **not** get its name appended:
+A dependency can also set its own `vendorFolder`. Inside it, `{vendorFolder}` stands for the base
+folder. A dependency with its own folder does **not** get its name added to the path:
 
 <!-- formats -->
 <details open>
@@ -388,9 +452,10 @@ vendorFolder = '{vendorFolder}' # → ./my-vendors/
 </details>
 <!-- /formats -->
 
-### Renaming Files
+#### Renaming files
 
-Use an object with `source: destination`:
+To save a file under another name or in another folder, write it as an object that maps the source
+path to the destination:
 
 <!-- formats -->
 <details open>
@@ -441,12 +506,214 @@ files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
 </details>
 <!-- /formats -->
 
-An absolute destination is taken at its word, like an absolute `vendorFolder`.
+An absolute destination is used exactly as written, like an absolute `vendorFolder`.
 
-### Commit-Based Versioning
+### Versions and releases
 
-By default versions track GitHub releases. To track a file's latest commit instead, use
-`hashVersionFile`:
+By default, `version` holds a release tag, and `vendor update` moves a dependency to the newest
+release. You can also [track commits](#tracking-commits-instead-of-releases) instead.
+
+#### Release assets
+
+A file that starts with `{release}/` comes from the release's assets instead of the repository.
+`{version}` in a path expands to the version number in the release tag. That's the first `x.y.z`
+in the tag, or the tag with its leading `v`s removed:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "files": [
+                "LICENSE",
+                "{release}/fzf-{version}-linux_amd64.tar.gz",
+                { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" }
+            ]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - LICENSE
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+      - '{release}/fzf-{version}-windows_amd64.zip': fzf-windows.zip
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  'LICENSE',
+  '{release}/fzf-{version}-linux_amd64.tar.gz',
+  { '{release}/fzf-{version}-windows_amd64.zip' = 'fzf-windows.zip' },
+]
+```
+
+</details>
+<!-- /formats -->
+
+`{version}` stays as written in your config, so the same paths keep working after
+`vendor update`.
+
+#### Extracting files from archives
+
+To take files out of an archive, map the archive to the files you want. A list keeps their names,
+and a map renames them:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "files": [
+                {
+                    "{release}/fzf-{version}-linux_amd64.tar.gz": ["fzf"],
+                    "{release}/fzf-{version}-windows_amd64.zip": {
+                        "fzf.exe": "my-custom-fzf.exe"
+                    }
+                }
+            ]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz':
+          - fzf
+        '{release}/fzf-{version}-windows_amd64.zip':
+          fzf.exe: my-custom-fzf.exe
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+files = [
+  { '{release}/fzf-{version}-linux_amd64.tar.gz' = ['fzf'], '{release}/fzf-{version}-windows_amd64.zip' = { 'fzf.exe' = 'my-custom-fzf.exe' } },
+]
+```
+
+</details>
+<!-- /formats -->
+
+- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`. `vendor` detects
+  the format from the file's contents, not its name.
+- Only the files you name are unpacked.
+- For a large `.zip`, only those files are downloaded, using HTTP range requests. The rest of the
+  archive never is.
+
+#### Choosing which releases count
+
+`releaseRegex` decides which releases count as the latest. `vendor` tests it against each
+release's tag and title, newest first.
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "fzf": {
+            "version": "0.38.0",
+            "repository": "https://github.com/junegunn/fzf",
+            "releaseRegex": "^v\\d+\\.\\d+\\.\\d+$",
+            "files": ["{release}/fzf-{version}-linux_amd64.tar.gz"]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  fzf:
+    version: 0.38.0
+    repository: https://github.com/junegunn/fzf
+    releaseRegex: ^v\d+\.\d+\.\d+$
+    files:
+      - '{release}/fzf-{version}-linux_amd64.tar.gz'
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.fzf]
+version = '0.38.0'
+repository = 'https://github.com/junegunn/fzf'
+releaseRegex = '^v\d+\.\d+\.\d+$'
+files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
+```
+
+</details>
+<!-- /formats -->
+
+These patterns cover the common cases:
+
+- `"^v\\d+\\.\\d+\\.\\d+$"` accepts plain versions like `v1.2.3` and nothing else.
+- `"^v(?!.*-(?:alpha|beta)).*"` skips alpha and beta pre-releases.
+- `"stable"` accepts any release with "stable" in its title.
+
+Patterns run on [`fancy-regex`](https://docs.rs/fancy-regex), so the lookarounds and
+backreferences a JavaScript pattern may use work too.
+
+> [!TIP]
+> In a JSON string, write each backslash twice, like `\\d`.
+
+#### Tracking commits instead of releases
+
+To follow a file's latest commit instead of releases, set `hashVersionFile`. `version` then holds a
+commit hash:
 
 <!-- formats -->
 <details open>
@@ -515,200 +782,14 @@ files = ['dist/coloris.min.js']
 </details>
 <!-- /formats -->
 
-- **String**: track that file's latest commit hash
-- **`true`**: track the first entry in `files`
+`hashVersionFile` takes a path or `true`.
 
-### GitHub Releases
+- A path tracks that file's latest commit.
+- `true` tracks the first file in `files`.
 
-Download release assets with `{release}/` in the path.<br>
-`{version}` expands to the semver core
-of the git tag - the first `x.y.z` found, or the tag with leading `v`s stripped:
+### Locking a dependency
 
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "files": [
-                "LICENSE",
-                "{release}/fzf-{version}-linux_amd64.tar.gz",
-                { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" }
-            ]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    files:
-      - LICENSE
-      - '{release}/fzf-{version}-linux_amd64.tar.gz'
-      - '{release}/fzf-{version}-windows_amd64.zip': fzf-windows.zip
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-files = [
-  'LICENSE',
-  '{release}/fzf-{version}-linux_amd64.tar.gz',
-  { '{release}/fzf-{version}-windows_amd64.zip' = 'fzf-windows.zip' },
-]
-```
-
-</details>
-<!-- /formats -->
-
-**Extracting from archives** - give a list (keep names) or a map (rename):
-
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "files": [
-                {
-                    "{release}/fzf-{version}-linux_amd64.tar.gz": ["fzf"],
-                    "{release}/fzf-{version}-windows_amd64.zip": {
-                        "fzf.exe": "my-custom-fzf.exe"
-                    }
-                }
-            ]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    files:
-      - '{release}/fzf-{version}-linux_amd64.tar.gz':
-          - fzf
-        '{release}/fzf-{version}-windows_amd64.zip':
-          fzf.exe: my-custom-fzf.exe
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-files = [
-  { '{release}/fzf-{version}-linux_amd64.tar.gz' = ['fzf'], '{release}/fzf-{version}-windows_amd64.zip' = { 'fzf.exe' = 'my-custom-fzf.exe' } },
-]
-```
-
-</details>
-<!-- /formats -->
-
-Supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`, detected from the
-file's contents rather than its name. Only the members you name are unpacked. For a large `.zip`,
-those members are fetched with HTTP range requests, so the rest of the archive is never downloaded.
-
-### Filtering Releases
-
-`releaseRegex` controls which releases count as "latest". It is tested against each release's
-tag and title, newest first.
-
-<!-- formats -->
-<details open>
-<summary>JSON</summary>
-
-```json
-{
-    "vendorDependencies": {
-        "fzf": {
-            "version": "0.38.0",
-            "repository": "https://github.com/junegunn/fzf",
-            "releaseRegex": "^v\\d+\\.\\d+\\.\\d+$",
-            "files": ["{release}/fzf-{version}-linux_amd64.tar.gz"]
-        }
-    }
-}
-```
-
-</details>
-
-<details>
-<summary>YAML</summary>
-
-```yml
-vendorDependencies:
-  fzf:
-    version: 0.38.0
-    repository: https://github.com/junegunn/fzf
-    releaseRegex: ^v\d+\.\d+\.\d+$
-    files:
-      - '{release}/fzf-{version}-linux_amd64.tar.gz'
-```
-
-</details>
-
-<details>
-<summary>TOML</summary>
-
-```toml
-[vendorDependencies.fzf]
-version = '0.38.0'
-repository = 'https://github.com/junegunn/fzf'
-releaseRegex = '^v\d+\.\d+\.\d+$'
-files = ['{release}/fzf-{version}-linux_amd64.tar.gz']
-```
-
-</details>
-<!-- /formats -->
-
-Common patterns:
-
-- Semver only: `"^v\\d+\\.\\d+\\.\\d+$"`
-- Exclude pre-releases: `"^v(?!.*-(?:alpha|beta)).*"`
-- Match a title containing "stable": `"stable"`
-
-Patterns are compiled with [`fancy-regex`](https://docs.rs/fancy-regex), so the lookaround and
-backreferences a JavaScript pattern may use are supported.
-
-> **Note:** Use double escaping (`\\d`) in JSON strings.
-
-### Locking Dependencies
-
-`locked: true` pins a dependency:
+Set `locked: true` to keep a dependency at its current version:
 
 <!-- formats -->
 <details open>
@@ -758,13 +839,14 @@ locked = true
 </details>
 <!-- /formats -->
 
-Locked dependencies are still downloaded by `vendor sync` if missing, are skipped by
-`vendor update`, and do not appear in `vendor outdated`.
+`vendor update` skips a locked dependency, and `vendor outdated` leaves it out. `vendor sync` still
+downloads its files if they're missing.
 
-### Default Options
+### Default options
 
-A `default` (or `defaultVendorOptions`) object supplies values for every dependency that does
-not set them:
+A `default` object sets values for every dependency that doesn't set them itself.
+`defaultVendorOptions` is another name for the same object. In this example both dependencies come
+from one repository and track commits:
 
 <!-- formats -->
 <details open>
@@ -842,60 +924,143 @@ version = 'afde2592a6254be7c14ccac520cb608bd1adbaf9'
 
 ## Commands
 
-```text
-Usage: vendor command [options]
+Every command has short aliases, like `vendor s` for `vendor sync`. Run `vendor help <command>` to
+see a command's options in your terminal.
 
-Options:
-  -c, --config <file/folder path>                Config file path / Folder containing the config file
-  -p, --plain                                    Print plain lines instead of a live display
-  -v, --version                                  output the current version
-  -h, --help                                     display help for command
+### Options for every command
 
-Commands:
-  sync|s [options]                               Sync config file
-  update|upgrade|bump|up|u [options] [names...]  Update outdated dependencies
-  outdated|o                                     List outdated dependencies
-  install|add|i|a [options] <url/name...>        Install dependencies
-  search|find [options] [terms...]               Find programs to install by name
-  uninstall|remove|delete|del|rm <names...>      Uninstall dependencies
-  list|ls                                        List dependencies in the config file
-  config|cfg [command]                           Show or edit the config file
-  login|auth [token]                             Login to GitHub, or check it with auth status
-  logout                                         Log out of GitHub
-  completions <shell>                            Print a shell completion script
-  help [command]                                 display help for command
+These go before or after the command name.
+
+| Option | What it does |
+| --- | --- |
+| `-c, --config <file/folder path>` | Use this config file, or the config in this folder |
+| `-p, --plain` | Print plain lines instead of the live display |
+| `-v, --version` | Print the version |
+| `-h, --help` | Print help |
+
+`VENDOR_CONFIG` sets the config path too, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config
+is found. [Where vendor looks for the config](#where-vendor-looks-for-the-config) has the details.
+
+### Command list
+
+| Command | Aliases | What it does |
+| --- | --- | --- |
+| `sync` | `s` | Download everything the config lists |
+| `update [names...]` | `upgrade`, `bump`, `up`, `u` | Move dependencies to their latest version |
+| `outdated` | `o` | List dependencies that have a newer version |
+| `install <url/name...>` | `add`, `i`, `a` | Add dependencies |
+| `search [terms...]` | `find` | Find programs you can add by name |
+| `uninstall <names...>` | `remove`, `delete`, `del`, `rm` | Delete dependencies and their files |
+| `list` | `ls` | Print the dependencies in the config |
+| `config [edit]` | `cfg` | Print the config file's path, or open it in an editor |
+| `login [token]` | `auth` | Log in to GitHub, or check the login |
+| `logout` | | Delete the saved GitHub token |
+| `completions <shell>` | | Print a shell completion script |
+| `help [command]` | | Print help for a command |
+
+---
+
+### `vendor sync`
+
+`vendor sync` downloads every dependency whose files are missing or out of date. `-f`/`--force`
+downloads them again even when they're up to date. `vendor` checks the [lockfile](#lockfile) to see
+what's out of date.
+
+---
+
+### `vendor update`
+
+`vendor update` installs the latest version of every dependency. Name dependencies to update only
+those:
+
+```bash
+vendor update
+vendor update React Express
 ```
 
-Root options work on either side of the subcommand. The config location can also come from
-`VENDOR_CONFIG`, and `DEFAULT_VENDOR_CONFIG` is the fallback when no config is found.
+`--pr` prints a Markdown summary of the changes, ready to use as a pull request description from a
+GitHub Action. [Locked](#locking-a-dependency) dependencies are skipped.
 
-| Command | What it does |
+---
+
+### `vendor install`
+
+`vendor install`, or its alias `vendor add`, adds dependencies to the config. Each source can be any
+of these:
+
+| Source | Looks like |
 | --- | --- |
-| `vendor sync\|s` | Download everything the config declares.<br>`-f`/`--force` re-downloads even when up to date. |
-| `vendor update\|upgrade\|bump\|up\|u [names...]` | Install the latest version of each dependency, or only the named ones.<br>`--pr` prints a Markdown summary. |
-| `vendor outdated\|o` | List dependencies with a newer version available. |
-| `vendor install\|add\|i\|a <url/name...>` | Add dependencies. A source is a [program name from the registry](#installing-by-name) (`vendor add rg`), a repo URL, `owner/repo`, or a repo name to search GitHub for. Any source can be pinned as `source@version`.<br>A registry program needs no `-f`; for anything else, `-f`/`--files` lists the files.<br>`-n`/`--name` sets the config key.<br>`--dry-run` prints what it would add and changes nothing.<br>`--list` does the same as `vendor search`. |
-| `vendor search\|find [terms...]` | Find registry programs by name, alias or description. |
-| `vendor uninstall\|remove\|delete\|del\|rm <names...>` | Delete a dependency's files and remove it from the config and lockfile. |
-| `vendor list\|ls` | Print the config's dependencies. Also spelled `vendor config list\|ls`. |
-| `vendor config\|cfg` | Print the config file path. |
-| `vendor config\|cfg edit [editor]` | Open the config file in `editor`, `$EDITOR`, or the OS default. |
-| `vendor login\|auth [token]` | Store a GitHub token. With no argument, runs the OAuth device flow. |
-| `vendor login\|auth status` | Show which token is in use, whether GitHub accepts it, and the quota left. Exits `1` when there is no token or GitHub rejects it. |
-| `vendor logout` | Delete the stored token. |
-| `vendor completions <shell>` | Print a completion script for `bash`, `elvish`, `fish`, `powershell` or `zsh`. |
+| A [program name from the registry](#program-registry) | `rg` |
+| A repository URL | `https://github.com/th-ch/youtube-music` |
+| `owner/repo` | `Araxeus/vendorfiles` |
+| A repository name to search GitHub for | `React` |
 
-**Examples:**
+A registry program needs no file list. For any other source, list the files with `-f`. Pin any
+source to a version with `source@version`, like `vendor add fd@v10.2.0`.
+
+| Option | What it does |
+| --- | --- |
+| `-f, --files <files...>` | The files to download. A registry program needs none. |
+| `-n, --name [name]` | The name to give the dependency in the config |
+| `--dry-run` | Print the entry it would add, and change nothing |
+| `--list` | List the programs you can add by name, like `vendor search` |
+| `--refresh` | Check the program registry for changes now |
 
 ```bash
 vendor add rg fd
 vendor add Araxeus/vendorfiles@v1.0.0 -f README.md LICENSE
 vendor i https://github.com/th-ch/youtube-music -f "{release}/YouTube-Music-{version}.exe"
-vendor update
+```
+
+---
+
+### `vendor search`
+
+`vendor search` finds programs you can add by name. [Finding a program](#finding-a-program) shows how
+the search works. `--refresh` checks the registry for changes first.
+
+---
+
+### `vendor uninstall`
+
+`vendor uninstall` deletes a dependency's files and removes it from the config and the lockfile.
+
+---
+
+### `vendor list`
+
+`vendor list` prints the dependencies in the config. `vendor config list` does the same.
+
+---
+
+### `vendor config`
+
+`vendor config` prints the path of the config file it found. `vendor config edit` opens that file in
+the editor you name, or in `$EDITOR`, or in your system's default editor:
+
+```bash
 vendor cfg edit "code --wait"
 ```
 
-**Completions:**
+---
+
+### `vendor login` and `vendor logout`
+
+`vendor login` saves a GitHub token. With no token given, it logs you in through your browser.
+`vendor auth status` shows which token is in use, whether GitHub accepts it, and how many requests
+are left. It exits with `1` when there is no token or GitHub rejects it.
+
+`vendor logout` deletes the saved token. [Authentication](#authentication) covers all three in detail.
+
+---
+
+### `vendor completions`
+
+`vendor completions <shell>` prints a completion script for `bash`, `elvish`, `fish`, `powershell`
+or `zsh`. The bash and zsh scripts also complete program names after `vendor add`, as the registry
+stood when you made the script.
+
+Save the script where your shell loads it:
 
 ```bash
 vendor completions bash > /etc/bash_completion.d/vendor
@@ -904,10 +1069,10 @@ vendor completions fish > ~/.config/fish/completions/vendor.fish
 vendor completions powershell >> $PROFILE
 ```
 
-## Installing by name
+## Program registry
 
-Some programs are known by name, so you do not have to look up the repository or work out what its
-release assets are called:
+The program registry is a list of programs `vendor` knows by name. For those, you don't have to
+look up the repository or work out what its release assets are called:
 
 ```bash
 vendor add fd          # or fdfind, or fd-find
@@ -916,8 +1081,10 @@ vendor add rg fd       # both at once
 vendor add fd@v10.2.0  # pin a version
 ```
 
-That writes an ordinary entry - nothing registry-specific, so it keeps working whatever happens to
-the registry later:
+### What gets written
+
+`vendor add` writes an ordinary config entry. Nothing in it depends on the registry, so it keeps
+working whatever happens to the registry later:
 
 <!-- formats -->
 <details open>
@@ -973,14 +1140,14 @@ files = [
 </details>
 <!-- /formats -->
 
-The asset picked is the one for your platform, and `{version}` stays symbolic so `vendor update`
+`vendor add` picks the asset for your platform. `{version}` stays as written, so `vendor update`
 keeps working afterwards.
 
 ### Finding a program
 
-`vendor search` lists every program the registry knows, and `vendor add --list` does the same.
-Words narrow the list. Each one has to match a name, an alias, a word in the description or the
-repository, and name matches rank first:
+`vendor search` lists every program the registry knows, and `vendor add --list` does the same. Add
+words to narrow the list. Each word has to match a program's name, an alias, a word in its
+description, or its repository. Name matches come first.
 
 ```bash
 vendor search          # everything
@@ -988,8 +1155,10 @@ vendor search disk     # bottom, btop, dust, dysk and gdu
 vendor search git      # delta, gh, lazygit and actionlint
 ```
 
-A name the registry nearly knows gets a hint before the GitHub search runs, so `vendor add ripgreb`
-asks whether you meant `ripgrep`.
+If you mistype a name the registry nearly knows, `vendor` suggests the right one before it searches
+GitHub. `vendor add ripgreb` asks whether you meant `ripgrep`.
+
+### Programs you can add by name
 
 <!-- registry -->
 <details>
@@ -1050,20 +1219,23 @@ asks whether you meant `ripgrep`.
 </details>
 <!-- /registry -->
 
-### Adding a program to the registry
+### Adding to the registry
 
-See [`docs/add_to_registry.md`](./docs/add_to_registry.md). After changing `registry.yml`, run
-`cargo xtask readme` to regenerate the list above. CI fails while it is out of date.
+Anyone can add a program with a pull request. The
+[registry guide](./docs/add_to_registry.md) walks through writing and testing an entry. After
+changing `registry.yml`, run `cargo xtask readme` to regenerate the list above. CI fails while the
+list is out of date.
 
 ## Keeping vendorfiles updated
 
-`vendor` can vendor itself:
+`vendor` can keep itself up to date. Add it like any other program:
 
 ```bash
 vendor add vendorfiles
 ```
 
-That writes an entry for your platform's release asset, installed next to the running binary:
+That writes an entry for your platform's release asset, set to install next to the running `vendor`
+binary:
 
 <!-- formats -->
 <details open>
@@ -1118,22 +1290,28 @@ vendorFolder = 'C:/tools/bin'
 </details>
 <!-- /formats -->
 
-From then on `vendor update` upgrades the tool along with everything else, replacing the running
-binary safely. `vendor uninstall vendorfiles-rs` stops tracking it but leaves the binary in place.
+From then on, `vendor update` upgrades `vendor` along with everything else, and safely replaces the
+running binary. `vendor uninstall vendorfiles-rs` stops tracking it but leaves the binary in place.
 
 ## Authentication
 
-Anonymous requests to the GitHub API are limited to 60 per hour, so `vendor` warns when it is
-running without credentials.
+Without a token, GitHub allows 60 API requests an hour, so `vendor` warns when it runs without one.
+Log in to raise the limit.
 
-Tokens are resolved in this order:
+### Where the token comes from
 
-1. `GITHUB_TOKEN` environment variable
-2. the token `vendor login` stored in the platform's credential store
-3. anonymous
+`vendor` uses the first token it finds, in this order:
 
-`vendor login` stores a token, either by verifying one you paste (`vendor login <token>`) or
-through GitHub's OAuth device flow:
+1. The `GITHUB_TOKEN` environment variable
+2. The token `vendor login` saved in your system's credential store
+3. No token, with the anonymous limit
+
+`login`, `logout` and `auth status` need no config file, so they work from any folder.
+
+### Logging in
+
+`vendor login` saves a token. Paste one with `vendor login <token>`, or run `vendor login` alone to
+log in through GitHub's device flow in your browser:
 
 ```text
 $ vendor login
@@ -1142,13 +1320,14 @@ Press Enter to open https://github.com/login/device in your browser...
 SUCCESS: Logged in successfully
 ```
 
-`vendor logout` deletes it again, and says so if something still authenticates you: a
-`GITHUB_TOKEN` in the environment, or a token the npm CLI left in its own keyring entry - that
-entry is not this tool's to delete.
+`vendor logout` deletes the saved token. If something would still log you in, it tells you. That
+can be a `GITHUB_TOKEN` in the environment, or a token the npm CLI saved in its own keyring entry.
+`vendor` leaves that entry alone, because it belongs to npm.
 
-`vendor auth status` shows which of those a run would use and asks GitHub whether it still
-works. It names the account, the requests left this hour and, for a token that has one, the
-expiry date:
+### Checking your login
+
+`vendor auth status` shows which token a run would use, and asks GitHub whether it still works. It
+prints the account name, the requests left this hour, and the token's expiry date if it has one:
 
 ```text
 $ vendor auth status
@@ -1156,41 +1335,42 @@ SUCCESS: Logged in to GitHub as octocat with the token from the credential store
 INFO: 4990 of 5000 API requests left this hour (resets in 42 min)
 ```
 
-It exits `1` when there is no token or GitHub rejects it, so CI can run it as a preflight check.
+It exits with `1` when there is no token or GitHub rejects it, so CI can run it as a check before
+anything else.
 
-Native stores are compiled in per platform - there is no cross-platform facade, and no system
-library to install:
+### Where the token is stored
 
-| Platform                 | Store                                                | Survives         |
+`vendor` has each platform's credential store built in, so there is no system library to install:
+
+| Platform                 | Store                                                | Keeps the token  |
 | ------------------------ | ---------------------------------------------------- | ---------------- |
 | Windows                  | Credential Manager (`windows-native-keyring-store`)  | until deleted    |
 | macOS                    | login Keychain (`apple-native-keyring-store`)        | until deleted    |
 | Linux                    | Secret Service (`zbus-secret-service-keyring-store`) | until deleted    |
 | Linux, no keyring daemon | kernel keyutils (`linux-keyutils-keyring-store`)     | **until reboot** |
-| anything else            | none - `GITHUB_TOKEN` only                           | -                |
+| anything else            | none, so use `GITHUB_TOKEN`                          | -                |
 
-On Linux the Secret Service is tried first, so a token persists wherever a keyring daemon is
-running - gnome-keyring, KWallet or KeePassXC. Headless boxes, minimal containers and WSL
-usually have none, and there the kernel keyutils store takes over: it always works, but it
-holds secrets in kernel memory.
+On Linux, `vendor` tries the Secret Service first, so the token lasts wherever a keyring daemon runs,
+like gnome-keyring, KWallet or KeePassXC. Headless machines, minimal containers and WSL usually have
+no daemon. There `vendor` falls back to the kernel keyutils store. It always works, but it keeps
+secrets in kernel memory, so they're gone after a reboot.
 
-`login` asks the store it used how long it keeps things, so when you land on the keyutils
-fallback it tells you rather than letting the next boot look mysteriously anonymous:
+When `vendor login` lands on that fallback, it warns you, so the next boot doesn't quietly log you
+out:
 
 ```text
 WARNING: this system's credential store keeps secrets in kernel memory, so the token will be gone after a reboot
 ```
 
-Two ways to get persistence if you see that: run a Secret Service daemon (installing
-`gnome-keyring` is usually enough - on a headless box it needs unlocking, see
-[this note](https://docs.rs/zbus-secret-service-keyring-store)), or set `GITHUB_TOKEN` from
-your shell profile or CI secrets.
+You can keep the token across reboots in two ways.
 
-`login`, `logout` and `auth status` need no config file - they work from any directory.
+- Run a Secret Service daemon. Installing `gnome-keyring` is usually enough. On a headless machine
+  it needs unlocking, as [this note](https://docs.rs/zbus-secret-service-keyring-store) explains.
+- Set `GITHUB_TOKEN` from your shell profile or your CI secrets.
 
 ## Lockfile
 
-Each dependency folder gets a `vendor-lock.json` recording what was written:
+`vendor` records what it downloaded in a `vendor-lock.json` file in each dependency's folder:
 
 ```json
 {
@@ -1205,18 +1385,27 @@ Each dependency folder gets a `vendor-lock.json` recording what was written:
 }
 ```
 
-The keys are the inputs from your config (with `{version}` left un-expanded) and the values are
-what landed on disk. `vendor sync` treats a dependency as stale when the version differs, a
-recorded file is missing, or the `files` declaration changed.
+Under `files`, each key is a path from your config, with `{version}` left as written. Each value is
+the file that landed on disk.
 
-Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead:
-`true` puts it next to the config file, a string names the folder (relative to the config file,
-or absolute); `{vendorFolder}` expands to the base vendor folder.
+`vendor sync` downloads a dependency again when any of these is true:
+
+- Its version changed.
+- A recorded file is missing.
+- Its `files` list changed.
+
+### One lockfile for everything
+
+Set `vendorConfig.singleLockfile` to keep every dependency in one `vendor-lock.json` instead.
+
+- `true` puts it next to the config file.
+- A string names the folder for it, relative to the config file or absolute. `{vendorFolder}` in
+  the string expands to the base vendor folder.
 
 ## JSON Schema
 
-[`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format, so editors
-can validate and autocomplete it:
+[`vendorfiles.schema.json`](./vendorfiles.schema.json) describes the config format. Point your
+config at it, and your editor can check and autocomplete it as you type:
 
 <!-- formats -->
 <details open>
@@ -1259,8 +1448,9 @@ vendorDependencies:
 
 ## Differences from the TypeScript version
 
-Configs and lockfiles are interchangeable with the original. Version lookups and downloads run in
-parallel, which is where most of the speedup comes from. Measured against `vendorfiles@1.4.2` with 8 dependencies:
+Configs and lockfiles work with both versions. This version looks up versions and downloads files in
+parallel, which is where most of the speedup comes from. These timings compare the two on a config
+with 8 dependencies, against `vendorfiles@1.4.2`:
 
 |                                 | TypeScript | Rust   |
 | ------------------------------- | ---------- | ------ |
@@ -1271,12 +1461,16 @@ parallel, which is where most of the speedup comes from. Measured against `vendo
 
 ## Development
 
+### Checks
+
+`cargo xtask ci` runs every check CI runs. That's `cargo check`, rustfmt, clippy and the tests, in
+that order, and it stops at the first failure.
+
 ```bash
-cargo xtask ci   # every gate CI applies: check, rustfmt, clippy, tests
+cargo xtask ci
 ```
 
-Or one at a time. The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` is the
-same gate as the workflow; the flags below are what CI spells out and are redundant locally.
+You can also run them one at a time:
 
 ```bash
 cargo check --workspace --all-targets
@@ -1285,16 +1479,51 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
-The workspace is three crates:
+The lint groups live in `[workspace.lints]`, so a bare `cargo clippy` applies the same lints as CI.
+The flags above are what CI spells out, and you don't need them locally.
 
-| Crate                     | Role                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/vendorfiles_core` | Library: config, lockfile, GitHub client, archive handling, operations. Typed errors via `thiserror`; never exits the process.                                                                                                                                                                                                                                                                                |
-| `crates/vendorfiles`      | The `vendor` binary: Commander-compatible help and errors, `anyhow` at the boundary.                                                                                                                                                                                                                                                                                                                          |
-| `xtask`                   | `cargo xtask ci` - the four checks above, stopping at the first failure. `cargo xtask release` - clean-tree check, version prompt, manifest and README update, format, commit, tag, and then the push, `cargo publish --workspace` and draft GitHub release it asks about up front; `--push`, `--publish` and `--draft-release` answer those three ahead of time, for a release that never stops on a prompt. |
+### Workspace layout
 
-See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, ownership model, and the full
+| Crate                     | What it holds |
+| ------------------------- | ------------- |
+| `crates/vendorfiles_core` | The library: config, lockfile, GitHub client, archive handling and operations. It returns typed errors through `thiserror` and never exits the process. |
+| `crates/vendorfiles`      | The `vendor` binary, with Commander-compatible help and errors, and `anyhow` at the boundary. |
+| `xtask`                   | Repository automation, run as `cargo xtask <command>` |
+
+See [`docs/DESIGN.md`](./docs/DESIGN.md) for the module layout, the ownership model and the full
 parity contract.
+
+### Automation
+
+| Command               | What it does |
+| --------------------- | ------------ |
+| `cargo xtask ci`      | Runs the four checks above |
+| `cargo xtask readme`  | Regenerates the YAML and TOML versions of the README's examples, and its list of programs. `--check` fails instead of writing. |
+| `cargo xtask site`    | Writes the docs site's pages from this README |
+| `cargo xtask release` | Makes a release |
+
+`cargo xtask release` checks that the working tree is clean and asks for the new version. It then
+updates the manifests and the README, formats, commits and tags. It asks up front whether to push,
+run `cargo publish --workspace` and draft a GitHub release. `--push`, `--publish` and
+`--draft-release` answer those questions ahead of time, so a release never stops on a prompt.
+
+### Docs site
+
+The [docs site](https://araxeus.github.io/vendorfiles-rs/) is built from this README and
+[`docs/add_to_registry.md`](./docs/add_to_registry.md), so edit those files, not the site's pages. The
+home page is the one exception, written by hand in `site/src/home.mdx`.
+
+To preview the site, install [Bun](https://bun.sh) and run:
+
+```bash
+cd site
+bun install
+bun run dev
+```
+
+`bun run dev` writes the pages first. After you edit the README, `bun run gen` writes them again. A
+new `##` section in the README needs a page in `xtask/src/site/pages.rs`, and the build names any
+section that has none.
 
 ## License
 

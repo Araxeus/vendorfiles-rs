@@ -2,3 +2,4 @@
 **/*.rs.bk
 .claude/worktrees
 .codex/config.toml
+/docs/superpowers

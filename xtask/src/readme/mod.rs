@@ -10,7 +10,7 @@
 
 mod jsonc;
 mod registry;
-mod render;
+pub mod render;
 mod toml;
 mod yaml;
 
@@ -20,7 +20,15 @@ use crate::sh;
 
 const OPEN_PREFIX: &str = "<!-- formats";
 const OPEN_SUFFIX: &str = "-->";
-const CLOSE: &str = "<!-- /formats -->";
+pub const CLOSE: &str = "<!-- /formats -->";
+
+/// What a region's opening marker asks for.
+pub struct Marker {
+    /// The example is about creating the file, so its name is the useful label.
+    pub files: bool,
+    /// The format that leads and is open.
+    pub first: render::Format,
+}
 
 /// Reads a region's opening marker, or returns `None` for any other line.
 ///
@@ -28,7 +36,7 @@ const CLOSE: &str = "<!-- /formats -->";
 ///
 /// - `files` labels the tabs by file name, for an example about creating the file
 /// - `json first` (the default), `yml first` or `toml first` picks the tab that leads and is open
-fn parse_open(line: &str) -> Result<Option<(render::Labels, render::Format)>> {
+pub fn parse_open(line: &str) -> Result<Option<Marker>> {
     let marker = line
         .trim()
         .strip_prefix(OPEN_PREFIX)
@@ -37,21 +45,21 @@ fn parse_open(line: &str) -> Result<Option<(render::Labels, render::Format)>> {
         return Ok(None);
     };
 
-    let mut labels = render::NAMES;
+    let mut files = false;
     let mut first = render::Format::Json;
 
     let options = marker.trim().strip_prefix(':').unwrap_or(marker);
     for option in options.split(',').map(str::trim) {
         match option {
             "" => {}
-            "files" => labels = render::FILES,
+            "files" => files = true,
             "json first" => first = render::Format::Json,
             "yml first" => first = render::Format::Yaml,
             "toml first" => first = render::Format::Toml,
             other => bail!("unknown option `{other}`"),
         }
     }
-    Ok(Some((labels, first)))
+    Ok(Some(Marker { files, first }))
 }
 
 /// Rewrites every marked region from the JSON inside it, leaving the rest of the file alone.
@@ -63,7 +71,7 @@ pub fn regenerate(markdown: &str) -> Result<String> {
     while at < source.len() {
         let line = source[at];
         let opened = parse_open(line).with_context(|| format!("the marker at line {}", at + 1))?;
-        let Some((labels, first)) = opened else {
+        let Some(marker) = opened else {
             out.push(line.to_owned());
             at += 1;
             continue;
@@ -75,7 +83,12 @@ pub fn regenerate(markdown: &str) -> Result<String> {
 
         let (fence, example) = source_block(&source[at + 1..close])
             .with_context(|| format!("the region at line {}", at + 1))?;
-        let rendered = render::group(&example, &fence, labels, first)
+        let labels = if marker.files {
+            render::FILES
+        } else {
+            render::NAMES
+        };
+        let rendered = render::group(&example, &fence, labels, marker.first)
             .with_context(|| format!("the example at line {}", at + 1))?;
 
         out.push(line.to_owned());
@@ -94,7 +107,7 @@ pub fn regenerate(markdown: &str) -> Result<String> {
 
 /// The first `json` or `jsonc` block in a region: the one example everything else is derived
 /// from.
-fn source_block(region: &[&str]) -> Result<(String, String)> {
+pub fn source_block(region: &[&str]) -> Result<(String, String)> {
     let opened = region.iter().enumerate().find_map(|(idx, line)| {
         let info = line.trim_start().strip_prefix("```")?.trim();
         matches!(info, "json" | "jsonc").then(|| (idx, info.to_owned()))
