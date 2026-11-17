@@ -35,6 +35,12 @@
     background: var(--sl-color-bg);
   }
 
+  /* A row's short cells sit level with the middle of a wrapped description. */
+
+  .program-filter ~ :global(table td) {
+    vertical-align: middle;
+  }
+
   .program-filter span {
     font-size: var(--sl-text-sm);
     color: var(--sl-color-gray-3);
