@@ -50,12 +50,15 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
     tags
 }
 
-/// How a tag sorts: its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`),
-/// with trailing zeros dropped so `1.2` equals `1.2.0`, and whether it is a stable release.
+/// How a tag sorts, most significant first:
 ///
-/// A tag whose numbers are followed by `-` is a prerelease (`v2.0.0-rc.1`). `None` for a tag
-/// with no digits.
-fn sort_key(tag: &str) -> Option<(Vec<u64>, bool)> {
+/// - whether its numbers are dotted, so `v1.10.0` beats a build number like `r1234`;
+/// - its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing zeros
+///   dropped so `1.2` equals `1.2.0`;
+/// - whether it is a stable release. Numbers followed by `-` mark a prerelease (`v2.0.0-rc.1`).
+///
+/// `None` for a tag with no digits.
+fn sort_key(tag: &str) -> Option<(bool, Vec<u64>, bool)> {
     let run = NUMBERS.find(tag)?;
     let mut numbers = run
         .as_str()
@@ -63,24 +66,24 @@ fn sort_key(tag: &str) -> Option<(Vec<u64>, bool)> {
         .map(str::parse)
         .collect::<Result<Vec<u64>, _>>()
         .ok()?;
+    let dotted = numbers.len() > 1;
     while numbers.last() == Some(&0) {
         numbers.pop();
     }
     let stable = !tag[run.end()..].starts_with('-');
-    Some((numbers, stable))
+    Some((dotted, numbers, stable))
 }
 
 /// The latest of `tags`.
 ///
 /// Without a regex only stable tags count. With one, every tag it matches counts, prereleases
-/// included. At equal numbers a stable tag beats a prerelease, and the greater text breaks any
-/// remaining tie.
+/// included. Tags sort by [`sort_key`], and the greater text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
     tags.iter()
         .filter(|tag| regex.is_none_or(|re| re.is_match(tag).unwrap_or(false)))
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
-        .filter(|((_, stable), _)| *stable || regex.is_some())
+        .filter(|((_, _, stable), _)| *stable || regex.is_some())
         .max()
         .map(|(_, tag)| tag.clone())
 }
@@ -147,6 +150,12 @@ pub(crate) mod tests {
     #[test]
     fn the_highest_stable_tag_wins_by_number_not_by_text() {
         let tags = ["v1.9.0", "v1.10.0", "v2.0.0-beta.1", "nightly", "v1.10"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
+    }
+
+    #[test]
+    fn a_dotted_version_beats_a_bare_build_number() {
+        let tags = ["r1234", "v1.10.0", "build-20240101", "v1.9.0"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
     }
 

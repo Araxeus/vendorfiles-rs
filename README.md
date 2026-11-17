@@ -910,7 +910,7 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
 <!-- /formats -->
 
 - Tags compare by number, so `v1.10.0` beats `v1.9.0`. `_` separates numbers too, as in
-  `curl-8_10_0`.
+  `curl-8_10_0`, and a dotted version beats a bare build number like `r1234`.
 - A tag with a `-` after its numbers, like `v2.0.0-rc.1`, is a prerelease and is skipped. Date tags
   like `2024-01-15` are skipped too.
 - With `versionRegex`, only the tags it matches count, prereleases included.
