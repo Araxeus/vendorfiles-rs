@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 static NUMBERS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[0-9]+(?:\.[0-9]+)*").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"[0-9]+(?:[._][0-9]+)*").expect("valid regex"));
 
 /// The tag names in a ref listing, in the order the host sent them.
 ///
@@ -50,8 +50,8 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
     tags
 }
 
-/// How a tag sorts: its first run of dotted numbers, with trailing zeros dropped so `1.2` equals
-/// `1.2.0`, and whether it is a stable release.
+/// How a tag sorts: its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`),
+/// with trailing zeros dropped so `1.2` equals `1.2.0`, and whether it is a stable release.
 ///
 /// A tag whose numbers are followed by `-` is a prerelease (`v2.0.0-rc.1`). `None` for a tag
 /// with no digits.
@@ -59,7 +59,7 @@ fn sort_key(tag: &str) -> Option<(Vec<u64>, bool)> {
     let run = NUMBERS.find(tag)?;
     let mut numbers = run
         .as_str()
-        .split('.')
+        .split(['.', '_'])
         .map(str::parse)
         .collect::<Result<Vec<u64>, _>>()
         .ok()?;
@@ -148,6 +148,13 @@ pub(crate) mod tests {
     fn the_highest_stable_tag_wins_by_number_not_by_text() {
         let tags = ["v1.9.0", "v1.10.0", "v2.0.0-beta.1", "nightly", "v1.10"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
+    }
+
+    #[test]
+    fn underscores_separate_numbers_too() {
+        // curl tags its releases `curl-8_10_0`.
+        let tags = ["curl-8_9_1", "curl-8_10_0"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("curl-8_10_0"));
     }
 
     #[test]
