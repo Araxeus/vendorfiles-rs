@@ -25,7 +25,8 @@ const LS_TAGS_RESULT: &str = "application/x-git-upload-pack-result";
 /// does not speak git, or a login page.
 const ADVERTISEMENT: &str = "application/x-git-upload-pack-advertisement";
 
-/// How long a version lookup may take. A host that hangs would otherwise stall the whole run.
+/// How long a whole version lookup may take, every request included. A host that hangs would
+/// otherwise stall the whole run.
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How much of a version page is read. A version sits near the top of anything sane.
@@ -61,11 +62,27 @@ pub fn is_git_url(version_url: &str) -> bool {
 ///
 /// [`VendorError::NoVersionAt`] when the answer holds no version or is a 404,
 /// [`VendorError::RequestFailed`] for any other refusal, and [`VendorError::Http`] when the host
-/// cannot be reached.
+/// cannot be reached or takes longer than [`LOOKUP_TIMEOUT`].
 pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Result<Option<String>> {
     let Some(version_url) = source.version_url.as_deref() else {
         return Ok(None);
     };
+    tokio::time::timeout(LOOKUP_TIMEOUT, look_up(http, source, version_url))
+        .await
+        .unwrap_or_else(|_| {
+            Err(VendorError::Http(format!(
+                "looking up the version at {version_url} took over {} seconds",
+                LOOKUP_TIMEOUT.as_secs()
+            )))
+        })
+}
+
+/// [`latest_version`] without its deadline.
+async fn look_up(
+    http: &reqwest::Client,
+    source: &UrlSource,
+    version_url: &str,
+) -> Result<Option<String>> {
     let miss = || VendorError::NoVersionAt {
         url: version_url.to_owned(),
     };
@@ -91,9 +108,7 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
         tags.retain(|tag| is_plausible_version(tag));
         tags::latest_tag(&tags, regex.as_ref())
     } else {
-        let response = send(http.get(version_url).timeout(LOOKUP_TIMEOUT))
-            .await
-            .map_err(refused)?;
+        let response = send(http.get(version_url)).await.map_err(refused)?;
 
         // A redirect can carry the version in its target, like `/latest` to `/v1.2.3/tool.zip`.
         // Without one, the URL is the configured `versionUrl` and says nothing new.
@@ -149,8 +164,7 @@ async fn git_tags(http: &reqwest::Client, repository: &str) -> Result<Option<Vec
         .post(format!("{repository}/git-upload-pack"))
         .header("Git-Protocol", "version=2")
         .header(CONTENT_TYPE, "application/x-git-upload-pack-request")
-        .body(LS_TAGS)
-        .timeout(LOOKUP_TIMEOUT);
+        .body(LS_TAGS);
     if let Ok(response) = send(listing).await
         && has_type(&response, LS_TAGS_RESULT)
     {
@@ -160,9 +174,7 @@ async fn git_tags(http: &reqwest::Client, repository: &str) -> Result<Option<Vec
         }
     }
 
-    let advertisement = http
-        .get(format!("{repository}/info/refs?service=git-upload-pack"))
-        .timeout(LOOKUP_TIMEOUT);
+    let advertisement = http.get(format!("{repository}/info/refs?service=git-upload-pack"));
     let response = send(advertisement).await?;
     if !has_type(&response, ADVERTISEMENT) {
         return Ok(None);
@@ -392,7 +404,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_silent_version_url_times_out() {
-        // The clock is paused, so the wait costs nothing: tokio jumps to the next timer.
+        // The clock is paused, so the wait costs nothing: tokio jumps to the next timer. One
+        // deadline covers the whole lookup, including a git host's second request.
         let http = client().unwrap();
         for version_url in [
             format!("{}/v", serve_silence()),
@@ -404,8 +417,11 @@ mod tests {
                 version_regex: None,
                 version_selector: None,
             };
-            let outcome =
-                tokio::time::timeout(LOOKUP_TIMEOUT * 2, latest_version(&http, &source)).await;
+            let outcome = tokio::time::timeout(
+                LOOKUP_TIMEOUT + LOOKUP_TIMEOUT / 10,
+                latest_version(&http, &source),
+            )
+            .await;
             assert!(matches!(outcome, Ok(Err(_))), "{outcome:?}");
         }
     }
