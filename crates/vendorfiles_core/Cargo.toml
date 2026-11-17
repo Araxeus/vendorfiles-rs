@@ -27,6 +27,7 @@ ratatui.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
+scraper.workspace = true
 secrecy.workspace = true
 self-replace.workspace = true
 serde.workspace = true

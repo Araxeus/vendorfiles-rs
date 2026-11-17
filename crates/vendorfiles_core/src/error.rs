@@ -117,6 +117,10 @@ pub enum VendorError {
     #[error("Could not find a version for {0}")]
     NoVersionFound(String),
 
+    /// A `versionUrl` answered, but nothing in the answer reads as a version.
+    #[error("found no version at {url}")]
+    NoVersionAt { url: String },
+
     // ---- files & downloads ---------------------------------------------------------
     #[error("File {0}\nis not a string, and {{release}} is not used}}")]
     NonStringOutputWithoutRelease(String),

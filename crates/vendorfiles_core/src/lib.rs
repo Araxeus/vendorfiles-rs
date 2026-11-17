@@ -32,7 +32,10 @@ pub mod progress;
 pub mod registry;
 pub mod remote_zip;
 pub mod template;
+#[cfg(test)]
+mod test_server;
 pub mod ui;
+pub mod url_source;
 
 pub use config::{ConfigFile, ConfigFormat, Workspace};
 pub use error::{Result, VendorError};
