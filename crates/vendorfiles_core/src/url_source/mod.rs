@@ -140,14 +140,13 @@ async fn look_up(
 }
 
 /// Whether `version` can be one: letters, digits and `.`, `_`, `+`, `-`, `@`, starting with a
-/// letter or digit, short, and holding a digit unless it is a commit hash.
+/// letter or digit, short, and holding a digit unless it is a full 40-character commit hash.
 ///
 /// A version lands in file names through `{tag}`, and a remote host chooses it. So a path like
 /// `../x`, a JSON body or a stray word like `Forbidden` is refused rather than used. `@` is in for
 /// monorepo tags like `astro@5.0.0`.
 fn is_plausible_version(version: &str) -> bool {
-    let commit =
-        (7..=40).contains(&version.len()) && version.chars().all(|c| c.is_ascii_hexdigit());
+    let commit = version.len() == 40 && version.chars().all(|c| c.is_ascii_hexdigit());
     version.len() <= MAX_VERSION_LEN
         && version.starts_with(|c: char| c.is_ascii_alphanumeric())
         && (commit || version.contains(|c: char| c.is_ascii_digit()))
@@ -492,11 +491,11 @@ mod tests {
             "v1.2.3+build.4",
             "astro@5.0.0",
             "f6ec482ea395cead4fd849c05df6edd8da284a52",
-            "abcdefa",
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
         ] {
             assert!(super::is_plausible_version(version), "{version}");
         }
-        for version in ["../v1", "Forbidden", "", "a/1", r#"{"v":1}"#, "deface"] {
+        for version in ["../v1", "Forbidden", "", "a/1", r#"{"v":1}"#, "defaced"] {
             assert!(!super::is_plausible_version(version), "{version}");
         }
     }
