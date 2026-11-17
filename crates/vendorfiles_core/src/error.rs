@@ -163,7 +163,9 @@ pub enum VendorError {
     NoVersionAt { url: String },
 
     /// A `.git` `versionUrl` with no release tag, only package tags like a monorepo's `astro@5.0.0`.
-    #[error("{url} has only package tags like '{example}'; set versionRegex to pick one")]
+    #[error(
+        "{url} has no release tag, only package tags like '{example}'; set versionRegex to pick one"
+    )]
     OnlyPackageTags { url: String, example: String },
 
     // ---- files & downloads ---------------------------------------------------------

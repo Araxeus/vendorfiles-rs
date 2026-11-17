@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             format!(
-                "{base}/o/r.git has only package tags like 'astro@5.0.0'; set versionRegex to pick one"
+                "{base}/o/r.git has no release tag, only package tags like 'astro@5.0.0'; set versionRegex to pick one"
             )
         );
     }
