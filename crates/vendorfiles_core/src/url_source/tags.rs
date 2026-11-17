@@ -51,12 +51,16 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
     tags
 }
 
-/// Whether the text after a tag's numbers marks a prerelease: a `-` (`v2.0.0-rc.1`), or a marker
-/// straight after the numbers (`go1.25rc1`, `1.0.beta2`). Any other letter names a release, as in
-/// OpenSSL's `1_1_1w`.
+/// Whether the text after a tag's numbers marks a prerelease: a `-` (`v2.0.0-rc.1`), a marker
+/// word (`go1.25rc1`, `1.0.beta2`), or `a`, `b` or `m` and a digit (`CPython`'s `v3.14.0a1`,
+/// Spring's `v4.1.0.M1`). Any other letter names a release, as in OpenSSL's `1_1_1w`.
 fn is_prerelease_suffix(rest: &str) -> bool {
     let rest = rest.trim_start_matches(['.', '_']).to_ascii_lowercase();
+    let mut chars = rest.chars();
+    let short_marker = matches!(chars.next(), Some('a' | 'b' | 'm'))
+        && chars.next().is_some_and(|c| c.is_ascii_digit());
     rest.starts_with('-')
+        || short_marker
         || ["rc", "alpha", "beta", "pre", "dev"]
             .iter()
             .any(|marker| rest.starts_with(marker))
@@ -286,6 +290,11 @@ pub(crate) mod tests {
         let re = fancy_regex::Regex::new("^go").unwrap();
         assert_eq!(latest_tag(&tags, Some(&re)).as_deref(), Some("go1.25.0"));
         // A letter that is not a prerelease marker still names a release: OpenSSL `1_1_1w`.
+        // CPython tags alphas and betas `v3.14.0a1`; Spring tagged milestones `v4.1.0.M1`.
+        let tags = ["v3.13.5", "v3.14.0a1", "v3.14.0b2"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v3.13.5"));
+        let tags = ["v4.0.9", "v4.1.0.M1"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v4.0.9"));
         let tags = ["OpenSSL_1_1_1v", "OpenSSL_1_1_1w"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("OpenSSL_1_1_1w"));
     }
