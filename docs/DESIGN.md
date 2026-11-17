@@ -28,7 +28,7 @@ vendorfiles-rs/
 │   │       ├── ui.rs         # ANSI colors, INFO/SUCCESS/WARNING/ERROR routing, RunOptions
 │   │       ├── progress/     # the live display, and the plain-line fallback
 │   │       ├── model.rs      # FileEntry / FileTarget / VendorDependency / VendorConfig
-│   │       ├── template.rs   # {version} / {release} / {vendorFolder} substitution, trims
+│   │       ├── template.rs   # {version} / {tag} / {url} / {release} / {vendorFolder} substitution, trims
 │   │       ├── config/
 │   │       │   ├── mod.rs      # Workspace: discovery, defaults merge, mutation, write-back
 │   │       │   ├── format.rs   # ConfigFormat, detect-indent, per-format (de)serialisation

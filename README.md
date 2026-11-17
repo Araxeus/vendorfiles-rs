@@ -1599,7 +1599,8 @@ vendorDependencies:
 
 ## Differences from the TypeScript version
 
-Configs and lockfiles work with both versions. This version looks up versions and downloads files in
+Configs and lockfiles work with both versions, except
+[`url` dependencies](#downloading-from-other-sites), which only this version reads. This version looks up versions and downloads files in
 parallel, which is where most of the speedup comes from. These timings compare the two on a config
 with 8 dependencies, against `vendorfiles@1.4.2`:
 
