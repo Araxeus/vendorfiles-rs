@@ -90,6 +90,11 @@ pub const PAGES: &[PageSpec] = &[
         Start::Heading("Program registry"),
     ),
     page(
+        "reference/program-list",
+        Some("Program list"),
+        Start::Heading("Programs you can add by name"),
+    ),
+    page(
         "reference/self-update",
         Some("Self-update"),
         Start::Heading("Keeping vendorfiles updated"),
@@ -140,6 +145,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
         "Reference",
         &[
             "reference/commands",
+            "reference/program-list",
             "reference/self-update",
             "reference/authentication",
             "reference/lockfile",
@@ -496,7 +502,7 @@ mod tests {
         let (pages, _) = generate(&readme(), ADD).unwrap();
         let by_name = pages
             .iter()
-            .find(|p| p.path == "getting-started/program-registry.mdx")
+            .find(|p| p.path == "reference/program-list.mdx")
             .unwrap();
         assert!(
             by_name

@@ -50,8 +50,8 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
 - [Program registry](#program-registry)
   - [What gets written](#what-gets-written)
   - [Finding a program](#finding-a-program)
-  - [Programs you can add by name](#programs-you-can-add-by-name)
   - [Adding to the registry](#adding-to-the-registry)
+  - [Programs you can add by name](#programs-you-can-add-by-name)
 - [Keeping vendorfiles updated](#keeping-vendorfiles-updated)
 - [Authentication](#authentication)
   - [Where the token comes from](#where-the-token-comes-from)
@@ -1158,6 +1158,16 @@ vendor search git      # delta, gh, lazygit and actionlint
 If you mistype a name the registry nearly knows, `vendor` suggests the right one before it searches
 GitHub. `vendor add ripgreb` asks whether you meant `ripgrep`.
 
+Every program the registry knows is listed under
+[Programs you can add by name](#programs-you-can-add-by-name).
+
+### Adding to the registry
+
+Anyone can add a program with a pull request. The
+[registry guide](./docs/add_to_registry.md) walks through writing and testing an entry. After
+changing `registry.yml`, run `cargo xtask readme` to regenerate the program list. CI fails while the
+list is out of date.
+
 ### Programs you can add by name
 
 <!-- registry -->
@@ -1218,13 +1228,6 @@ GitHub. `vendor add ripgreb` asks whether you meant `ripgrep`.
 
 </details>
 <!-- /registry -->
-
-### Adding to the registry
-
-Anyone can add a program with a pull request. The
-[registry guide](./docs/add_to_registry.md) walks through writing and testing an entry. After
-changing `registry.yml`, run `cargo xtask readme` to regenerate the list above. CI fails while the
-list is out of date.
 
 ## Keeping vendorfiles updated
 
