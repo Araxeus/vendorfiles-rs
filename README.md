@@ -918,8 +918,8 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
   by `rc`, `cr`, `alpha`, `beta`, `pre` or `dev` (`go1.25rc1`), or by `a`, `b` or `m` and a digit
   (`v3.14.0a1`). Date tags like `2024-01-15` are skipped too.
 - A `-` and digits alone, like ImageMagick's `7.1.1-41`, is a patch level when most tags look like
-  that. It's a prerelease when plain releases outnumber it, or when one shares its numbers, like
-  npm's `v1.0.1-0` beside `v1.0.1`.
+  that. It's a prerelease when plain releases outnumber it, or when releases often share its
+  numbers, like npm's `v1.0.1-0` beside `v1.0.1`.
 - With `versionRegex`, only the tags it matches count, prereleases included. A stable release
   still beats a prerelease of the same version.
 - A repository with several tag schemes needs a `versionRegex` to say which one is current.
