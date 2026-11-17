@@ -140,7 +140,7 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// are its packages' releases, like `plugin-legacy@6.1.0`. With a regex, every tag it matches
 /// counts, prereleases included.
 ///
-/// A `-N` suffix is a prerelease where at least a third of such tags share their numbers with a
+/// A `-N` suffix is a prerelease where at least a third of the versions it appears on also have a
 /// plain release, like npm's `v1.0.1-0` beside `v1.0.1`. Otherwise it is a patch level where such
 /// tags outnumber plain releases with the same prefix, as in `ImageMagick`'s `7.1.1-41`.
 ///
@@ -163,27 +163,39 @@ pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
         .collect();
 
-    // Per prefix: how many tags end in `-N`, how many are plain releases, and how many `-N` tags
-    // have a plain release of the same numbers beside them.
+    // Per prefix: how many tags end in `-N`, how many are plain releases, and how many of the
+    // `-N` versions also have a plain release. Versions, not tags, so a long run of prereleases
+    // of one unreleased version counts once.
     let plain: HashSet<(&str, &[u64])> = candidates
         .iter()
         .filter(|(key, _)| key.patch.is_none() && key.stable)
         .map(|(key, _)| (key.prefix.as_str(), key.base()))
         .collect();
-    let mut schemes: HashMap<String, (usize, usize, usize)> = HashMap::new();
+    let mut schemes: HashMap<&str, (usize, usize, HashSet<&[u64]>)> = HashMap::new();
     for (key, _) in &candidates {
-        let scheme = schemes.entry(key.prefix.clone()).or_default();
+        let scheme = schemes.entry(&key.prefix).or_default();
         if key.patch.is_some() {
             scheme.0 += 1;
-            scheme.2 += usize::from(plain.contains(&(key.prefix.as_str(), key.base())));
+            scheme.2.insert(key.base());
         } else if key.stable {
             scheme.1 += 1;
         }
     }
+    // npm pairs most prerelease versions with their release; a stray plain tag pairs with one.
+    let patch_levels: HashSet<String> = schemes
+        .into_iter()
+        .filter(|(prefix, (patched, plain_tags, versions))| {
+            let paired = versions
+                .iter()
+                .filter(|&&base| plain.contains(&(*prefix, base)))
+                .count();
+            paired * 3 < versions.len() && patched > plain_tags
+        })
+        .map(|(prefix, _)| prefix.to_owned())
+        .collect();
     for (key, _) in &mut candidates {
-        // npm pairs most prereleases with their release; a stray plain tag pairs with one.
-        let (patched, plain, paired) = schemes[&key.prefix];
-        key.settle(paired * 3 < patched && patched > plain);
+        let patch = patch_levels.contains(&key.prefix);
+        key.settle(patch);
     }
     candidates.retain(|(key, _)| key.stable || regex.is_some());
 
@@ -363,8 +375,11 @@ pub(crate) mod tests {
         let tags = ["7.1.1-9", "7.1.1-41", "7.1.0-62"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
         // Nor does one stray plain tag that happens to share a `-N` tag's numbers.
-        let tags = ["7.1.0", "7.1.0-1", "7.1.1-2", "7.1.1-3", "7.1.1-41"].map(String::from);
-        assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
+        let tags = [
+            "7.1.0", "7.1.0-1", "7.1.1-2", "7.1.1-3", "7.1.2-1", "7.1.3-41",
+        ]
+        .map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.3-41"));
         // One stray plain tag does not change the scheme: ImageMagick has `7.0.7.7`.
         let tags = ["7.0.7.7", "7.1.1-9", "7.1.1-41"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
@@ -384,6 +399,12 @@ pub(crate) mod tests {
             "v1.0.2-2",
         ]
         .map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.1"));
+        // Many prereleases of one unreleased version do not outweigh earlier release pairs.
+        let mut tags: Vec<String> = ["v1.0.0-0", "v1.0.0", "v1.0.1-0", "v1.0.1"]
+            .map(String::from)
+            .to_vec();
+        tags.extend((0..10).map(|n| format!("v2.0.0-{n}")));
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.1"));
         let tags = ["v1.0.1-0", "v1.0.1"].map(String::from);
         let re = fancy_regex::Regex::new("^v").unwrap();
