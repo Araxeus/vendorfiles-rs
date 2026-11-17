@@ -910,7 +910,8 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
 <!-- /formats -->
 
 - Tags compare by number, so `v1.10.0` beats `v1.9.0`. `_` separates numbers too, as in
-  `curl-8_10_0`, and a dotted version beats a bare build number like `r1234`.
+  `curl-8_10_0`. A dotted version beats a bare build number like `r1234`, but not a bare major
+  like `v263` beside `v262.1`.
 - A tag with a `-` after its numbers, like `v2.0.0-rc.1`, is a prerelease and is skipped. Date tags
   like `2024-01-15` are skipped too.
 - With `versionRegex`, only the tags it matches count, prereleases included.
@@ -928,8 +929,8 @@ A page can answer with just the version, like `v1.2.3`. For anything bigger, `ve
 | Set | Set | That element's text, then its HTML |
 
 - `versionRegex` takes its first capture group, or the whole match when it has none.
-- A version holds letters, digits and `.`, `_`, `+` or `-`, with at least one digit. Anything
-  else, like a path or a JSON body, is refused.
+- A version holds letters, digits and `.`, `_`, `+`, `-` or `@`, with at least one digit unless
+  it's a commit hash. Anything else, like a path or a JSON body, is refused.
 - `versionSelector` takes a CSS selector, like `#latest` or `.release h2`. To get one, right-click
   the version in your browser, choose **Inspect**, then **Copy selector**.
 - The example above follows `/download/latest` to a file named after the version. The

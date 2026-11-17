@@ -3,6 +3,7 @@
 //! Both answers this reads, the protocol v2 `ls-refs` listing and the older full advertisement,
 //! are pkt-lines: each is prefixed with its length as four hex digits.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -50,15 +51,21 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
     tags
 }
 
-/// How a tag sorts, most significant first:
-///
-/// - whether its numbers are dotted, so `v1.10.0` beats a build number like `r1234`;
-/// - its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing zeros
-///   dropped so `1.2` equals `1.2.0`;
-/// - whether it is a stable release. Numbers followed by `-` mark a prerelease (`v2.0.0-rc.1`).
-///
-/// `None` for a tag with no digits.
-fn sort_key(tag: &str) -> Option<(bool, Vec<u64>, bool)> {
+/// What a tag sorts by.
+struct SortKey<'a> {
+    /// The text before its numbers, like `v` or `curl-`.
+    prefix: &'a str,
+    /// Whether its numbers are dotted, unlike a build number like `r1234`.
+    dotted: bool,
+    /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing
+    /// zeros dropped so `1.2` equals `1.2.0`.
+    numbers: Vec<u64>,
+    /// Whether it is a stable release. Numbers followed by `-` mark a prerelease (`v2.0.0-rc.1`).
+    stable: bool,
+}
+
+/// The [`SortKey`] of `tag`, or `None` for a tag with no digits.
+fn sort_key(tag: &str) -> Option<SortKey<'_>> {
     let run = NUMBERS.find(tag)?;
     let mut numbers = run
         .as_str()
@@ -70,21 +77,42 @@ fn sort_key(tag: &str) -> Option<(bool, Vec<u64>, bool)> {
     while numbers.last() == Some(&0) {
         numbers.pop();
     }
-    let stable = !tag[run.end()..].starts_with('-');
-    Some((dotted, numbers, stable))
+    Some(SortKey {
+        prefix: &tag[..run.start()],
+        dotted,
+        numbers,
+        stable: !tag[run.end()..].starts_with('-'),
+    })
 }
 
 /// The latest of `tags`.
 ///
 /// Without a regex only stable tags count. With one, every tag it matches counts, prereleases
-/// included. Tags sort by [`sort_key`], and the greater text breaks any remaining tie.
+/// included.
+///
+/// A bare number loses to dotted tags that start differently, so `v1.10.0` beats a build number
+/// like `r1234`. Beside dotted tags with its own prefix it is a release like them: systemd tags
+/// `v263` after `v262.1`. Then numbers decide, a stable tag beats a prerelease, and the greater
+/// text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
-    tags.iter()
+    let candidates: Vec<(SortKey<'_>, &String)> = tags
+        .iter()
         .filter(|tag| regex.is_none_or(|re| re.is_match(tag).unwrap_or(false)))
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
-        .filter(|((_, _, stable), _)| *stable || regex.is_some())
-        .max()
+        .filter(|(key, _)| key.stable || regex.is_some())
+        .collect();
+    let dotted_prefixes: HashSet<&str> = candidates
+        .iter()
+        .filter(|(key, _)| key.dotted)
+        .map(|(key, _)| key.prefix)
+        .collect();
+    candidates
+        .into_iter()
+        .max_by(|(a, a_tag), (b, b_tag)| {
+            let rank = |key: &SortKey<'_>| key.dotted || dotted_prefixes.contains(key.prefix);
+            (rank(a), &a.numbers, a.stable, a_tag).cmp(&(rank(b), &b.numbers, b.stable, b_tag))
+        })
         .map(|(_, tag)| tag.clone())
 }
 
@@ -151,6 +179,13 @@ pub(crate) mod tests {
     fn the_highest_stable_tag_wins_by_number_not_by_text() {
         let tags = ["v1.9.0", "v1.10.0", "v2.0.0-beta.1", "nightly", "v1.10"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
+    }
+
+    #[test]
+    fn a_new_major_without_a_dot_still_wins() {
+        // systemd tags majors bare and point releases dotted.
+        let tags = ["v261.5", "v262", "v262.1", "v263"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v263"));
     }
 
     #[test]
