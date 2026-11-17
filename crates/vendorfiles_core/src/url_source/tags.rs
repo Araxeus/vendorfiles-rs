@@ -52,8 +52,9 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
 }
 
 /// Whether the text after a tag's numbers marks a prerelease: a `-` (`v2.0.0-rc.1`), a marker
-/// word (`go1.25rc1`, `1.0.beta2`, Hibernate's `6.1.0.CR1`), or `a`, `b` or `m` and a digit (`CPython`'s `v3.14.0a1`,
-/// Spring's `v4.1.0.M1`). Any other letter names a release, as in OpenSSL's `1_1_1w`.
+/// word (`go1.25rc1`, `1.0.beta2`, Hibernate's `6.1.0.CR1`), or `a`, `b` or `m` and a digit
+/// (`CPython`'s `v3.14.0a1`, Spring's `v4.1.0.M1`). Any other letter names a release, as in
+/// OpenSSL's `1_1_1w`.
 fn is_prerelease_suffix(rest: &str) -> bool {
     let rest = rest.trim_start_matches(['.', '_']).to_ascii_lowercase();
     let mut chars = rest.chars();
@@ -72,46 +73,54 @@ struct SortKey<'a> {
     prefix: &'a str,
     /// Whether its numbers are dotted, unlike a build number like `r1234`.
     dotted: bool,
-    /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing
-    /// zeros dropped so `1.2` equals `1.2.0`.
+    /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`). Once settled,
+    /// trailing zeros are dropped so `1.2` equals `1.2.0`.
     numbers: Vec<u64>,
-    /// Whether it is a stable release. See [`is_prerelease_suffix`]. A dash and digits alone is a
-    /// patch level instead, added to `numbers`.
+    /// Whether it is a stable release. See [`is_prerelease_suffix`].
     stable: bool,
+    /// The number of a `-N` suffix, like the `41` of `7.1.1-41`. [`latest_tag`] decides whether
+    /// it is a patch level or a prerelease.
+    patch: Option<u64>,
+}
+
+impl SortKey<'_> {
+    /// Applies the repository's reading of `-N`, then drops trailing zeros.
+    fn settle(&mut self, patch_levels: bool) {
+        if let Some(patch) = self.patch {
+            self.stable = patch_levels;
+            if patch_levels {
+                self.numbers.push(patch);
+            }
+        }
+        while self.numbers.last() == Some(&0) {
+            self.numbers.pop();
+        }
+    }
 }
 
 /// The [`SortKey`] of `tag`, or `None` for a tag with no digits.
 fn sort_key(tag: &str) -> Option<SortKey<'_>> {
     let run = NUMBERS.find(tag)?;
-    let mut numbers = run
+    let numbers = run
         .as_str()
         .split(['.', '_'])
         .map(str::parse)
         .collect::<Result<Vec<u64>, _>>()
         .ok()?;
-    let dotted = numbers.len() > 1;
     let rest = &tag[run.end()..];
-
-    // A dash and digits alone is a patch level, like ImageMagick's `7.1.1-41` or a Debian
-    // revision `v1.2.3-1`, not a prerelease.
-    let patch = rest
+    let patch = match rest
         .strip_prefix('-')
-        .filter(|level| !level.is_empty() && level.bytes().all(|b| b.is_ascii_digit()));
-    let stable = match patch {
-        Some(level) => {
-            numbers.push(level.parse().ok()?);
-            true
-        }
-        None => !is_prerelease_suffix(rest),
+        .filter(|level| !level.is_empty() && level.bytes().all(|b| b.is_ascii_digit()))
+    {
+        Some(level) => Some(level.parse().ok()?),
+        None => None,
     };
-    while numbers.last() == Some(&0) {
-        numbers.pop();
-    }
     Some(SortKey {
         prefix: &tag[..run.start()],
-        dotted,
+        dotted: numbers.len() > 1,
+        stable: patch.is_some() || !is_prerelease_suffix(rest),
         numbers,
-        stable,
+        patch,
     })
 }
 
@@ -124,6 +133,10 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// are its packages' releases, like `plugin-legacy@6.1.0`. With a regex, every tag it matches
 /// counts, prereleases included.
 ///
+/// A `-N` suffix is a patch level where such tags outnumber plain releases with the same prefix,
+/// as in `ImageMagick`'s `7.1.1-41`. Beside more plain releases it is a prerelease, like npm's
+/// `v1.0.1-0`.
+///
 /// A bare number counts as a release only beside dotted tags with its own prefix, ignoring case,
 /// and only in the run of majors that carries on from their newest one, each within
 /// [`BARE_MAJOR_REACH`] of the last: systemd tags `v263` after `v262.1`, and gwsw/less went from
@@ -132,7 +145,7 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
-    let candidates: Vec<(SortKey<'_>, &String)> = tags
+    let mut candidates: Vec<(SortKey<'_>, &String)> = tags
         .iter()
         .filter(|tag| {
             regex.map_or_else(
@@ -141,8 +154,23 @@ pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option
             )
         })
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
-        .filter(|(key, _)| key.stable || regex.is_some())
         .collect();
+
+    // Per prefix: how many tags end in `-N`, against how many are plain releases.
+    let mut suffixed: HashMap<String, (usize, usize)> = HashMap::new();
+    for (key, _) in &candidates {
+        let counts = suffixed.entry(key.prefix.to_ascii_lowercase()).or_default();
+        if key.patch.is_some() {
+            counts.0 += 1;
+        } else if key.stable {
+            counts.1 += 1;
+        }
+    }
+    for (key, _) in &mut candidates {
+        let (patched, plain) = suffixed[&key.prefix.to_ascii_lowercase()];
+        key.settle(patched > plain);
+    }
+    candidates.retain(|(key, _)| key.stable || regex.is_some());
 
     let major = |key: &SortKey<'_>| key.numbers.first().copied().unwrap_or(0);
 
@@ -316,11 +344,25 @@ pub(crate) mod tests {
 
     #[test]
     fn a_numeric_suffix_after_a_dash_is_a_patch_level() {
-        // ImageMagick tags `7.1.1-41`, and Debian revisions read `v1.2.3-1`.
+        // ImageMagick tags `7.1.1-41`.
         let tags = ["7.1.1-9", "7.1.1-41", "7.1.0-62"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
-        let tags = ["v1.2.3", "v1.2.3-1", "v1.2.4-rc1"].map(String::from);
-        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.2.3-1"));
+        // One stray plain tag does not change the scheme: ImageMagick has `7.0.7.7`.
+        let tags = ["7.0.7.7", "7.1.1-9", "7.1.1-41"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
+    }
+
+    #[test]
+    fn a_numeric_suffix_beside_plain_releases_is_a_prerelease() {
+        // `npm version prerelease` tags `v1.0.1-0`, `v1.0.1-1`, then the release `v1.0.1`. A
+        // Debian revision `v1.2.3-1` beside `v1.2.3` reads the same way.
+        let tags = ["v1.0.0", "v1.0.1-0"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.0"));
+        let tags = ["v1.0.0", "v1.0.1-1", "v1.0.1"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.1"));
+        let tags = ["v1.0.1-0", "v1.0.1"].map(String::from);
+        let re = fancy_regex::Regex::new("^v").unwrap();
+        assert_eq!(latest_tag(&tags, Some(&re)).as_deref(), Some("v1.0.1"));
     }
 
     #[test]
