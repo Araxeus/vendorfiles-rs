@@ -9,6 +9,7 @@
 // exemption should go with it.
 #![expect(clippy::literal_string_with_formatting_args)]
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -109,6 +110,18 @@ pub fn is_http_url(s: &str) -> bool {
     s.starts_with("https://") || s.starts_with("http://")
 }
 
+/// A link a person can open for `url`: the URL itself, or its site when it still holds a
+/// placeholder like `{version}`.
+#[must_use]
+pub fn browsable_url(url: &str) -> Cow<'_, str> {
+    if !url.contains('{') {
+        return Cow::Borrowed(url);
+    }
+    reqwest::Url::parse(url).map_or(Cow::Borrowed(url), |parsed| {
+        Cow::Owned(format!("{}/", parsed.origin().ascii_serialization()))
+    })
+}
+
 /// Whether `s` holds a `{version}` or `{tag}` placeholder.
 #[must_use]
 pub fn uses_version(s: &str) -> bool {
@@ -145,7 +158,7 @@ pub fn basename(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        basename, expand_url, is_github_url, is_http_url, is_owner_repo_shorthand,
+        basename, browsable_url, expand_url, is_github_url, is_http_url, is_owner_repo_shorthand,
         owner_and_name_from_repo_url, replace_version, strip_release_prefix, trim_end_matches_str,
         trim_start_matches_str, uses_version, version_token,
     };
@@ -160,6 +173,19 @@ mod tests {
             replace_version("{version}-{tag}", "v1.2.3.4"),
             "1.2.3-v1.2.3.4"
         );
+    }
+
+    #[test]
+    fn a_url_with_placeholders_links_to_its_site() {
+        assert_eq!(
+            browsable_url("https://x.io/dl/v{version}/a.zip"),
+            "https://x.io/"
+        );
+        assert_eq!(
+            browsable_url("https://github.com/a/b"),
+            "https://github.com/a/b"
+        );
+        assert_eq!(browsable_url("not a url {tag}"), "not a url {tag}");
     }
 
     #[test]

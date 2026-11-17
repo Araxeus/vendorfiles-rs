@@ -8,8 +8,12 @@
 //! Note what is *absent*: there is no `vendorFolder`. A registry entry says what to fetch; where
 //! it lands is the config's business.
 
+use std::borrow::Cow;
+
 use indexmap::IndexMap;
 use serde::Deserialize;
+
+use crate::template::browsable_url;
 
 /// The newest schema version this build understands.
 ///
@@ -87,13 +91,15 @@ pub struct Program {
 }
 
 impl Program {
-    /// Where the program lives: its repository, or its `url`.
+    /// Where the program lives: its repository, or the site of its `url`.
     #[must_use]
-    pub fn link(&self) -> &str {
-        self.repository
-            .as_deref()
-            .or(self.url.as_deref())
-            .unwrap_or_default()
+    pub fn link(&self) -> Cow<'_, str> {
+        browsable_url(
+            self.repository
+                .as_deref()
+                .or(self.url.as_deref())
+                .unwrap_or_default(),
+        )
     }
 
     /// Whether it can be installed on `host`. A repository file is the same everywhere.

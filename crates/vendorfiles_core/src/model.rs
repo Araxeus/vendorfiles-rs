@@ -6,13 +6,16 @@
 //! type mismatch into `None` instead of a hard parse failure, and by keeping validation in
 //! [`RawDependency::validate`] where the reference puts it.
 
+use std::borrow::Cow;
+
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{Result, VendorError};
 use crate::template::{
-    basename, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url, uses_version,
+    basename, browsable_url, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url,
+    uses_version,
 };
 use crate::url_source::{UrlSource, is_git_url};
 
@@ -492,7 +495,7 @@ impl RawDependency {
             let source = UrlSource {
                 url: url.clone(),
                 version_url: self.version_url.clone(),
-                version_regex: self.version_regex.clone(),
+                version_regex: self.version_regex.clone().filter(|r| !r.is_empty()),
                 version_selector: self.version_selector.clone(),
             };
             (Source::Url(source), url.clone(), host)
@@ -553,6 +556,13 @@ pub struct Dependency {
 }
 
 impl Dependency {
+    /// Where a person can look the dependency up: its repository, or its `url`'s site while the
+    /// `url` still holds a placeholder.
+    #[must_use]
+    pub fn link(&self) -> Cow<'_, str> {
+        browsable_url(&self.repository)
+    }
+
     /// Whether this dependency downloads from a `url` rather than GitHub.
     #[must_use]
     pub const fn is_url(&self) -> bool {
@@ -741,6 +751,15 @@ mod tests {
         ] {
             dep(ok).validate("Foo").unwrap();
         }
+    }
+
+    #[test]
+    fn an_empty_version_regex_is_unset() {
+        let d = dep(r#"{"url":"https://x.io","versionRegex":"","files":[{"{url}":"a"}]}"#);
+        let super::Source::Url(source) = d.resolve("tool").unwrap().source else {
+            panic!("a url dependency")
+        };
+        assert_eq!(source.version_regex, None);
     }
 
     #[test]

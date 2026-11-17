@@ -67,7 +67,7 @@ pub(super) async fn search(query: &str, refresh: bool) -> Result<()> {
     for (row, (_, program)) in rows.iter().zip(&found) {
         vendorfiles_core::progress::print_out(&line(
             &row[0],
-            Some(program.link()),
+            Some(&program.link()),
             [&row[1], &row[2]],
         ));
         vendorfiles_core::progress::print_out(&rule);

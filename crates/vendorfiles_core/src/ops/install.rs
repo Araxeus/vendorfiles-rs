@@ -86,7 +86,7 @@ impl Session {
         let progress = Arc::new(
             self.progress
                 .dependency(&dependency.name)
-                .linked_to(&dependency.repository),
+                .linked_to(&dependency.link()),
         );
         progress.status("resolving version");
         let version = match self.decide_version(&dependency, &options).await {
@@ -401,7 +401,7 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
 
 /// One line of `vendor outdated` output.
 fn outdated_line(dependency: &Dependency, new_version: &str) -> String {
-    let name = ui::link(&dependency.name, &dependency.repository);
+    let name = ui::link(&dependency.name, &dependency.link());
     match dependency.version.as_deref() {
         Some(old) if old != new_version => {
             format!("{name} {} -> {}", ui::red(old), ui::green(new_version))
@@ -804,7 +804,8 @@ async fn download_url_file(
         .prefix("vendorfiles-")
         .tempdir()
         .map_err(VendorError::from)?;
-    let name = archive_name(&url);
+    // After redirects, so `/latest` saves under the versioned name it points at.
+    let name = archive_name(response.url().as_str());
     progress.status(format!("downloading {name}"));
     save_and_extract(response, &name, &wanted, temp.path(), progress).await?;
     place_members(&temp.path().join("extracted"), &pairs, version, folder).await
@@ -940,8 +941,11 @@ async fn save_and_extract(
     progress: &progress::Dependency,
 ) -> Result<()> {
     // Saved under the archive's own name: a lone `.gz` or `.xz` extracts to its name minus the
-    // suffix, so a random temporary name would produce the wrong member.
-    let archive_path = temp.join(archive_name);
+    // suffix, so a random temporary name would produce the wrong member. Its own folder keeps
+    // that name, whatever it is, clear of `extracted`.
+    let archive_folder = temp.join("archive");
+    tokio::fs::create_dir_all(&archive_folder).await?;
+    let archive_path = archive_folder.join(archive_name);
     // Reported as the extraction failure the reference prints for it, because that is what a
     // half-written archive amounts to - but carrying the reason, which used to be dropped here
     // so that extraction could rediscover the symptom and not the cause.
@@ -1328,6 +1332,64 @@ mod tests {
             writer.write_all(bytes).unwrap();
         }
         writer.finish().unwrap().into_inner()
+    }
+
+    fn gz_bytes(content: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(content).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_archive_is_named_after_where_its_url_lands() {
+        // A lone `.gz` extracts to its own name minus the suffix, so the name has to come from
+        // the redirect target, not from `/latest`.
+        let base = serve(vec![
+            route("/latest", 302, "Location: /files/tool.gz\r\n", b""),
+            Route {
+                path: "/files/tool.gz",
+                status: 200,
+                headers: "",
+                body: gz_bytes(b"tool bytes"),
+            },
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1", "files": [{ "{url}/latest": { "tool": "tool" } }],
+            })),
+        )
+        .await;
+        sync(&mut session, false, false).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/tool")).unwrap(),
+            b"tool bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_archive_may_be_named_like_the_extraction_folder() {
+        let base = serve(vec![Route {
+            path: "/extracted",
+            status: 200,
+            headers: "",
+            body: zip_bytes(&[("tool", b"tool bytes")]),
+        }]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1", "files": [{ "{url}/extracted": ["tool"] }],
+            })),
+        )
+        .await;
+        sync(&mut session, false, false).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/tool")).unwrap(),
+            b"tool bytes"
+        );
     }
 
     #[test]
