@@ -1383,7 +1383,7 @@ fn registry(dir: &Path) -> std::path::PathBuf {
     std::fs::write(
         &path,
         r#"
-version: 2
+version: 3
 programs:
   fd:
     aliases: [fdfind]
@@ -1415,6 +1415,17 @@ programs:
     targets:
       plan9-x86_64:
         asset: "{release}/plan9-tool"
+  urltool:
+    description: "A program served from its own website"
+    url: https://x.io/dl/v{version}
+    versionUrl: https://x.io/latest
+    targets:
+      windows-x86_64: { asset: "{url}/urltool.exe", as: urltool.exe }
+      windows-aarch64: { asset: "{url}/urltool.exe", as: urltool.exe }
+      macos-aarch64: { asset: "{url}/urltool", as: urltool }
+      macos-x86_64: { asset: "{url}/urltool", as: urltool }
+      linux-x86_64: { asset: "{url}/urltool", as: urltool }
+      linux-aarch64: { asset: "{url}/urltool", as: urltool }
 "#,
     )
     .expect("writing the registry");
@@ -1435,6 +1446,39 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
         .env("VENDOR_REGISTRY", &registry)
         .output()
         .expect("running the vendor binary")
+}
+
+#[test]
+fn add_writes_a_url_entry_for_a_url_program() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "urltool", "--dry-run"]);
+    let printed = stdout(&out);
+    assert!(
+        printed.contains(r#""url": "https://x.io/dl/v{version}""#),
+        "{printed}{}",
+        stderr(&out)
+    );
+    assert!(
+        printed.contains(r#""versionUrl": "https://x.io/latest""#),
+        "{printed}"
+    );
+    assert!(!printed.contains("repository"), "{printed}");
+}
+
+#[test]
+fn add_refuses_to_put_a_url_program_over_a_github_entry() {
+    let dir = project(
+        r#"{ "vendorDependencies": { "urltool": {
+        "repository": "https://github.com/a/urltool", "files": ["x"] } } }"#,
+    );
+    let err = stderr(&vendor_with_registry(
+        dir.path(),
+        &["add", "urltool", "--dry-run"],
+    ));
+    assert!(
+        err.contains("'urltool' already vendors https://github.com/a/urltool"),
+        "{err}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
