@@ -31,6 +31,13 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How much of a version page is read. A version sits near the top of anything sane.
 const MAX_VERSION_BODY: usize = 1 << 20;
 
+/// How much of a tag listing is read. The full advertisement of a large repository runs to tens
+/// of megabytes, and a host that never stops sending is cut off here.
+const MAX_REFS_BODY: usize = 64 << 20;
+
+/// The longest version accepted.
+const MAX_VERSION_LEN: usize = 128;
+
 /// Where a URL dependency downloads from and how its version is found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UrlSource {
@@ -77,10 +84,11 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
         .map_err(|_| miss())?;
 
     let found = if is_git_url(version_url) {
-        let tags = git_tags(http, version_url)
+        let mut tags = git_tags(http, version_url)
             .await
             .map_err(refused)?
             .ok_or_else(miss)?;
+        tags.retain(|tag| is_plausible_version(tag));
         tags::latest_tag(&tags, regex.as_ref())
     } else {
         let response = send(http.get(version_url).timeout(LOOKUP_TIMEOUT))
@@ -100,6 +108,7 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
         }
 
         let body = read_capped(response, MAX_VERSION_BODY).await?;
+        let body = String::from_utf8_lossy(&body);
         let selector = source
             .version_selector
             .as_deref()
@@ -108,7 +117,25 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
             .map_err(|_| miss())?;
         page::find_version(&body, selector.as_ref(), regex.as_ref())
     };
-    found.map(Some).ok_or_else(miss)
+    found
+        .filter(|version| is_plausible_version(version))
+        .map(Some)
+        .ok_or_else(miss)
+}
+
+/// Whether `version` can be one: letters, digits and `.`, `_`, `+`, `-`, starting with a letter
+/// or digit, holding a digit, and short.
+///
+/// A version lands in file names through `{tag}`, and a remote host chooses it. So a path like
+/// `../x`, a JSON body or a stray word like `Forbidden` is refused rather than used.
+fn is_plausible_version(version: &str) -> bool {
+    version.len() <= MAX_VERSION_LEN
+        && version.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && version.contains(|c: char| c.is_ascii_digit())
+        && !version.contains("..")
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
 }
 
 /// The tag names of the git repository at `repository`, or `None` when no git host answers.
@@ -127,7 +154,7 @@ async fn git_tags(http: &reqwest::Client, repository: &str) -> Result<Option<Vec
     if let Ok(response) = send(listing).await
         && has_type(&response, LS_TAGS_RESULT)
     {
-        let tags = tags::parse_advertisement(&response.bytes().await?);
+        let tags = tags::parse_advertisement(&read_capped(response, MAX_REFS_BODY).await?);
         if !tags.is_empty() {
             return Ok(Some(tags));
         }
@@ -140,7 +167,9 @@ async fn git_tags(http: &reqwest::Client, repository: &str) -> Result<Option<Vec
     if !has_type(&response, ADVERTISEMENT) {
         return Ok(None);
     }
-    Ok(Some(tags::parse_advertisement(&response.bytes().await?)))
+    Ok(Some(tags::parse_advertisement(
+        &read_capped(response, MAX_REFS_BODY).await?,
+    )))
 }
 
 /// Whether `response` declares the content type `expected`.
@@ -174,8 +203,8 @@ async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
     })
 }
 
-/// The first `limit` bytes of the body, decoded lossily.
-async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<String> {
+/// The first `limit` bytes of the body.
+async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
     let mut body = Vec::new();
     while body.len() < limit
         && let Some(chunk) = response.chunk().await?
@@ -183,7 +212,7 @@ async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<St
         body.extend_from_slice(&chunk);
     }
     body.truncate(limit);
-    Ok(String::from_utf8_lossy(&body).into_owned())
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -379,6 +408,62 @@ mod tests {
                 tokio::time::timeout(LOOKUP_TIMEOUT * 2, latest_version(&http, &source)).await;
             assert!(matches!(outcome, Ok(Err(_))), "{outcome:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_cannot_be_a_version_is_refused() {
+        // Whatever a host answers ends up in file names through `{tag}`, so it has to look like
+        // a version: no path, no JSON, no word without a digit.
+        let base = serve(vec![
+            route("/climb", 200, "", b"../../../v1"),
+            route("/json", 200, "", br#"{"tag_name":"v1.2.3"}"#),
+            route("/word", 200, "", b"Forbidden"),
+            route("/fine", 200, "", b"v1.2.3+build.4"),
+        ]);
+        let http = client().unwrap();
+        let lookup = |path: &str| UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/{path}")),
+            version_regex: None,
+            version_selector: None,
+        };
+        for path in ["climb", "json", "word"] {
+            let error = latest_version(&http, &lookup(path)).await.unwrap_err();
+            assert!(
+                matches!(error, VendorError::NoVersionAt { .. }),
+                "{path}: {error}"
+            );
+        }
+        assert_eq!(
+            latest_version(&http, &lookup("fine"))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("v1.2.3+build.4")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_git_tag_that_cannot_be_a_version_is_skipped() {
+        let base = serve(vec![route(
+            "/o/r.git/git-upload-pack",
+            200,
+            "Content-Type: application/x-git-upload-pack-result\r\n",
+            &tags::tests::ls_refs(&["refs/tags/v1.0.0", "refs/tags/../../v9.0.0"]),
+        )]);
+        let source = UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/o/r.git")),
+            version_regex: None,
+            version_selector: None,
+        };
+        assert_eq!(
+            latest_version(&client().unwrap(), &source)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("v1.0.0")
+        );
     }
 
     #[tokio::test]
