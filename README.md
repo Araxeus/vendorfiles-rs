@@ -917,6 +917,8 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
 - A tag with a `-` after its numbers, like `v2.0.0-rc.1`, is a prerelease and is skipped. Date tags
   like `2024-01-15` are skipped too.
 - With `versionRegex`, only the tags it matches count, prereleases included.
+- A repository with several tag schemes needs a `versionRegex` to say which one is current.
+  golang/go keeps old `release.r60.3` tags beside `go1.25.0`, so it takes `"versionRegex": "^go"`.
 
 #### Reading the version from a page
 
