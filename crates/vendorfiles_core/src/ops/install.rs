@@ -832,10 +832,12 @@ pub(crate) fn archive_name(url: &str) -> String {
     // Windows reserves these names whatever the extension, and a write to one goes nowhere.
     let stem_len = name.find('.').unwrap_or(name.len());
     let stem = name[..stem_len].to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4
-            && (stem.starts_with("COM") || stem.starts_with("LPT"))
-            && stem.ends_with(|c: char| ('1'..='9').contains(&c)));
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || (stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.ends_with(|c: char| ('1'..='9').contains(&c)));
     if reserved {
         name.insert(stem_len, '_');
     }
@@ -1422,6 +1424,7 @@ mod tests {
             super::archive_name("https://x.io/console.zip"),
             "console.zip"
         );
+        assert_eq!(super::archive_name("https://x.io/CONIN$"), "CONIN$_");
         assert_eq!(super::archive_name("https://x.io"), "download");
     }
 
