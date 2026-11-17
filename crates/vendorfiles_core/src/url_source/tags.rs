@@ -51,6 +51,17 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
     tags
 }
 
+/// Whether the text after a tag's numbers marks a prerelease: a `-` (`v2.0.0-rc.1`), or a marker
+/// straight after the numbers (`go1.25rc1`, `1.0.beta2`). Any other letter names a release, as in
+/// OpenSSL's `1_1_1w`.
+fn is_prerelease_suffix(rest: &str) -> bool {
+    let rest = rest.trim_start_matches(['.', '_']).to_ascii_lowercase();
+    rest.starts_with('-')
+        || ["rc", "alpha", "beta", "pre", "dev"]
+            .iter()
+            .any(|marker| rest.starts_with(marker))
+}
+
 /// What a tag sorts by.
 struct SortKey<'a> {
     /// The text before its numbers, like `v` or `curl-`.
@@ -60,7 +71,7 @@ struct SortKey<'a> {
     /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing
     /// zeros dropped so `1.2` equals `1.2.0`.
     numbers: Vec<u64>,
-    /// Whether it is a stable release. Numbers followed by `-` mark a prerelease (`v2.0.0-rc.1`).
+    /// Whether it is a stable release. See [`is_prerelease_suffix`].
     stable: bool,
 }
 
@@ -81,7 +92,7 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
         prefix: &tag[..run.start()],
         dotted,
         numbers,
-        stable: !tag[run.end()..].starts_with('-'),
+        stable: !is_prerelease_suffix(&tag[run.end()..]),
     })
 }
 
@@ -265,6 +276,18 @@ pub(crate) mod tests {
             latest_tag(&tags, None).as_deref(),
             Some("v18446744073709551615.1")
         );
+    }
+
+    #[test]
+    fn a_release_candidate_without_a_dash_is_a_prerelease() {
+        // Go tags `go1.25rc1`, then `go1.25.0`.
+        let tags = ["go1.24.5", "go1.25rc1", "go1.25rc2", "go1.25.0"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("go1.25.0"));
+        let re = fancy_regex::Regex::new("^go").unwrap();
+        assert_eq!(latest_tag(&tags, Some(&re)).as_deref(), Some("go1.25.0"));
+        // A letter that is not a prerelease marker still names a release: OpenSSL `1_1_1w`.
+        let tags = ["OpenSSL_1_1_1v", "OpenSSL_1_1_1w"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("OpenSSL_1_1_1w"));
     }
 
     #[test]
