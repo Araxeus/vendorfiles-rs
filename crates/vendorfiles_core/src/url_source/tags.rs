@@ -3,7 +3,7 @@
 //! Both answers this reads, the protocol v2 `ls-refs` listing and the older full advertisement,
 //! are pkt-lines: each is prefixed with its length as four hex digits.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -68,9 +68,9 @@ fn is_prerelease_suffix(rest: &str) -> bool {
 }
 
 /// What a tag sorts by.
-struct SortKey<'a> {
-    /// The text before its numbers, like `v` or `curl-`.
-    prefix: &'a str,
+struct SortKey {
+    /// The text before its numbers, like `v` or `curl-`, lowercased so `V1.0` and `v2` compare.
+    prefix: String,
     /// Whether its numbers are dotted, unlike a build number like `r1234`.
     dotted: bool,
     /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`). Once settled,
@@ -83,7 +83,13 @@ struct SortKey<'a> {
     patch: Option<u64>,
 }
 
-impl SortKey<'_> {
+impl SortKey {
+    /// Its numbers without trailing zeros, the form two tags compare in.
+    fn base(&self) -> &[u64] {
+        let zeros = self.numbers.iter().rev().take_while(|&&n| n == 0).count();
+        &self.numbers[..self.numbers.len() - zeros]
+    }
+
     /// Applies the repository's reading of `-N`, then drops trailing zeros.
     fn settle(&mut self, patch_levels: bool) {
         if let Some(patch) = self.patch {
@@ -99,7 +105,7 @@ impl SortKey<'_> {
 }
 
 /// The [`SortKey`] of `tag`, or `None` for a tag with no digits.
-fn sort_key(tag: &str) -> Option<SortKey<'_>> {
+fn sort_key(tag: &str) -> Option<SortKey> {
     let run = NUMBERS.find(tag)?;
     let numbers = run
         .as_str()
@@ -116,9 +122,10 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
         None => None,
     };
     Some(SortKey {
-        prefix: &tag[..run.start()],
+        prefix: tag[..run.start()].to_ascii_lowercase(),
         dotted: numbers.len() > 1,
-        stable: patch.is_some() || !is_prerelease_suffix(rest),
+        // A `-N` tag reads as a prerelease here, and `settle` decides for good.
+        stable: !is_prerelease_suffix(rest),
         numbers,
         patch,
     })
@@ -133,9 +140,9 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// are its packages' releases, like `plugin-legacy@6.1.0`. With a regex, every tag it matches
 /// counts, prereleases included.
 ///
-/// A `-N` suffix is a patch level where such tags outnumber plain releases with the same prefix,
-/// as in `ImageMagick`'s `7.1.1-41`. Beside more plain releases it is a prerelease, like npm's
-/// `v1.0.1-0`.
+/// A `-N` suffix is a prerelease where a plain release shares its numbers, like npm's `v1.0.1-0`
+/// beside `v1.0.1`. Otherwise it is a patch level where such tags outnumber plain releases with
+/// the same prefix, as in `ImageMagick`'s `7.1.1-41`.
 ///
 /// A bare number counts as a release only beside dotted tags with its own prefix, ignoring case,
 /// and only in the run of majors that carries on from their newest one, each within
@@ -145,7 +152,7 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
-    let mut candidates: Vec<(SortKey<'_>, &String)> = tags
+    let mut candidates: Vec<(SortKey, &String)> = tags
         .iter()
         .filter(|tag| {
             regex.map_or_else(
@@ -156,29 +163,37 @@ pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
         .collect();
 
-    // Per prefix: how many tags end in `-N`, against how many are plain releases.
-    let mut suffixed: HashMap<String, (usize, usize)> = HashMap::new();
+    // Per prefix: how many tags end in `-N` against how many are plain releases, and whether
+    // any `-N` tag has a plain release of the same numbers beside it.
+    let plain: HashSet<(&str, &[u64])> = candidates
+        .iter()
+        .filter(|(key, _)| key.patch.is_none() && key.stable)
+        .map(|(key, _)| (key.prefix.as_str(), key.base()))
+        .collect();
+    let mut schemes: HashMap<String, (usize, usize, bool)> = HashMap::new();
     for (key, _) in &candidates {
-        let counts = suffixed.entry(key.prefix.to_ascii_lowercase()).or_default();
+        let scheme = schemes.entry(key.prefix.clone()).or_default();
         if key.patch.is_some() {
-            counts.0 += 1;
+            scheme.0 += 1;
+            scheme.2 |= plain.contains(&(key.prefix.as_str(), key.base()));
         } else if key.stable {
-            counts.1 += 1;
+            scheme.1 += 1;
         }
     }
+    drop(plain);
     for (key, _) in &mut candidates {
-        let (patched, plain) = suffixed[&key.prefix.to_ascii_lowercase()];
-        key.settle(patched > plain);
+        let (patched, plain, paired) = schemes[&key.prefix];
+        key.settle(!paired && patched > plain);
     }
     candidates.retain(|(key, _)| key.stable || regex.is_some());
 
-    let major = |key: &SortKey<'_>| key.numbers.first().copied().unwrap_or(0);
+    let major = |key: &SortKey| key.numbers.first().copied().unwrap_or(0);
 
     // Per prefix: the newest dotted major, then the bare majors above it.
     let mut newest_dotted: HashMap<String, u64> = HashMap::new();
     let mut bare_majors: HashMap<String, Vec<u64>> = HashMap::new();
     for (key, _) in &candidates {
-        let prefix = key.prefix.to_ascii_lowercase();
+        let prefix = key.prefix.clone();
         if key.dotted {
             let newest = newest_dotted.entry(prefix).or_insert(0);
             *newest = (*newest).max(major(key));
@@ -204,10 +219,10 @@ pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option
             (prefix, reach)
         })
         .collect();
-    let is_release = |key: &SortKey<'_>| {
+    let is_release = |key: &SortKey| {
         key.dotted
             || reach
-                .get(&key.prefix.to_ascii_lowercase())
+                .get(&key.prefix)
                 .is_some_and(|&reach| major(key) <= reach)
     };
 
@@ -359,6 +374,13 @@ pub(crate) mod tests {
         let tags = ["v1.0.0", "v1.0.1-0"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.0"));
         let tags = ["v1.0.0", "v1.0.1-1", "v1.0.1"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.1"));
+        // Prereleases can outnumber releases; a release beside its own prereleases still decides.
+        let tags = [
+            "v1.0.0", "v1.0.1-0", "v1.0.1-1", "v1.0.1-2", "v1.0.1", "v1.0.2-0", "v1.0.2-1",
+            "v1.0.2-2",
+        ]
+        .map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.0.1"));
         let tags = ["v1.0.1-0", "v1.0.1"].map(String::from);
         let re = fancy_regex::Regex::new("^v").unwrap();
