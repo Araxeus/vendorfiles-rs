@@ -16,14 +16,14 @@
   </a>
 </p>
 
-vendorfiles pulls files from GitHub repositories and keeps them up to date. List the CSS libraries,
-binaries or config files you want in a config file, run `vendor sync`, and they land in your
-project.
+vendorfiles pulls files from GitHub repositories, git hosts and plain URLs, and keeps them up to
+date. List the CSS libraries, binaries or config files you want in a config file, run
+`vendor sync`, and they land in your project.
 
-- Download any file from any GitHub repository
+- Download any file from any GitHub repository, or from any URL
 - Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
   archives
-- Track versions by release or by commit
+- Track versions by release, by commit, by git tag or from a version URL
 - Write the config in TOML, YAML, JSON, JSON5 or `package.json`
 - Download in parallel, streaming each file straight to disk
 - Install one static binary, with nothing else to set up

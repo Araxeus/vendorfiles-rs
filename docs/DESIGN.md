@@ -39,6 +39,7 @@ vendorfiles-rs/
 │   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction,
 │   │       │                 # selective by member with a full-extraction fallback
 │   │       ├── remote_zip.rs # HTTP-range reader: named members out of a remote ZIP
+│   │       ├── url_source/   # URL dependencies: version lookup (page or git tags), credential-free fetch
 │   │       ├── github/
 │   │       │   ├── mod.rs    # GitHubClient: releases (cached), commits, search, downloads
 │   │       │   ├── auth.rs   # token resolution, OAuth device flow
@@ -179,6 +180,10 @@ pass collapses duplicate lookups into one request instead of racing - the anonym
 is 60 requests an hour, so a duplicate is not free. `Arc<Release>` means cache hits do not clone
 asset lists. The lookup also reproduces the TS quirk: a request for a tag is satisfied by any
 already-resolved release of the same repository whose `tag_name` matches.
+
+URL dependencies never touch `api`. They go through `GitHubClient::http()`, the credential-free
+client, so the token is never sent to another host. `Source` picks the pipeline, once in
+`resolve_new_version` and once in `download_all`.
 
 ### 3.5 Credential storage
 

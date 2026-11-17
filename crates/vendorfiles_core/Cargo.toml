@@ -1,6 +1,6 @@
 [package]
 name = "vendorfiles_core"
-description = "Library powering the vendorfiles CLI: pull files from GitHub repositories and keep them up to date"
+description = "Library powering the vendorfiles CLI: pull files from GitHub repositories and URLs and keep them up to date"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
