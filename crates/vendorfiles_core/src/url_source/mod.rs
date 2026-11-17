@@ -9,13 +9,24 @@
 pub mod page;
 pub mod tags;
 
+use std::time::Duration;
+
 use reqwest::header::CONTENT_TYPE;
 
 use crate::error::{Result, VendorError};
 
-/// The content type of a smart-HTTP ref advertisement. Anything else at `info/refs` is a host
-/// that does not speak the protocol, or a login page.
+/// A protocol v2 `ls-refs` request for tags alone.
+const LS_TAGS: &[u8] = b"0014command=ls-refs\n0001001aref-prefix refs/tags/\n0000";
+
+/// The content type of a protocol v2 answer.
+const LS_TAGS_RESULT: &str = "application/x-git-upload-pack-result";
+
+/// The content type of a full ref advertisement. Anything else at `info/refs` is a host that
+/// does not speak git, or a login page.
 const ADVERTISEMENT: &str = "application/x-git-upload-pack-advertisement";
+
+/// How long a version lookup may take. A host that hangs would otherwise stall the whole run.
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How much of a version page is read. A version sits near the top of anything sane.
 const MAX_VERSION_BODY: usize = 1 << 20;
@@ -41,8 +52,9 @@ pub fn is_git_url(version_url: &str) -> bool {
 ///
 /// # Errors
 ///
-/// [`VendorError::NoVersionAt`] when the answer holds no version or the host refuses, and
-/// [`VendorError::Http`] when the host cannot be reached.
+/// [`VendorError::NoVersionAt`] when the answer holds no version or is a 404,
+/// [`VendorError::RequestFailed`] for any other refusal, and [`VendorError::Http`] when the host
+/// cannot be reached.
 pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Result<Option<String>> {
     let Some(version_url) = source.version_url.as_deref() else {
         return Ok(None);
@@ -50,8 +62,10 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
     let miss = || VendorError::NoVersionAt {
         url: version_url.to_owned(),
     };
+    // A 404 is an answer: nothing is there. Any other refusal, like a 503, says nothing about
+    // versions, so it is reported as itself.
     let refused = |e| match e {
-        VendorError::RequestFailed { .. } => miss(),
+        VendorError::RequestFailed { status: 404, .. } => miss(),
         other => other,
     };
     // Validation already compiled both, so a failure here cannot happen in practice.
@@ -63,22 +77,15 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
         .map_err(|_| miss())?;
 
     let found = if is_git_url(version_url) {
-        let refs = format!(
-            "{}/info/refs?service=git-upload-pack",
-            version_url.trim_end_matches('/')
-        );
-        let response = fetch(http, &refs).await.map_err(refused)?;
-        let advertised = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .is_some_and(|t| t.as_bytes().starts_with(ADVERTISEMENT.as_bytes()));
-        if !advertised {
-            return Err(miss());
-        }
-        let body = response.bytes().await?;
-        tags::latest_tag(&tags::parse_advertisement(&body), regex.as_ref())
+        let tags = git_tags(http, version_url)
+            .await
+            .map_err(refused)?
+            .ok_or_else(miss)?;
+        tags::latest_tag(&tags, regex.as_ref())
     } else {
-        let response = fetch(http, version_url).await.map_err(refused)?;
+        let response = send(http.get(version_url).timeout(LOOKUP_TIMEOUT))
+            .await
+            .map_err(refused)?;
 
         // A redirect can carry the version in its target, like `/latest` to `/v1.2.3/tool.zip`.
         // Without one, the URL is the configured `versionUrl` and says nothing new.
@@ -104,6 +111,46 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
     found.map(Some).ok_or_else(miss)
 }
 
+/// The tag names of the git repository at `repository`, or `None` when no git host answers.
+///
+/// Protocol v2 is asked for tags alone first. The older full advertisement lists every branch
+/// and merge request too, which runs to tens of megabytes on a large repository, so it is only
+/// the fallback for a host that does not speak v2.
+async fn git_tags(http: &reqwest::Client, repository: &str) -> Result<Option<Vec<String>>> {
+    let repository = repository.trim_end_matches('/');
+    let listing = http
+        .post(format!("{repository}/git-upload-pack"))
+        .header("Git-Protocol", "version=2")
+        .header(CONTENT_TYPE, "application/x-git-upload-pack-request")
+        .body(LS_TAGS)
+        .timeout(LOOKUP_TIMEOUT);
+    if let Ok(response) = send(listing).await
+        && has_type(&response, LS_TAGS_RESULT)
+    {
+        let tags = tags::parse_advertisement(&response.bytes().await?);
+        if !tags.is_empty() {
+            return Ok(Some(tags));
+        }
+    }
+
+    let advertisement = http
+        .get(format!("{repository}/info/refs?service=git-upload-pack"))
+        .timeout(LOOKUP_TIMEOUT);
+    let response = send(advertisement).await?;
+    if !has_type(&response, ADVERTISEMENT) {
+        return Ok(None);
+    }
+    Ok(Some(tags::parse_advertisement(&response.bytes().await?)))
+}
+
+/// Whether `response` declares the content type `expected`.
+fn has_type(response: &reqwest::Response, expected: &str) -> bool {
+    response
+        .headers()
+        .get(CONTENT_TYPE)
+        .is_some_and(|t| t.as_bytes().starts_with(expected.as_bytes()))
+}
+
 /// Sends a GET to `url`, following redirects.
 ///
 /// # Errors
@@ -111,7 +158,12 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
 /// [`VendorError::RequestFailed`] for a non-2xx answer, and [`VendorError::Http`] when the host
 /// cannot be reached.
 pub async fn fetch(http: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
-    let response = http.get(url).send().await?;
+    send(http.get(url)).await
+}
+
+/// Sends `request`, turning a non-2xx answer into [`VendorError::RequestFailed`].
+async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+    let response = request.send().await?;
     let status = response.status();
     if status.is_success() {
         return Ok(response);
@@ -161,6 +213,30 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("v1.0.0")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_git_host_speaking_protocol_v2_lists_only_its_tags() {
+        // No `info/refs` route: the full advertisement must not be needed.
+        let base = serve(vec![route(
+            "/o/r.git/git-upload-pack",
+            200,
+            "Content-Type: application/x-git-upload-pack-result\r\n",
+            &tags::tests::ls_refs(&["refs/tags/v1.0.0", "refs/tags/v1.2.0"]),
+        )]);
+        let source = UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/o/r.git")),
+            version_regex: None,
+            version_selector: None,
+        };
+        assert_eq!(
+            latest_version(&client().unwrap(), &source)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("v1.2.0")
         );
     }
 
@@ -265,6 +341,24 @@ mod tests {
             version_selector: None,
         };
         send(latest_version(&http, &source));
+    }
+
+    #[tokio::test]
+    async fn a_version_url_that_refuses_reports_why() {
+        let base = serve(vec![route("/busy", 503, "", b"")]);
+        let source = UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/busy")),
+            version_regex: None,
+            version_selector: None,
+        };
+        let error = latest_version(&client().unwrap(), &source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, VendorError::RequestFailed { status: 503, .. }),
+            "{error}"
+        );
     }
 
     #[tokio::test]

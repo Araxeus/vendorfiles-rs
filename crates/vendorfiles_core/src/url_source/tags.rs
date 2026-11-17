@@ -1,7 +1,7 @@
-//! The latest tag of a git repository, read from the smart-HTTP ref advertisement.
+//! The latest tag of a git repository, read from the refs a git host lists.
 //!
-//! The advertisement is what `git ls-remote` reads. It lists every ref as pkt-lines, each
-//! prefixed with its length as four hex digits.
+//! Both answers this reads, the protocol v2 `ls-refs` listing and the older full advertisement,
+//! are pkt-lines: each is prefixed with its length as four hex digits.
 
 use std::sync::LazyLock;
 
@@ -10,7 +10,7 @@ use regex::Regex;
 static NUMBERS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[0-9]+(?:\.[0-9]+)*").expect("valid regex"));
 
-/// The tag names in a ref advertisement, in the order the host sent them.
+/// The tag names in a ref listing, in the order the host sent them.
 ///
 /// Peeled `^{}` lines repeat a tag that is already listed, so they are dropped.
 #[must_use]
@@ -30,15 +30,16 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
         let Some(line) = rest.get(4..len) else { break };
         rest = &rest[len..];
 
-        // `<sha> <ref>`, then a NUL and the capability list on the first ref.
+        // `<sha> <ref>`, then a NUL and the capability list on the first ref of the full
+        // advertisement, or a space and attributes like `peeled:<sha>` in a v2 listing.
         let line = line
             .split(|&b| b == b'\0' || b == b'\n')
             .next()
             .unwrap_or_default();
         let Some(name) = std::str::from_utf8(line)
             .ok()
-            .and_then(|l| l.split_once(' '))
-            .and_then(|(_, r)| r.strip_prefix("refs/tags/"))
+            .and_then(|l| l.split(' ').nth(1))
+            .and_then(|r| r.strip_prefix("refs/tags/"))
         else {
             continue;
         };
@@ -104,6 +105,31 @@ pub(crate) mod tests {
             s += &pkt(&format!("{} {r}{caps}\n", "a".repeat(40)));
         }
         (s + "0000").into_bytes()
+    }
+
+    /// A protocol v2 `ls-refs` answer listing `refs`.
+    pub fn ls_refs(refs: &[&str]) -> Vec<u8> {
+        let mut s = String::new();
+        for r in refs {
+            s += &pkt(&format!("{} {r}\n", "b".repeat(40)));
+        }
+        (s + "0000").into_bytes()
+    }
+
+    #[test]
+    fn a_protocol_v2_listing_reads_the_same_way() {
+        let mut body = ls_refs(&["refs/tags/v2.0.0"]);
+        // A peeled line carries its target after the name.
+        body.splice(
+            ..0,
+            pkt(&format!(
+                "{} refs/tags/v1.0.0 peeled:{}\n",
+                "c".repeat(40),
+                "d".repeat(40)
+            ))
+            .into_bytes(),
+        );
+        assert_eq!(parse_advertisement(&body), ["v1.0.0", "v2.0.0"]);
     }
 
     #[test]
