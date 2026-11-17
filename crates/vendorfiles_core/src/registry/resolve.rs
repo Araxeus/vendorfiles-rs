@@ -447,6 +447,12 @@ fn output_name(name: &str, member: &str) -> Result<String> {
     if basename.contains(':') || basename.starts_with('/') || basename.starts_with('\\') {
         return Err(refuse(&format!("'{basename}' is not a plain file name")));
     }
+    // `{url}` and `{release}` never expand in an output name, so a bare `{url}` asset needs `as`.
+    if basename.contains("{url}") || basename.contains("{release}") {
+        return Err(refuse(&format!(
+            "'{basename}' is not a file name, so the asset needs an 'as' name"
+        )));
+    }
     Ok(basename.to_owned())
 }
 
@@ -518,6 +524,13 @@ targets:
             URL_PROGRAM.replace(r#""{url}/tool-{target}{ext}""#, r#""{release}/tool{ext}""#);
         let error = for_host("tool", &one_program(&release), "linux-x86_64").unwrap_err();
         assert!(error.to_string().contains("is not a URL"), "{error}");
+    }
+
+    #[test]
+    fn a_bare_url_asset_needs_an_as_name() {
+        let yaml = "url: https://x.io/tool\ntargets:\n  linux-x86_64: { asset: \"{url}\" }\n";
+        let error = for_host("tool", &one_program(yaml), "linux-x86_64").unwrap_err();
+        assert!(error.to_string().contains("'as'"), "{error}");
     }
 
     #[test]
