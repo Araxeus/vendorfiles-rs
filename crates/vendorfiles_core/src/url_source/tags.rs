@@ -85,7 +85,7 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
     })
 }
 
-/// How far past the newest dotted major a bare number may sit and still count as a release.
+/// The widest gap between bare majors that still reads as one run of releases.
 const BARE_MAJOR_REACH: u64 = 10;
 
 /// The latest of `tags`.
@@ -95,9 +95,11 @@ const BARE_MAJOR_REACH: u64 = 10;
 /// counts, prereleases included.
 ///
 /// A bare number counts as a release only beside dotted tags with its own prefix, ignoring case,
-/// and close to their newest major: systemd tags `v263` after `v262.1`. Otherwise it is a build
-/// number or a date, like `r1234` or `20240101`, and any dotted tag beats it. Then numbers
-/// decide, a stable tag beats a prerelease, and the greater text breaks any remaining tie.
+/// and only in the run of majors that carries on from their newest one, each within
+/// [`BARE_MAJOR_REACH`] of the last: systemd tags `v263` after `v262.1`, and gwsw/less went from
+/// `v581.2` to `v712`. Otherwise it is a build number or a date, like `r1234` or `20240101`, and
+/// any dotted tag beats it. Then numbers decide, a stable tag beats a prerelease, and the greater
+/// text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
     let candidates: Vec<(SortKey<'_>, &String)> = tags
@@ -113,18 +115,42 @@ pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option
         .collect();
 
     let major = |key: &SortKey<'_>| key.numbers.first().copied().unwrap_or(0);
-    let mut newest_major: HashMap<String, u64> = HashMap::new();
-    for (key, _) in candidates.iter().filter(|(key, _)| key.dotted) {
-        let newest = newest_major
-            .entry(key.prefix.to_ascii_lowercase())
-            .or_insert(0);
-        *newest = (*newest).max(major(key));
+
+    // Per prefix: the newest dotted major, then the bare majors above it.
+    let mut newest_dotted: HashMap<String, u64> = HashMap::new();
+    let mut bare_majors: HashMap<String, Vec<u64>> = HashMap::new();
+    for (key, _) in &candidates {
+        let prefix = key.prefix.to_ascii_lowercase();
+        if key.dotted {
+            let newest = newest_dotted.entry(prefix).or_insert(0);
+            *newest = (*newest).max(major(key));
+        } else {
+            bare_majors.entry(prefix).or_default().push(major(key));
+        }
     }
+
+    // How far the run of releases reaches: from the newest dotted major, through each bare major
+    // no more than `BARE_MAJOR_REACH` past the last.
+    let reach: HashMap<String, u64> = newest_dotted
+        .into_iter()
+        .map(|(prefix, newest)| {
+            let mut majors = bare_majors.remove(&prefix).unwrap_or_default();
+            majors.sort_unstable();
+            let reach = majors
+                .into_iter()
+                .filter(|&m| m > newest)
+                .try_fold(newest, |last, m| {
+                    (m - last <= BARE_MAJOR_REACH).then_some(m).ok_or(last)
+                })
+                .unwrap_or_else(|last| last);
+            (prefix, reach)
+        })
+        .collect();
     let is_release = |key: &SortKey<'_>| {
         key.dotted
-            || newest_major
+            || reach
                 .get(&key.prefix.to_ascii_lowercase())
-                .is_some_and(|&newest| major(key) <= newest + BARE_MAJOR_REACH)
+                .is_some_and(|&reach| major(key) <= reach)
     };
 
     candidates
@@ -222,6 +248,23 @@ pub(crate) mod tests {
     fn prefixes_compare_without_case() {
         let tags = ["V1.0", "v2"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn a_run_of_bare_majors_after_a_dotted_one_counts() {
+        // gwsw/less tagged one dotted release, `v581.2`, then kept tagging bare majors.
+        let mut tags: Vec<String> = (1..=712).map(|n| format!("v{n}")).collect();
+        tags.push("v581.2".to_owned());
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v712"));
+    }
+
+    #[test]
+    fn a_huge_major_does_not_overflow_the_reach() {
+        let tags = ["v18446744073709551615.1", "v3"].map(String::from);
+        assert_eq!(
+            latest_tag(&tags, None).as_deref(),
+            Some("v18446744073709551615.1")
+        );
     }
 
     #[test]
