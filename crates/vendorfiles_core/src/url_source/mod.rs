@@ -118,6 +118,7 @@ async fn look_up(
             && let Some(version) = regex
                 .as_ref()
                 .and_then(|re| page::extract_version(response.url().as_str(), Some(re)))
+                .filter(|version| is_plausible_version(version))
         {
             return Ok(Some(version));
         }
@@ -138,19 +139,22 @@ async fn look_up(
         .ok_or_else(miss)
 }
 
-/// Whether `version` can be one: letters, digits and `.`, `_`, `+`, `-`, starting with a letter
-/// or digit, holding a digit, and short.
+/// Whether `version` can be one: letters, digits and `.`, `_`, `+`, `-`, `@`, starting with a
+/// letter or digit, short, and holding a digit unless it is a commit hash.
 ///
 /// A version lands in file names through `{tag}`, and a remote host chooses it. So a path like
-/// `../x`, a JSON body or a stray word like `Forbidden` is refused rather than used.
+/// `../x`, a JSON body or a stray word like `Forbidden` is refused rather than used. `@` is in for
+/// monorepo tags like `astro@5.0.0`.
 fn is_plausible_version(version: &str) -> bool {
+    let commit =
+        (7..=40).contains(&version.len()) && version.chars().all(|c| c.is_ascii_hexdigit());
     version.len() <= MAX_VERSION_LEN
         && version.starts_with(|c: char| c.is_ascii_alphanumeric())
-        && version.contains(|c: char| c.is_ascii_digit())
+        && (commit || version.contains(|c: char| c.is_ascii_digit()))
         && !version.contains("..")
         && version
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-' | '@'))
 }
 
 /// The tag names of the git repository at `repository`, or `None` when no git host answers.
@@ -457,6 +461,44 @@ mod tests {
                 .as_deref(),
             Some("v1.2.3+build.4")
         );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_that_cannot_be_a_version_is_refused() {
+        let base = serve(vec![
+            route("/latest", 302, "Location: /dl/x?v=../../v1\r\n", b""),
+            route("/dl/x?v=../../v1", 200, "", b"<html>\n</html>"),
+        ]);
+        let source = UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/latest")),
+            version_regex: Some(r"[?&]v=([^&]+)".into()),
+            version_selector: None,
+        };
+        let error = latest_version(&client().unwrap(), &source)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, VendorError::NoVersionAt { .. }), "{error}");
+    }
+
+    #[test]
+    fn versions_people_use_are_plausible() {
+        for version in [
+            "v1.2.3",
+            "1.2.3-rc.1",
+            "2024.01.15",
+            "release-1.0",
+            "curl-8_10_0",
+            "v1.2.3+build.4",
+            "astro@5.0.0",
+            "f6ec482ea395cead4fd849c05df6edd8da284a52",
+            "abcdefa",
+        ] {
+            assert!(super::is_plausible_version(version), "{version}");
+        }
+        for version in ["../v1", "Forbidden", "", "a/1", r#"{"v":1}"#, "deface"] {
+            assert!(!super::is_plausible_version(version), "{version}");
+        }
     }
 
     #[tokio::test]
