@@ -5,8 +5,9 @@ use std::path::Path;
 use crate::error::{Result, VendorError};
 use crate::fsx::anchor;
 use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
-use crate::model::Dependency;
+use crate::model::{Dependency, Source};
 use crate::ops::Session;
+use crate::url_source::latest_version;
 
 /// Whether a failed release lookup means the repository simply has no release.
 ///
@@ -37,10 +38,21 @@ impl Session {
         dependency: &Dependency,
         show_outdated_only: bool,
     ) -> Result<String> {
+        let repo = match &dependency.source {
+            Source::GitHub(repo) => repo,
+            // Without a `versionUrl` the dependency is unversioned: the configured version
+            // stands, and an empty one means "install once".
+            Source::Url(source) => {
+                let latest = latest_version(self.github.http(), source).await?;
+                return Ok(latest
+                    .or_else(|| dependency.version.clone())
+                    .unwrap_or_default());
+            }
+        };
         if let Some(path) = dependency.hash_version_target()? {
             return self
                 .github
-                .file_commit_sha(&dependency.repo, &path)
+                .file_commit_sha(repo, &path)
                 .await
                 .map_err(|source| VendorError::CommitShaLookup {
                     path,
@@ -50,7 +62,7 @@ impl Session {
 
         match self
             .github
-            .latest_release(&dependency.repo, dependency.release_regex.as_deref())
+            .latest_release(repo, dependency.release_regex.as_deref())
             .await
         {
             Ok(release) => Ok(release.tag_name.clone()),

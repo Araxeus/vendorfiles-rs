@@ -14,7 +14,7 @@ use crate::error::{Result, VendorError};
 use crate::template::{
     basename, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url, uses_version,
 };
-use crate::url_source::is_git_url;
+use crate::url_source::{UrlSource, is_git_url};
 
 /// `owner`/`name` pair extracted from a GitHub repository URL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -477,29 +477,46 @@ impl RawDependency {
     /// Turns a config entry into an installable [`Dependency`].
     ///
     /// `fallback_name` is the config key; the reference prefers it over the repository name
-    /// and only consults `name` when the entry did not come from the dependency map.
+    /// and only consults `name` when the entry did not come from the dependency map. A `url`
+    /// dependency with neither is named after the url's host.
     ///
     /// # Errors
     ///
     /// Returns [`VendorError::InvalidGitHubUrl`] when `repository` is missing or unparseable.
     pub fn resolve(&self, fallback_name: &str) -> Result<Dependency> {
-        let repository = self
-            .repository
-            .clone()
-            .ok_or_else(|| VendorError::InvalidGitHubUrl("undefined".to_owned()))?;
-        let repo = owner_and_name_from_repo_url(&repository)?;
+        let (source, repository, own_name) = if let Some(url) = &self.url {
+            let host = reqwest::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| url.clone());
+            let source = UrlSource {
+                url: url.clone(),
+                version_url: self.version_url.clone(),
+                version_regex: self.version_regex.clone(),
+                version_selector: self.version_selector.clone(),
+            };
+            (Source::Url(source), url.clone(), host)
+        } else {
+            let repository = self
+                .repository
+                .clone()
+                .ok_or_else(|| VendorError::InvalidGitHubUrl("undefined".to_owned()))?;
+            let repo = owner_and_name_from_repo_url(&repository)?;
+            let own_name = repo.name.clone();
+            (Source::GitHub(repo), repository, own_name)
+        };
         let name = if fallback_name.is_empty() {
             self.name
                 .clone()
                 .filter(|n| !n.is_empty())
-                .unwrap_or_else(|| repo.name.clone())
+                .unwrap_or(own_name)
         } else {
             fallback_name.to_owned()
         };
 
         Ok(Dependency {
             name,
-            repo,
+            source,
             repository,
             files: self.files.clone().unwrap_or_default(),
             version: self.version.clone().filter(|v| !v.is_empty()),
@@ -511,11 +528,21 @@ impl RawDependency {
     }
 }
 
+/// Where a dependency's files come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source {
+    /// Repository files and release assets.
+    GitHub(Repository),
+    /// Plain URLs.
+    Url(UrlSource),
+}
+
 /// A dependency with everything the install pipeline needs, owned outright.
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub name: String,
-    pub repo: Repository,
+    pub source: Source,
+    /// The GitHub repository URL, or the `url` value. Used for links and the lockfile.
     pub repository: String,
     pub files: Vec<FileEntry>,
     pub version: Option<String>,
@@ -526,6 +553,12 @@ pub struct Dependency {
 }
 
 impl Dependency {
+    /// Whether this dependency downloads from a `url` rather than GitHub.
+    #[must_use]
+    pub const fn is_url(&self) -> bool {
+        matches!(self.source, Source::Url(_))
+    }
+
     /// The `hashVersionFile` path to track, resolving `true` to the first declared file.
     ///
     /// `None` means "track releases instead".
