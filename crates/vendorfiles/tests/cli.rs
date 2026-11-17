@@ -765,10 +765,65 @@ fn a_missing_config_is_reported_by_config_too() {
     assert_eq!(code(&out), 1);
 }
 
+fn url_project(locked: bool) -> tempfile::TempDir {
+    project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://x.io/t", "version": "1", "locked": locked, "files": [{ "{url}": "t" }],
+        } } })
+        .to_string(),
+    )
+}
+
+#[test]
+fn list_shows_the_url_of_a_url_dependency() {
+    let dir = url_project(false);
+    let out = stdout(&vendor(dir.path(), &["list"]));
+    let row = out
+        .lines()
+        .find(|line| line.starts_with("tool"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(row.contains("https://x.io/t"), "{out}");
+}
+
+#[test]
+fn update_does_not_ask_a_url_dependency_for_a_repository() {
+    let dir = url_project(true);
+    let err = stderr(&vendor(dir.path(), &["update", "tool"]));
+    assert!(
+        err.contains("Dependency tool is locked and cannot be upgraded"),
+        "{err}"
+    );
+}
+
+#[test]
+fn update_validates_a_url_dependency_before_downloading() {
+    let dir = project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://x.io/t", "files": ["{url}"],
+        } } })
+        .to_string(),
+    );
+    let err = stderr(&vendor(dir.path(), &["update", "tool"]));
+    assert!(err.contains("needs an output name"), "{err}");
+}
+
+#[test]
+fn add_refuses_a_name_held_by_a_url_dependency() {
+    let dir = url_project(false);
+    let out = vendor(dir.path(), &["add", "owner/tool", "-f", "LICENSE"]);
+    assert!(
+        stderr(&out).contains("'tool' already vendors https://x.io/t"),
+        "{}",
+        stderr(&out)
+    );
+    let config = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+    assert!(!config.contains("repository"), "{config}");
+}
+
 #[test]
 fn list_prints_a_column_per_field_in_config_order() {
     let dir = project(LISTABLE);
-    let expected = "\u{1b}[36mNAME           VERSION  REPOSITORY\u{1b}[0m
+    let expected = "\u{1b}[36mNAME           VERSION  SOURCE\u{1b}[0m
 React          v18.2.0  https://github.com/facebook/react
 youtube-music  v3.3.1   https://github.com/th-ch/youtube-music
 bare           -        -

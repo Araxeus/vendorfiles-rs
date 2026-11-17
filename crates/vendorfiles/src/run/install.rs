@@ -263,12 +263,13 @@ async fn install(
         },
     };
 
-    // `add` never repoints an entry, so a name holding another repository is a clash.
+    // `add` never repoints an entry, so a name holding another repository, or a `url`, is a
+    // clash.
     if let Some(held) = session
         .workspace
         .dependencies
         .get(&name)
-        .and_then(|entry| entry.repository.as_deref())
+        .and_then(|entry| entry.repository.as_deref().or(entry.url.as_deref()))
         && !same_repository(held, &repository)
     {
         bail!(VendorError::NameTaken {
