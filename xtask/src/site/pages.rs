@@ -74,6 +74,11 @@ pub const PAGES: &[PageSpec] = &[
         Start::Heading("Versions and releases"),
     ),
     page(
+        "configuration/other-sites",
+        Some("Other sites"),
+        Start::Heading("Downloading from other sites"),
+    ),
+    page(
         "configuration/locking",
         Some("Locking"),
         Start::Heading("Locking a dependency"),
@@ -132,6 +137,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/config-files",
             "configuration/paths",
             "configuration/versions",
+            "configuration/other-sites",
             "configuration/locking",
             "configuration/defaults",
         ],
