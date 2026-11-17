@@ -102,6 +102,10 @@ impl Session {
         if locked.version != new_version {
             return true;
         }
+        // A changed `url` downloads from somewhere else, even at the same version.
+        if dependency.is_url() && locked.url.as_deref() != Some(dependency.repository.as_str()) {
+            return true;
+        }
         // Only `singleLockfile` records a location; there it is what tells a moved dependency
         // from an unchanged one.
         if self.workspace.config.single_lockfile.is_some() {

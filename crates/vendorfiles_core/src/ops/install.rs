@@ -825,10 +825,21 @@ pub(crate) fn archive_name(url: &str) -> String {
     }
     let unsafe_in_names =
         |c: char| matches!(c, '<' | '>' | ':' | '"' | '|' | '*' | '\\') || c.is_control();
-    segment
+    let mut name: String = segment
         .chars()
         .map(|c| if unsafe_in_names(c) { '_' } else { c })
-        .collect()
+        .collect();
+    // Windows reserves these names whatever the extension, and a write to one goes nowhere.
+    let stem_len = name.find('.').unwrap_or(name.len());
+    let stem = name[..stem_len].to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.ends_with(|c: char| ('1'..='9').contains(&c)));
+    if reserved {
+        name.insert(stem_len, '_');
+    }
+    name
 }
 
 /// Starts a streaming download of one of a dependency's release assets.
@@ -1400,6 +1411,17 @@ mod tests {
         );
         assert_eq!(super::archive_name("https://x.io/dl/v1:2.zip"), "v1_2.zip");
         assert_eq!(super::archive_name("https://x.io/"), "download");
+        // Windows device names save nowhere, so they get an underscore.
+        assert_eq!(super::archive_name("https://x.io/aux.zip"), "aux_.zip");
+        assert_eq!(super::archive_name("https://x.io/NUL"), "NUL_");
+        assert_eq!(
+            super::archive_name("https://x.io/com1.tar.gz"),
+            "com1_.tar.gz"
+        );
+        assert_eq!(
+            super::archive_name("https://x.io/console.zip"),
+            "console.zip"
+        );
         assert_eq!(super::archive_name("https://x.io"), "download");
     }
 
@@ -1493,6 +1515,30 @@ mod tests {
         assert!(!dir.path().join("vendor/tool/gone.js").exists());
         let lock = read_lockfile(&dir.path().join("vendor/tool/vendor-lock.json")).await;
         assert!(lock.map_or(true, |l| l.get("tool").is_none_or(|entry| entry.pending)));
+    }
+
+    #[tokio::test]
+    async fn a_changed_url_downloads_again() {
+        let (base, hits) = serve_counted(vec![
+            route("/v1/f.txt", 200, "", b"one"),
+            route("/v2/f.txt", 200, "", b"two"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let config = |path: &str| {
+            tool_config(&json!({
+                "url": format!("{base}/{path}"), "files": [{ "{url}": "f.txt" }],
+            }))
+        };
+        let mut first = session(dir.path(), &config("v1/f.txt")).await;
+        sync(&mut first, false, false).await.unwrap();
+        let mut second = session(dir.path(), &config("v2/f.txt")).await;
+        sync(&mut second, false, false).await.unwrap();
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/f.txt")).unwrap(),
+            b"two"
+        );
     }
 
     #[tokio::test]
