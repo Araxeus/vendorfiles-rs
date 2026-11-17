@@ -11,7 +11,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{Result, VendorError};
-use crate::template::{basename, is_github_url, owner_and_name_from_repo_url};
+use crate::template::{
+    basename, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url, uses_version,
+};
+use crate::url_source::is_git_url;
 
 /// `owner`/`name` pair extracted from a GitHub repository URL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -114,6 +117,17 @@ pub fn flatten_files(files: &[FileEntry]) -> Vec<FileSpec> {
     out
 }
 
+/// Whether an output name or archive member holds `{version}` or `{tag}`.
+fn target_uses_version(target: &FileTarget) -> bool {
+    match target {
+        FileTarget::Rename(output) => uses_version(output),
+        FileTarget::ExtractList(members) => members.iter().any(|m| uses_version(m)),
+        FileTarget::ExtractMap(members) => members
+            .iter()
+            .any(|(member, output)| uses_version(member) || uses_version(output)),
+    }
+}
+
 /// `hashVersionFile`: either `true` (use the first declared file) or an explicit path.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -166,6 +180,14 @@ where
 pub struct DefaultOptions {
     #[serde(default, deserialize_with = "de_lenient")]
     pub repository: Option<String>,
+    #[serde(default, deserialize_with = "de_lenient")]
+    pub url: Option<String>,
+    #[serde(rename = "versionUrl", default, deserialize_with = "de_lenient")]
+    pub version_url: Option<String>,
+    #[serde(rename = "versionRegex", default, deserialize_with = "de_lenient")]
+    pub version_regex: Option<String>,
+    #[serde(rename = "versionSelector", default, deserialize_with = "de_lenient")]
+    pub version_selector: Option<String>,
     #[serde(default, deserialize_with = "de_files")]
     pub files: Option<Vec<FileEntry>>,
     #[serde(default, deserialize_with = "de_lenient")]
@@ -203,6 +225,34 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub repository: Option<String>,
+    /// Where a dependency that is not on GitHub downloads from. Files reference it as `{url}`.
+    #[serde(
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub url: Option<String>,
+    #[serde(
+        rename = "versionUrl",
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_url: Option<String>,
+    #[serde(
+        rename = "versionRegex",
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_regex: Option<String>,
+    #[serde(
+        rename = "versionSelector",
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_selector: Option<String>,
     #[serde(
         default,
         deserialize_with = "de_files",
@@ -246,6 +296,9 @@ pub struct RawDependency {
 
 impl RawDependency {
     /// Fills unset fields from the config's `default` block, matching the reference's `??=`.
+    ///
+    /// Keys that belong to one kind of dependency fill only that kind, so a default
+    /// `repository` never turns a `url` dependency into an invalid mix of both.
     pub fn apply_defaults(&mut self, defaults: &DefaultOptions) {
         macro_rules! fill {
             ($($field:ident),+ $(,)?) => {$(
@@ -254,16 +307,16 @@ impl RawDependency {
                 }
             )+};
         }
-        fill!(
-            repository,
-            files,
-            version,
-            hash_version_file,
-            vendor_folder,
-            release_regex,
-            locked,
-            name,
-        );
+        if self.repository.is_none() {
+            fill!(url);
+        }
+        if self.url.is_none() {
+            fill!(repository, hash_version_file, release_regex);
+        }
+        if self.repository.is_none() {
+            fill!(version_url, version_regex, version_selector);
+        }
+        fill!(files, version, vendor_folder, locked, name);
     }
 
     /// Clears every field whose value the `default` block already supplies.
@@ -280,6 +333,10 @@ impl RawDependency {
         }
         clear_if_default!(
             repository,
+            url,
+            version_url,
+            version_regex,
+            version_selector,
             files,
             version,
             hash_version_file,
@@ -296,6 +353,14 @@ impl RawDependency {
     ///
     /// Returns the `Invalid*Key` variant naming the offending config key.
     pub fn validate(&self, name: &str) -> Result<()> {
+        if let Some(url) = &self.url {
+            if self.repository.is_some() {
+                return Err(VendorError::RepositoryAndUrl {
+                    name: name.to_owned(),
+                });
+            }
+            return self.validate_url(name, url);
+        }
         if !self.repository.as_deref().is_some_and(is_github_url) {
             return Err(VendorError::InvalidRepositoryKey {
                 name: name.to_owned(),
@@ -316,7 +381,97 @@ impl RawDependency {
                 name: name.to_owned(),
             });
         }
+        let url_only = [
+            ("versionUrl", &self.version_url),
+            ("versionRegex", &self.version_regex),
+            ("versionSelector", &self.version_selector),
+        ];
+        if let Some((key, _)) = url_only.iter().find(|(_, value)| value.is_some()) {
+            return Err(VendorError::KeyNeedsOtherMode {
+                name: name.to_owned(),
+                key,
+                needs: "url",
+            });
+        }
         Ok(())
+    }
+
+    /// The checks for a `url` dependency, whose files are URLs rather than repository paths.
+    fn validate_url(&self, name: &str, url: &str) -> Result<()> {
+        let name = || name.to_owned();
+        if !is_http_url(url) {
+            return Err(VendorError::InvalidUrlKey { name: name() });
+        }
+        let Some(files) = self.files.as_ref().filter(|f| !f.is_empty()) else {
+            return Err(VendorError::InvalidFilesKey { name: name() });
+        };
+        let hashes = match &self.hash_version_file {
+            None | Some(HashVersionFile::Flag(false)) => false,
+            Some(HashVersionFile::Path(path)) => !path.is_empty(),
+            Some(HashVersionFile::Flag(true)) => true,
+        };
+        let release_regex = self.release_regex.as_deref().is_some_and(|r| !r.is_empty());
+        for (key, set) in [("hashVersionFile", hashes), ("releaseRegex", release_regex)] {
+            if set {
+                return Err(VendorError::KeyNeedsOtherMode {
+                    name: name(),
+                    key,
+                    needs: "repository",
+                });
+            }
+        }
+        if self.version_url.as_deref().is_some_and(|v| !is_http_url(v)) {
+            return Err(VendorError::InvalidVersionUrlKey { name: name() });
+        }
+        if let Some(regex) = self.version_regex.as_deref()
+            && fancy_regex::Regex::new(regex).is_err()
+        {
+            return Err(VendorError::InvalidVersionRegexKey { name: name() });
+        }
+        if let Some(selector) = self.version_selector.as_deref() {
+            if scraper::Selector::parse(selector).is_err() {
+                return Err(VendorError::InvalidVersionSelectorKey { name: name() });
+            }
+            if self.version_url.as_deref().is_none_or(is_git_url) {
+                return Err(VendorError::SelectorNeedsPage { name: name() });
+            }
+        }
+
+        // The lockfile names every file before anything is downloaded, so each input needs an
+        // explicit output name. A URL's last segment is often a version or a bare `download`.
+        let mut mentions_version = uses_version(url);
+        for entry in files {
+            let map = match entry {
+                FileEntry::Simple(input) => {
+                    return Err(VendorError::UrlFileNeedsName {
+                        name: name(),
+                        input: input.clone(),
+                    });
+                }
+                FileEntry::Mapped(map) => map,
+            };
+            for (input, target) in map {
+                if !is_http_url(&expand_url(input, url)) {
+                    return Err(VendorError::UrlFileNotUrl {
+                        name: name(),
+                        input: input.clone(),
+                    });
+                }
+                mentions_version |= uses_version(input) || target_uses_version(target);
+            }
+        }
+        let versioned =
+            self.version.as_deref().is_some_and(|v| !v.is_empty()) || self.version_url.is_some();
+        if mentions_version && !versioned {
+            return Err(VendorError::UrlNeedsVersion { name: name() });
+        }
+        Ok(())
+    }
+
+    /// Whether this is a `url` dependency rather than a GitHub one.
+    #[must_use]
+    pub const fn is_url(&self) -> bool {
+        self.url.is_some()
     }
 
     /// Turns a config entry into an installable [`Dependency`].
@@ -469,6 +624,112 @@ mod tests {
             d.validate("Foo").unwrap_err().to_string(),
             "config key 'vendorDependencies.Foo.releaseRegex' must be a valid regex string"
         );
+    }
+
+    fn err(json: &str) -> String {
+        dep(json).validate("Foo").unwrap_err().to_string()
+    }
+
+    #[test]
+    fn url_mode_validates_its_own_keys() {
+        assert_eq!(
+            err(
+                r#"{"repository":"https://github.com/a/b","url":"https://x.io","files":[{"{url}":"a"}]}"#
+            ),
+            "vendorDependencies.Foo sets both 'repository' and 'url'; keep one"
+        );
+        assert_eq!(
+            err(r#"{"url":"x.io","files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.url' is not a valid http(s) url"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","versionUrl":"x","files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.versionUrl' is not a valid http(s) url"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","versionRegex":"(","files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.versionRegex' must be a valid regex string"
+        );
+        assert_eq!(
+            err(
+                r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionSelector":"h2[","files":[{"{url}":"a"}]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionSelector' must be a valid CSS selector"
+        );
+        assert_eq!(
+            err(
+                r#"{"url":"https://x.io","versionUrl":"https://x.io/r.git","versionSelector":"h2","files":[{"{url}":"a"}]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionSelector' needs a 'versionUrl' that isn't a .git URL"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","versionSelector":"h2","files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.versionSelector' needs a 'versionUrl' that isn't a .git URL"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","hashVersionFile":true,"files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.hashVersionFile' only applies to a 'repository' dependency"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","files":["{url}/a.js"]}"#),
+            r#"'{url}/a.js' in vendorDependencies.Foo.files needs an output name, like { "{url}/a.js": "file" }"#
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","files":[{"{release}/a.zip":"a"}]}"#),
+            "'{release}/a.zip' in vendorDependencies.Foo.files is not a URL"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io/v{version}","files":[{"{url}":"a"}]}"#),
+            "vendorDependencies.Foo uses {version} or {tag} but sets neither 'version' nor 'versionUrl'"
+        );
+    }
+
+    #[test]
+    fn github_mode_refuses_url_only_keys() {
+        assert_eq!(
+            err(
+                r#"{"repository":"https://github.com/a/b","versionUrl":"https://x.io","files":["a"]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionUrl' only applies to a 'url' dependency"
+        );
+        assert_eq!(
+            err(r#"{"repository":"https://github.com/a/b","versionSelector":"h2","files":["a"]}"#),
+            "config key 'vendorDependencies.Foo.versionSelector' only applies to a 'url' dependency"
+        );
+    }
+
+    #[test]
+    fn valid_url_dependencies_pass() {
+        for ok in [
+            r#"{"url":"https://x.io/v{version}","versionUrl":"https://x.io/latest","files":[{"{url}":"tool.exe"}]}"#,
+            r#"{"url":"https://x.io/v{tag}","version":"v1.0.0","files":[{"{url}/a.zip":["a"]}]}"#,
+            r#"{"url":"https://x.io","files":[{"https://cdn.x.io/b.js":"b.js","{url}/c.zip":{"c":"d"}}]}"#,
+            r##"{"url":"https://x.io/v{tag}","versionUrl":"https://x.io/changes","versionSelector":"#latest","files":[{"{url}":"t"}]}"##,
+        ] {
+            dep(ok).validate("Foo").unwrap();
+        }
+    }
+
+    #[test]
+    fn defaults_fill_only_the_matching_mode() {
+        let defaults: super::DefaultOptions = serde_json::from_str(
+            r#"{"repository":"https://github.com/a/b","releaseRegex":"^v","hashVersionFile":true,"versionUrl":"https://x.io/v"}"#,
+        )
+        .unwrap();
+        let mut url_dep = dep(r#"{"url":"https://x.io","files":[{"{url}":"a"}]}"#);
+        url_dep.apply_defaults(&defaults);
+        assert!(
+            url_dep.repository.is_none()
+                && url_dep.release_regex.is_none()
+                && url_dep.hash_version_file.is_none()
+        );
+        assert_eq!(url_dep.version_url.as_deref(), Some("https://x.io/v"));
+        url_dep.validate("Foo").unwrap();
+
+        let mut gh_dep = dep(r#"{"files":["a"]}"#);
+        gh_dep.apply_defaults(&defaults);
+        assert!(gh_dep.version_url.is_none());
+        assert_eq!(gh_dep.repository.as_deref(), Some("https://github.com/a/b"));
     }
 
     #[test]

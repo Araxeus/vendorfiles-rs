@@ -366,6 +366,10 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
     RawDependency {
         version: Some(version.to_owned()),
         repository: Some(dependency.repository.clone()),
+        url: None,
+        version_url: None,
+        version_regex: None,
+        version_selector: None,
         files: Some(dependency.files.clone()),
         hash_version_file: dependency.hash_version_file.clone(),
         vendor_folder: dependency.vendor_folder.clone(),

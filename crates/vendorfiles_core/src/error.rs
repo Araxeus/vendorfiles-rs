@@ -32,6 +32,47 @@ pub enum VendorError {
     #[error("config key 'vendorDependencies.{name}.releaseRegex' must be a valid regex string")]
     InvalidReleaseRegexKey { name: String },
 
+    #[error("vendorDependencies.{name} sets both 'repository' and 'url'; keep one")]
+    RepositoryAndUrl { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.url' is not a valid http(s) url")]
+    InvalidUrlKey { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.versionUrl' is not a valid http(s) url")]
+    InvalidVersionUrlKey { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.versionRegex' must be a valid regex string")]
+    InvalidVersionRegexKey { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.versionSelector' must be a valid CSS selector")]
+    InvalidVersionSelectorKey { name: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.versionSelector' needs a 'versionUrl' that isn't a .git URL"
+    )]
+    SelectorNeedsPage { name: String },
+
+    /// A key that belongs to the other kind of dependency: `repository` or `url`.
+    #[error("config key 'vendorDependencies.{name}.{key}' only applies to a '{needs}' dependency")]
+    KeyNeedsOtherMode {
+        name: String,
+        key: &'static str,
+        needs: &'static str,
+    },
+
+    #[error(
+        "'{input}' in vendorDependencies.{name}.files needs an output name, like {{ \"{input}\": \"file\" }}"
+    )]
+    UrlFileNeedsName { name: String, input: String },
+
+    #[error("'{input}' in vendorDependencies.{name}.files is not a URL")]
+    UrlFileNotUrl { name: String, input: String },
+
+    #[error(
+        "vendorDependencies.{name} uses {{version}} or {{tag}} but sets neither 'version' nor 'versionUrl'"
+    )]
+    UrlNeedsVersion { name: String },
+
     #[error("Dependency {name} not found in {path}")]
     DependencyNotFound { name: String, path: String },
 
