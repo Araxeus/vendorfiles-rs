@@ -54,6 +54,17 @@ pub fn serve_counted(routes: Vec<Route>) -> (String, Arc<AtomicUsize>) {
     (format!("http://127.0.0.1:{port}"), hits)
 }
 
+/// Accepts connections and never answers, and returns the base URL.
+pub fn serve_silence() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let port = listener.local_addr().expect("a bound address").port();
+    std::thread::spawn(move || {
+        // Held, not dropped: a closed socket would answer with an error.
+        let _held: Vec<TcpStream> = listener.incoming().flatten().collect();
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
 /// Reads the request head and returns its target, like `/a/b?c=d`.
 fn request_target(socket: &mut TcpStream) -> String {
     let mut head = Vec::new();

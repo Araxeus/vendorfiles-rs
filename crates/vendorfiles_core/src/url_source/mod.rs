@@ -188,10 +188,10 @@ async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<St
 
 #[cfg(test)]
 mod tests {
-    use super::{UrlSource, fetch, latest_version, tags};
+    use super::{LOOKUP_TIMEOUT, UrlSource, fetch, latest_version, tags};
     use crate::error::VendorError;
     use crate::github::http::client;
-    use crate::test_server::{route, serve};
+    use crate::test_server::{route, serve, serve_silence};
 
     #[tokio::test]
     async fn a_git_url_resolves_to_its_latest_tag() {
@@ -359,6 +359,26 @@ mod tests {
             matches!(error, VendorError::RequestFailed { status: 503, .. }),
             "{error}"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_version_url_times_out() {
+        // The clock is paused, so the wait costs nothing: tokio jumps to the next timer.
+        let http = client().unwrap();
+        for version_url in [
+            format!("{}/v", serve_silence()),
+            format!("{}/r.git", serve_silence()),
+        ] {
+            let source = UrlSource {
+                url: "https://x.io".into(),
+                version_url: Some(version_url),
+                version_regex: None,
+                version_selector: None,
+            };
+            let outcome =
+                tokio::time::timeout(LOOKUP_TIMEOUT * 2, latest_version(&http, &source)).await;
+            assert!(matches!(outcome, Ok(Err(_))), "{outcome:?}");
+        }
     }
 
     #[tokio::test]
