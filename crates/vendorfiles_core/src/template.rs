@@ -1,10 +1,10 @@
 //! String templating and URL helpers.
 //!
-//! `{version}` substitution replaces every occurrence. `{vendorFolder}` and `{release}/` replace
-//! the **first** occurrence only, because the reference implementation uses JavaScript's
-//! `String.prototype.replace` with a string pattern.
+//! `{version}`, `{tag}` and `{url}` substitution replaces every occurrence. `{vendorFolder}` and
+//! `{release}/` replace the **first** occurrence only, because the reference implementation uses
+//! JavaScript's `String.prototype.replace` with a string pattern.
 
-// `{version}`, `{release}/` and `{vendorFolder}` are config placeholders, not format arguments.
+// `{version}`, `{tag}`, `{url}`, `{release}/` and `{vendorFolder}` are config placeholders, not format arguments.
 // `expect` rather than `allow`: if the last placeholder literal ever leaves this module, the
 // exemption should go with it.
 #![expect(clippy::literal_string_with_formatting_args)]
@@ -89,10 +89,30 @@ pub fn version_token(version: &str) -> &str {
         .map_or_else(|| trim_start_matches_str(version, "v"), |m| m.as_str())
 }
 
-/// Replaces every `{version}` placeholder in `path`.
+/// Replaces every `{version}` placeholder in `path` with the version's `x.y.z`, and every `{tag}`
+/// with the version unchanged.
 #[must_use]
 pub fn replace_version(path: &str, version: &str) -> String {
     path.replace("{version}", version_token(version))
+        .replace("{tag}", version)
+}
+
+/// Replaces every `{url}` placeholder in `input`.
+#[must_use]
+pub fn expand_url(input: &str, url: &str) -> String {
+    input.replace("{url}", url)
+}
+
+/// Whether `s` is an `http://` or `https://` URL.
+#[must_use]
+pub fn is_http_url(s: &str) -> bool {
+    s.starts_with("https://") || s.starts_with("http://")
+}
+
+/// Whether `s` holds a `{version}` or `{tag}` placeholder.
+#[must_use]
+pub fn uses_version(s: &str) -> bool {
+    s.contains("{version}") || s.contains("{tag}")
 }
 
 /// Replaces the first `{vendorFolder}` placeholder in `path`.
@@ -125,10 +145,39 @@ pub fn basename(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        basename, is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
-        replace_version, strip_release_prefix, trim_end_matches_str, trim_start_matches_str,
-        version_token,
+        basename, expand_url, is_github_url, is_http_url, is_owner_repo_shorthand,
+        owner_and_name_from_repo_url, replace_version, strip_release_prefix, trim_end_matches_str,
+        trim_start_matches_str, uses_version, version_token,
     };
+
+    #[test]
+    fn tag_is_the_version_unchanged() {
+        assert_eq!(
+            replace_version("raw/tag/{tag}/a.js", "v1.2.3-beta"),
+            "raw/tag/v1.2.3-beta/a.js"
+        );
+        assert_eq!(
+            replace_version("{version}-{tag}", "v1.2.3.4"),
+            "1.2.3-v1.2.3.4"
+        );
+    }
+
+    #[test]
+    fn url_expands_everywhere() {
+        assert_eq!(
+            expand_url("{url}/a/{url}", "https://x.io"),
+            "https://x.io/a/https://x.io"
+        );
+    }
+
+    #[test]
+    fn http_urls_and_version_placeholders_are_recognised() {
+        assert!(is_http_url("https://x.io/a"));
+        assert!(is_http_url("http://127.0.0.1:9/a"));
+        assert!(!is_http_url("{release}/a.zip"));
+        assert!(!is_http_url("ftp://x.io"));
+        assert!(uses_version("v{version}.zip") && uses_version("{tag}") && !uses_version("{url}"));
+    }
 
     #[test]
     fn github_url_matching_mirrors_the_reference_regex() {
