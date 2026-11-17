@@ -103,7 +103,8 @@ where its latest version comes from. Its assets are URLs, usually `{url}` or `{u
 
 Find the version source first. A `/download/latest` link that redirects to a versioned file, a
 page with the version in one element (`versionSelector`), or a `.git` repository of tags all work.
-Confirm it with `curl -sIL <versionUrl>`. CI checks it like any entry: it resolves the version
+Confirm it with `curl -sIL <versionUrl>`. A `url` program needs `version: 3` at the top of
+`registry.yml`, and the parser refuses it otherwise. CI checks it like any entry: it resolves the version
 through `versionUrl`, then requests every host's asset.
 
 ### Descriptions

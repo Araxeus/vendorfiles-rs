@@ -162,6 +162,8 @@ where its latest version comes from. Its assets are URLs, usually `{url}` or `{u
 - `versionRegex` and `versionSelector` pick the version out of a page. The README section
   "Downloading from other sites" explains both.
 - A `url` program takes no `path`, `releaseRegex`, `hashVersionFile` or `{release}/` assets.
+- The first `url` program raises `version` at the top of `registry.yml` to `3`. Older builds then
+  say to update instead of failing on a key they don't know.
 
 CI checks it the same way as a GitHub program: it looks the version up through `versionUrl`, then
 requests every host's asset.

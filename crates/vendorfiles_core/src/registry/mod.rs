@@ -54,6 +54,19 @@ impl Registry {
 
         let document: Document = serde_yaml_ng::from_str(text)
             .map_err(|source| VendorError::RegistryUnreadable(source.to_string()))?;
+
+        // Builds before version 3 refuse `url` as an unknown field. A file that keeps saying 2
+        // would break them without telling them to update, so it has to say 3.
+        if document.version < 3
+            && let Some(name) = document
+                .programs
+                .iter()
+                .find_map(|(name, program)| program.url.is_some().then_some(name))
+        {
+            return Err(VendorError::RegistryUnreadable(format!(
+                "'{name}' downloads from a url, which needs `version: 3`"
+            )));
+        }
         Ok(Self { document })
     }
 
@@ -673,7 +686,10 @@ programs:
             &expand_url(asset, program.url.as_deref().unwrap_or_default()),
             tag,
         );
-        (archive_name(&url), fetch(github.http(), &url).await)
+        // Named after where the URL lands, as the install path names it.
+        let response = fetch(github.http(), &url).await;
+        let landed = response.as_ref().map_or(url.as_str(), |r| r.url().as_str());
+        (archive_name(landed), response)
     }
 
     /// The host whose assets hold archive members, preferring the platform running the test.
@@ -855,6 +871,20 @@ programs:
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_url_program_needs_version_3() {
+        // Builds before version 3 refuse `url` as an unknown field, so a file still saying
+        // version 2 would break them without telling them to update.
+        let text = |version: u32| {
+            format!(
+                "version: {version}\nprograms:\n  tool:\n    url: https://x.io\n    targets: {{}}\n"
+            )
+        };
+        let error = Registry::parse(&text(2)).unwrap_err();
+        assert!(error.to_string().contains("version: 3"), "{error}");
+        assert!(Registry::parse(&text(3)).is_ok());
     }
 
     #[test]
