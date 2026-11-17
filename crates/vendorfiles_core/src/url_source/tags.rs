@@ -3,7 +3,7 @@
 //! Both answers this reads, the protocol v2 `ls-refs` listing and the older full advertisement,
 //! are pkt-lines: each is prefixed with its length as four hex digits.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -85,35 +85,53 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
     })
 }
 
+/// How far past the newest dotted major a bare number may sit and still count as a release.
+const BARE_MAJOR_REACH: u64 = 10;
+
 /// The latest of `tags`.
 ///
-/// Without a regex only stable tags count. With one, every tag it matches counts, prereleases
-/// included.
+/// Without a regex only stable tags count, and tags with `@` are left out: in a monorepo those
+/// are its packages' releases, like `plugin-legacy@6.1.0`. With a regex, every tag it matches
+/// counts, prereleases included.
 ///
-/// A bare number loses to dotted tags that start differently, so `v1.10.0` beats a build number
-/// like `r1234`. Beside dotted tags with its own prefix it is a release like them: systemd tags
-/// `v263` after `v262.1`. Then numbers decide, a stable tag beats a prerelease, and the greater
-/// text breaks any remaining tie.
+/// A bare number counts as a release only beside dotted tags with its own prefix, ignoring case,
+/// and close to their newest major: systemd tags `v263` after `v262.1`. Otherwise it is a build
+/// number or a date, like `r1234` or `20240101`, and any dotted tag beats it. Then numbers
+/// decide, a stable tag beats a prerelease, and the greater text breaks any remaining tie.
 #[must_use]
 pub fn latest_tag(tags: &[String], regex: Option<&fancy_regex::Regex>) -> Option<String> {
     let candidates: Vec<(SortKey<'_>, &String)> = tags
         .iter()
-        .filter(|tag| regex.is_none_or(|re| re.is_match(tag).unwrap_or(false)))
+        .filter(|tag| {
+            regex.map_or_else(
+                || !tag.contains('@'),
+                |re| re.is_match(tag).unwrap_or(false),
+            )
+        })
         .filter_map(|tag| sort_key(tag).map(|key| (key, tag)))
         .filter(|(key, _)| key.stable || regex.is_some())
         .collect();
-    let dotted_prefixes: HashSet<&str> = candidates
-        .iter()
-        .filter(|(key, _)| key.dotted)
-        .map(|(key, _)| key.prefix)
-        .collect();
+
+    let major = |key: &SortKey<'_>| key.numbers.first().copied().unwrap_or(0);
+    let mut newest_major: HashMap<String, u64> = HashMap::new();
+    for (key, _) in candidates.iter().filter(|(key, _)| key.dotted) {
+        let newest = newest_major
+            .entry(key.prefix.to_ascii_lowercase())
+            .or_insert(0);
+        *newest = (*newest).max(major(key));
+    }
+    let is_release = |key: &SortKey<'_>| {
+        key.dotted
+            || newest_major
+                .get(&key.prefix.to_ascii_lowercase())
+                .is_some_and(|&newest| major(key) <= newest + BARE_MAJOR_REACH)
+    };
+
     candidates
         .into_iter()
-        .max_by(|(a, a_tag), (b, b_tag)| {
-            let rank = |key: &SortKey<'_>| key.dotted || dotted_prefixes.contains(key.prefix);
-            (rank(a), &a.numbers, a.stable, a_tag).cmp(&(rank(b), &b.numbers, b.stable, b_tag))
-        })
-        .map(|(_, tag)| tag.clone())
+        .map(|(key, tag)| (is_release(&key), key.numbers, key.stable, tag))
+        .max()
+        .map(|(.., tag)| tag.clone())
 }
 
 #[cfg(test)]
@@ -179,6 +197,31 @@ pub(crate) mod tests {
     fn the_highest_stable_tag_wins_by_number_not_by_text() {
         let tags = ["v1.9.0", "v1.10.0", "v2.0.0-beta.1", "nightly", "v1.10"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
+    }
+
+    #[test]
+    fn a_date_beside_unprefixed_versions_is_still_a_build_number() {
+        let tags = ["1.9.0", "1.10.0", "20240101"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("1.10.0"));
+        let tags = ["v1.10.0", "v20240101"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.10.0"));
+    }
+
+    #[test]
+    fn package_tags_count_only_when_a_regex_asks_for_them() {
+        let tags = ["v6.0.11", "plugin-legacy@6.1.0"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v6.0.11"));
+        let re = fancy_regex::Regex::new("^plugin-legacy@").unwrap();
+        assert_eq!(
+            latest_tag(&tags, Some(&re)).as_deref(),
+            Some("plugin-legacy@6.1.0")
+        );
+    }
+
+    #[test]
+    fn prefixes_compare_without_case() {
+        let tags = ["V1.0", "v2"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v2"));
     }
 
     #[test]

@@ -910,8 +910,10 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
 <!-- /formats -->
 
 - Tags compare by number, so `v1.10.0` beats `v1.9.0`. `_` separates numbers too, as in
-  `curl-8_10_0`. A dotted version beats a bare build number like `r1234`, but not a bare major
-  like `v263` beside `v262.1`.
+  `curl-8_10_0`. A dotted version beats a bare build number or date like `r1234` or
+  `20240101`, but not a bare major like `v263` beside `v262.1`.
+- Tags with `@`, like a monorepo's `plugin-legacy@6.1.0`, count only when `versionRegex` matches
+  them.
 - A tag with a `-` after its numbers, like `v2.0.0-rc.1`, is a prerelease and is skipped. Date tags
   like `2024-01-15` are skipped too.
 - With `versionRegex`, only the tags it matches count, prereleases included.
