@@ -267,14 +267,11 @@ async fn install(
         },
     };
 
-    // `add` never repoints an entry, so a name holding another repository, or a `url`, is a
-    // clash.
-    if let Some(held) = session
-        .workspace
-        .dependencies
-        .get(&name)
-        .and_then(|entry| entry.repository.as_deref().or(entry.url.as_deref()))
-        && !same_repository(held, &repository)
+    // `add` never repoints an entry, so a name holding another repository, or any `url`, is a
+    // clash. A `url` on github.com can name this very repository and still be a url entry.
+    if let Some(entry) = session.workspace.dependencies.get(&name)
+        && let Some(held) = entry.repository.as_deref().or(entry.url.as_deref())
+        && (entry.is_url() || !same_repository(held, &repository))
     {
         bail!(VendorError::NameTaken {
             name,

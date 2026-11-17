@@ -775,6 +775,29 @@ fn url_project(locked: bool) -> tempfile::TempDir {
 }
 
 #[test]
+fn add_refuses_a_name_held_by_a_url_dependency_on_github() {
+    // The url names the same repository, but it is still a url entry: adding a repository to it
+    // would leave both keys set.
+    let dir = project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://github.com/owner/tool/releases/download/{tag}", "version": "v1",
+            "files": [{ "{url}/t": "t" }],
+        } } })
+        .to_string(),
+    );
+    let out = vendor(
+        dir.path(),
+        &["add", "owner/tool", "-f", "LICENSE", "--dry-run"],
+    );
+    assert!(
+        stderr(&out).contains("'tool' already vendors"),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+}
+
+#[test]
 fn list_shows_the_url_of_a_url_dependency() {
     let dir = url_project(false);
     let out = stdout(&vendor(dir.path(), &["list"]));
