@@ -57,7 +57,7 @@ async fn resolve_source(
     let repository = if let Some(known) = known.as_ref() {
         known.repository.to_owned()
     } else if let Some(listed) = listed.as_ref() {
-        listed.repository.clone()
+        listed.repository.clone().unwrap_or_default()
     } else if is_github_url(source) {
         source.to_owned()
     } else if is_owner_repo_shorthand(source) {

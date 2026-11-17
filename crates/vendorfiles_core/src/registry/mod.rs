@@ -281,6 +281,9 @@ mod tests {
 
     use super::Registry;
     use crate::model::FileEntry;
+    use crate::ops::install::archive_name;
+    use crate::template::{expand_url, is_http_url, replace_version, strip_release_prefix};
+    use crate::url_source::{UrlSource, fetch, latest_version};
 
     const REGISTRY: &str = r#"
 version: 1
@@ -430,10 +433,15 @@ programs:
         let mut checked = 0;
         for name in registry.names() {
             let (canonical, program) = registry.find(name).expect("just listed");
+            let on_github = program
+                .repository
+                .as_deref()
+                .is_some_and(|repository| repository.starts_with("https://github.com/"));
+            let on_the_web = program.url.as_deref().is_some_and(is_http_url);
             assert!(
-                program.repository.starts_with("https://github.com/"),
-                "{canonical}: repository must be a GitHub URL, found {}",
-                program.repository
+                on_github || on_the_web,
+                "{canonical}: needs a GitHub 'repository' or an http(s) 'url', found '{}'",
+                program.link()
             );
             assert!(
                 !program.targets.is_empty() || program.path.is_some(),
@@ -455,8 +463,9 @@ programs:
                     "{canonical} for {host}: names no asset to fetch"
                 );
                 for (asset, target) in named {
+                    // A `url` program's assets are URLs, which `for_host` already checked.
                     assert!(
-                        asset.starts_with("{release}/"),
+                        on_the_web || asset.starts_with("{release}/"),
                         "{canonical} for {host}: assets need the {{release}}/ prefix, found {asset}"
                     );
                     assert!(
@@ -465,8 +474,9 @@ programs:
                     );
                     // An entry that names a member is extracted, so the asset has to be a
                     // container `archive::sniff` recognises. This is what catches a `.tar.xz`
-                    // release, which looks reasonable and cannot be opened.
-                    if matches!(target, crate::model::FileTarget::ExtractMap(_)) {
+                    // release, which looks reasonable and cannot be opened. A URL often has no
+                    // extension at all, so a `url` program is left to the live members check.
+                    if !on_the_web && matches!(target, crate::model::FileTarget::ExtractMap(_)) {
                         const CONTAINERS: [&str; 9] = [
                             ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".crx",
                             ".xpi",
@@ -515,9 +525,7 @@ programs:
     #[ignore = "queries the GitHub API"]
     async fn the_shipped_registry_names_assets_that_exist() {
         use crate::model::FileTarget;
-        use crate::template::{
-            owner_and_name_from_repo_url, replace_version, strip_release_prefix,
-        };
+        use crate::template::owner_and_name_from_repo_url;
 
         let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
         let github =
@@ -530,7 +538,12 @@ programs:
             if program.path.is_some() {
                 continue; // A repository file, not a release.
             }
-            let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
+            if program.url.is_some() {
+                checked += url_assets_exist(&github, canonical, program, &mut problems).await;
+                continue;
+            }
+            let repository = program.repository.as_deref().expect("a GitHub program");
+            let repo = owner_and_name_from_repo_url(repository).expect("a GitHub URL");
             let release = match github
                 .latest_release(&repo, program.release_regex.as_deref())
                 .await
@@ -580,8 +593,88 @@ programs:
         println!("verified {checked} asset names against live releases");
     }
 
+    /// The version a `url` program resolves to, as an install would resolve it.
+    async fn url_version(
+        github: &crate::GitHubClient,
+        canonical: &str,
+        program: &super::schema::Program,
+        problems: &mut Vec<String>,
+    ) -> Option<String> {
+        let source = UrlSource {
+            url: program.url.clone().unwrap_or_default(),
+            version_url: program.version_url.clone(),
+            version_regex: program.version_regex.clone(),
+            version_selector: program.version_selector.clone(),
+        };
+        match latest_version(github.http(), &source).await {
+            Ok(version) => Some(version.unwrap_or_default()),
+            Err(error) => {
+                problems.push(format!("{canonical}: no usable version ({error})"));
+                None
+            }
+        }
+    }
+
+    /// Requests every asset of a `url` program on every host, and counts the ones that answer.
+    ///
+    /// Each answer is dropped unread: a 2xx is the whole question.
+    async fn url_assets_exist(
+        github: &crate::GitHubClient,
+        canonical: &str,
+        program: &super::schema::Program,
+        problems: &mut Vec<String>,
+    ) -> usize {
+        let Some(version) = url_version(github, canonical, program, problems).await else {
+            return 0;
+        };
+        let url = program.url.as_deref().unwrap_or_default();
+        let mut checked = 0;
+        for host in program.targets.keys() {
+            let entry = match super::resolve::for_host(canonical, program, host) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    problems.push(format!("{canonical} for {host}: {error}"));
+                    continue;
+                }
+            };
+            for (asset, _) in assets(&entry) {
+                let wanted = replace_version(&expand_url(asset, url), &version);
+                match fetch(github.http(), &wanted).await {
+                    Ok(_) => checked += 1,
+                    Err(error) => {
+                        problems.push(format!("{canonical} for {host}: {wanted}: {error}"));
+                    }
+                }
+            }
+        }
+        checked
+    }
+
     /// One archive an entry names, with the members it claims are inside it.
     type Archive = (String, indexmap::IndexMap<String, String>);
+
+    /// Starts downloading one archive at `tag`, as an install would: a release asset of `repo`,
+    /// or a URL for a `url` program. Returns the name to save it under, with the response.
+    async fn fetch_archive(
+        github: &crate::GitHubClient,
+        program: &super::schema::Program,
+        repo: Option<&crate::Repository>,
+        asset: &str,
+        tag: &str,
+    ) -> (String, crate::Result<reqwest::Response>) {
+        if let Some(repo) = repo {
+            let asset_name = strip_release_prefix(&replace_version(asset, tag));
+            let response = github
+                .download_release_asset(repo, &asset_name, tag, program.release_regex.as_deref())
+                .await;
+            return (asset_name, response);
+        }
+        let url = replace_version(
+            &expand_url(asset, program.url.as_deref().unwrap_or_default()),
+            tag,
+        );
+        (archive_name(&url), fetch(github.http(), &url).await)
+    }
 
     /// The host whose assets hold archive members, preferring the platform running the test.
     ///
@@ -634,9 +727,7 @@ programs:
     #[tokio::test]
     #[ignore = "downloads release assets"]
     async fn the_shipped_registry_names_members_that_exist() {
-        use crate::template::{
-            owner_and_name_from_repo_url, replace_version, strip_release_prefix,
-        };
+        use crate::template::owner_and_name_from_repo_url;
 
         let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
         let github =
@@ -658,31 +749,32 @@ programs:
                 continue; // Bare binaries on every platform: no archive to look inside.
             };
 
-            let repo = owner_and_name_from_repo_url(&program.repository).expect("a GitHub URL");
-            let release = match github
-                .latest_release(&repo, program.release_regex.as_deref())
-                .await
-            {
-                Ok(release) => release,
-                Err(error) => {
-                    problems.push(format!("{canonical}: no usable release ({error})"));
-                    continue;
-                }
-            };
-            let tag = release.tag_name.clone();
-
-            for (asset, wanted_members) in archives {
-                let asset_name = strip_release_prefix(&replace_version(&asset, &tag));
-
-                let response = match github
-                    .download_release_asset(
-                        &repo,
-                        &asset_name,
-                        &tag,
-                        program.release_regex.as_deref(),
-                    )
+            // A GitHub program's repository, or `None` for a `url` program.
+            let repo = program
+                .repository
+                .as_deref()
+                .map(|repository| owner_and_name_from_repo_url(repository).expect("a GitHub URL"));
+            let tag = match &repo {
+                Some(repo) => match github
+                    .latest_release(repo, program.release_regex.as_deref())
                     .await
                 {
+                    Ok(release) => release.tag_name.clone(),
+                    Err(error) => {
+                        problems.push(format!("{canonical}: no usable release ({error})"));
+                        continue;
+                    }
+                },
+                None => match url_version(&github, canonical, program, &mut problems).await {
+                    Some(version) => version,
+                    None => continue,
+                },
+            };
+
+            for (asset, wanted_members) in archives {
+                let (asset_name, response) =
+                    fetch_archive(&github, program, repo.as_ref(), &asset, &tag).await;
+                let response = match response {
                     Ok(response) => response,
                     Err(error) => {
                         problems.push(format!("{canonical} for {host}: {asset_name}: {error}"));
