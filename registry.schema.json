@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/registry.schema.json",
   "title": "vendorfiles program registry",
-  "description": "Programs `vendor add <name>` can install without being told a repository or its asset names. Describes version 2 of the format; a later version bumps the number and this file with it.",
+  "description": "Programs `vendor add <name>` can install without being told a repository or its asset names. Describes version 3 of the format; a later version bumps the number and this file with it.",
   "type": "object",
   "required": ["version"],
   "additionalProperties": false,
@@ -42,20 +42,24 @@
           "pattern": "^https?://(?:www\\.)?github\\.com/[^/]+/[^/]+$"
         },
         "url": {
-          "description": "Where a program that is not on GitHub downloads from.",
-          "type": "string"
+          "description": "Where a program that is not released on GitHub downloads from. Assets reference it as `{url}`, and it may hold `{version}` or `{tag}`. Written to the config as-is.",
+          "type": "string",
+          "pattern": "^https?://"
         },
         "versionUrl": {
-          "description": "Where the latest version of a `url` program comes from.",
-          "type": "string"
+          "description": "Where the latest version of a `url` program comes from. A URL ending in `.git` gives the repository's newest tag. Any other URL is a page, or a redirect to a versioned file.",
+          "type": "string",
+          "pattern": "^https?://"
         },
         "versionRegex": {
-          "description": "Picks the version out of the `versionUrl` answer.",
-          "type": "string"
+          "description": "Picks the version out of the `versionUrl` answer: capture group 1, or the whole match. For a `.git` `versionUrl`, only the tags it matches count.",
+          "type": "string",
+          "minLength": 1
         },
         "versionSelector": {
-          "description": "Picks the element of a `versionUrl` page that holds the version.",
-          "type": "string"
+          "description": "A CSS selector for the element of a `versionUrl` page that holds the version. Its text is the version, or what `versionRegex` searches.",
+          "type": "string",
+          "minLength": 1
         },
         "releaseRegex": {
           "description": "Which tags count, for a repository publishing several trains of releases. `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0`, and only the first carries binaries.",
@@ -72,7 +76,7 @@
           "type": "boolean"
         },
         "asset": {
-          "description": "The asset pattern shared by every target, for projects naming assets by target triple. Placeholders: {release}, {version}, {target}, {ext}, {exe}.",
+          "description": "The asset pattern shared by every target, for projects naming assets by target triple. Placeholders: {release}, {version}, {tag}, {url}, {target}, {ext}, {exe}. A `url` program's asset is a URL, usually `{url}` or `{url}/...`.",
           "type": "string",
           "minLength": 1
         },
@@ -90,7 +94,32 @@
           "minProperties": 1
         }
       },
-      "anyOf": [{ "required": ["repository"] }, { "required": ["url"] }],
+      "oneOf": [
+        {
+          "description": "A program released on GitHub.",
+          "required": ["repository"],
+          "not": {
+            "anyOf": [
+              { "required": ["url"] },
+              { "required": ["versionUrl"] },
+              { "required": ["versionRegex"] },
+              { "required": ["versionSelector"] }
+            ]
+          }
+        },
+        {
+          "description": "A program downloaded from a `url`.",
+          "required": ["url"],
+          "not": {
+            "anyOf": [
+              { "required": ["repository"] },
+              { "required": ["path"] },
+              { "required": ["releaseRegex"] },
+              { "required": ["hashVersionFile"] }
+            ]
+          }
+        }
+      ],
       "allOf": [
         {
           "if": { "required": ["path"] },
@@ -164,7 +193,7 @@
       "additionalProperties": false,
       "properties": {
         "asset": {
-          "description": "The release asset, including the `{release}/` prefix.",
+          "description": "The release asset, including the `{release}/` prefix. A `url` program names a URL instead, usually `{url}` or `{url}/...`.",
           "type": "string",
           "minLength": 1
         },

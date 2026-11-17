@@ -157,7 +157,7 @@ pub enum Target {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Explicit {
-    /// The release asset, including the `{release}/` prefix.
+    /// The release asset, including the `{release}/` prefix, or a URL for a `url` program.
     pub asset: String,
     /// The path to the executable inside it, or omitted when the asset is the executable.
     #[serde(default)]
@@ -491,6 +491,43 @@ nope: 1
             SUPPORTED_VERSION,
             "the schema documents a format this build does not support"
         );
+    }
+
+    #[test]
+    fn the_schema_knows_a_program_needs_exactly_one_source() {
+        let validator = compiled_schema();
+        let doc = |program: serde_json::Value| serde_json::json!({ "version": 3, "programs": { "p": program } });
+        let targets = serde_json::json!({ "linux-x86_64": { "asset": "{url}" } });
+
+        for valid in [
+            serde_json::json!({ "url": "https://x.io", "targets": targets }),
+            serde_json::json!({ "repository": "https://github.com/a/b", "targets": targets }),
+            serde_json::json!({
+                "url": "https://x.io", "versionUrl": "https://x.io/changes",
+                "versionSelector": "h2", "targets": targets,
+            }),
+        ] {
+            let document = doc(valid);
+            assert!(
+                validator.is_valid(&document),
+                "{document}\n{}",
+                why_invalid(&validator, &document)
+            );
+        }
+        for invalid in [
+            serde_json::json!({ "targets": targets }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "url": "https://x.io", "targets": targets,
+            }),
+            serde_json::json!({ "url": "https://x.io", "releaseRegex": "^v", "targets": targets }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "versionUrl": "https://x.io",
+                "targets": targets,
+            }),
+        ] {
+            let document = doc(invalid);
+            assert!(!validator.is_valid(&document), "{document}");
+        }
     }
 
     #[test]
