@@ -915,8 +915,9 @@ files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
 - Tags with `@`, like a monorepo's `plugin-legacy@6.1.0`, count only when `versionRegex` matches
   them. Scoped tags like `@astrojs/react@4.0.0` hold a `/`, so they never count.
 - A tag is a prerelease, and is skipped, when its numbers are followed by a `-` (`v2.0.0-rc.1`),
-  by `rc`, `alpha`, `beta`, `pre` or `dev` (`go1.25rc1`), or by `a`, `b` or `m` and a digit
+  by `rc`, `cr`, `alpha`, `beta`, `pre` or `dev` (`go1.25rc1`), or by `a`, `b` or `m` and a digit
   (`v3.14.0a1`). Date tags like `2024-01-15` are skipped too.
+- A `-` and digits alone is a patch level, so ImageMagick's `7.1.1-41` beats `7.1.1-9`.
 - With `versionRegex`, only the tags it matches count, prereleases included. A stable release
   still beats a prerelease of the same version.
 - A repository with several tag schemes needs a `versionRegex` to say which one is current.

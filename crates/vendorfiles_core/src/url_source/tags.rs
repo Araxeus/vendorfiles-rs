@@ -52,7 +52,7 @@ pub fn parse_advertisement(body: &[u8]) -> Vec<String> {
 }
 
 /// Whether the text after a tag's numbers marks a prerelease: a `-` (`v2.0.0-rc.1`), a marker
-/// word (`go1.25rc1`, `1.0.beta2`), or `a`, `b` or `m` and a digit (`CPython`'s `v3.14.0a1`,
+/// word (`go1.25rc1`, `1.0.beta2`, Hibernate's `6.1.0.CR1`), or `a`, `b` or `m` and a digit (`CPython`'s `v3.14.0a1`,
 /// Spring's `v4.1.0.M1`). Any other letter names a release, as in OpenSSL's `1_1_1w`.
 fn is_prerelease_suffix(rest: &str) -> bool {
     let rest = rest.trim_start_matches(['.', '_']).to_ascii_lowercase();
@@ -61,7 +61,7 @@ fn is_prerelease_suffix(rest: &str) -> bool {
         && chars.next().is_some_and(|c| c.is_ascii_digit());
     rest.starts_with('-')
         || short_marker
-        || ["rc", "alpha", "beta", "pre", "dev"]
+        || ["rc", "cr", "alpha", "beta", "pre", "dev"]
             .iter()
             .any(|marker| rest.starts_with(marker))
 }
@@ -75,7 +75,8 @@ struct SortKey<'a> {
     /// Its first run of numbers joined by `.` or `_` (curl tags `curl-8_10_0`), with trailing
     /// zeros dropped so `1.2` equals `1.2.0`.
     numbers: Vec<u64>,
-    /// Whether it is a stable release. See [`is_prerelease_suffix`].
+    /// Whether it is a stable release. See [`is_prerelease_suffix`]. A dash and digits alone is a
+    /// patch level instead, added to `numbers`.
     stable: bool,
 }
 
@@ -89,6 +90,20 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
         .collect::<Result<Vec<u64>, _>>()
         .ok()?;
     let dotted = numbers.len() > 1;
+    let rest = &tag[run.end()..];
+
+    // A dash and digits alone is a patch level, like ImageMagick's `7.1.1-41` or a Debian
+    // revision `v1.2.3-1`, not a prerelease.
+    let patch = rest
+        .strip_prefix('-')
+        .filter(|level| !level.is_empty() && level.bytes().all(|b| b.is_ascii_digit()));
+    let stable = match patch {
+        Some(level) => {
+            numbers.push(level.parse().ok()?);
+            true
+        }
+        None => !is_prerelease_suffix(rest),
+    };
     while numbers.last() == Some(&0) {
         numbers.pop();
     }
@@ -96,7 +111,7 @@ fn sort_key(tag: &str) -> Option<SortKey<'_>> {
         prefix: &tag[..run.start()],
         dotted,
         numbers,
-        stable: !is_prerelease_suffix(&tag[run.end()..]),
+        stable,
     })
 }
 
@@ -297,6 +312,22 @@ pub(crate) mod tests {
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("v4.0.9"));
         let tags = ["OpenSSL_1_1_1v", "OpenSSL_1_1_1w"].map(String::from);
         assert_eq!(latest_tag(&tags, None).as_deref(), Some("OpenSSL_1_1_1w"));
+    }
+
+    #[test]
+    fn a_numeric_suffix_after_a_dash_is_a_patch_level() {
+        // ImageMagick tags `7.1.1-41`, and Debian revisions read `v1.2.3-1`.
+        let tags = ["7.1.1-9", "7.1.1-41", "7.1.0-62"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("7.1.1-41"));
+        let tags = ["v1.2.3", "v1.2.3-1", "v1.2.4-rc1"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("v1.2.3-1"));
+    }
+
+    #[test]
+    fn a_cr_release_candidate_is_a_prerelease() {
+        // Hibernate tags `6.1.0.CR1` before `6.1.0.Final`.
+        let tags = ["6.0.0.Final", "6.1.0.CR1"].map(String::from);
+        assert_eq!(latest_tag(&tags, None).as_deref(), Some("6.0.0.Final"));
     }
 
     #[test]
