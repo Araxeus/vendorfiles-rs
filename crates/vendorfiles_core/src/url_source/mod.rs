@@ -106,7 +106,20 @@ async fn look_up(
             .map_err(refused)?
             .ok_or_else(miss)?;
         tags.retain(|tag| is_plausible_version(tag));
-        tags::latest_tag(&tags, regex.as_ref())
+        let latest = tags::latest_tag(&tags, regex.as_ref());
+        // A monorepo tags only its packages, which count only when a regex picks one.
+        if latest.is_none()
+            && regex.is_none()
+            && let Some(example) = tags
+                .first()
+                .filter(|_| tags.iter().all(|t| t.contains('@')))
+        {
+            return Err(VendorError::OnlyPackageTags {
+                url: version_url.to_owned(),
+                example: example.clone(),
+            });
+        }
+        latest
     } else {
         let response = send(http.get(version_url)).await.map_err(refused)?;
 
@@ -498,6 +511,32 @@ mod tests {
         for version in ["../v1", "Forbidden", "", "a/1", r#"{"v":1}"#, "defaced"] {
             assert!(!super::is_plausible_version(version), "{version}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_repo_of_package_tags_says_to_set_a_regex() {
+        let base = serve(vec![route(
+            "/o/r.git/git-upload-pack",
+            200,
+            "Content-Type: application/x-git-upload-pack-result
+",
+            &tags::tests::ls_refs(&["refs/tags/astro@5.0.0", "refs/tags/react@4.0.0"]),
+        )]);
+        let source = UrlSource {
+            url: "https://x.io".into(),
+            version_url: Some(format!("{base}/o/r.git")),
+            version_regex: None,
+            version_selector: None,
+        };
+        let error = latest_version(&client().unwrap(), &source)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "{base}/o/r.git only has package tags like 'astro@5.0.0'; set versionRegex to pick one"
+            )
+        );
     }
 
     #[tokio::test]
