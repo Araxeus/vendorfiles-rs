@@ -1,6 +1,6 @@
 //! `vendor-lock.json` - the record of what was actually written into a dependency folder.
 //!
-//! Field order (`repository`, `version`, `files`) and key order inside `files` are part of the
+//! Field order (`repository` or `url`, `version`, `files`) and key order inside `files` are part of the
 //! on-disk format, so every map here is an [`IndexMap`].
 
 use std::path::{Path, PathBuf};
@@ -25,7 +25,12 @@ pub const LOCKFILE_NAME: &str = "vendor-lock.json";
 /// One dependency's entry in the lockfile.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VendorLock {
-    pub repository: String,
+    /// The GitHub repository, for a dependency that has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    /// The `url`, for a dependency that downloads from one instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub version: String,
     pub files: LockFiles,
     /// Where the dependency was installed, recorded only with `singleLockfile` (otherwise the
@@ -341,7 +346,8 @@ mod tests {
         let path = dir.path().join("vendor-lock.json");
         std::fs::write(&path, "{ broken").unwrap();
         let entry = VendorLock {
-            repository: "r".to_owned(),
+            repository: Some("r".to_owned()),
+            url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
             save_path: None,
@@ -362,7 +368,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vendor-lock.json");
         let entry = VendorLock {
-            repository: "r".to_owned(),
+            repository: Some("r".to_owned()),
+            url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
             save_path: None,
@@ -385,7 +392,8 @@ mod tests {
         lockfile.insert(
             "a".to_owned(),
             VendorLock {
-                repository: "https://github.com/o/a".to_owned(),
+                repository: Some("https://github.com/o/a".to_owned()),
+                url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files, "1"),
                 save_path: None,
@@ -409,7 +417,8 @@ mod tests {
         let folder = dir.path().join("vendor/a");
         std::fs::create_dir_all(&folder).unwrap();
         let entry = |version: &str| VendorLock {
-            repository: "r".to_owned(),
+            repository: Some("r".to_owned()),
+            url: None,
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
             save_path: None,
@@ -446,7 +455,8 @@ mod tests {
         lockfile.insert(
             "a".to_owned(),
             VendorLock {
-                repository: "r".to_owned(),
+                repository: Some("r".to_owned()),
+                url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 save_path: Some(".".to_owned()),
@@ -495,7 +505,8 @@ mod tests {
         earlier.insert(
             "a".to_owned(),
             VendorLock {
-                repository: "r".to_owned(),
+                repository: Some("r".to_owned()),
+                url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 save_path: Some(".".to_owned()),
@@ -563,7 +574,8 @@ mod tests {
         lockfile.insert(
             "fzf".to_owned(),
             VendorLock {
-                repository: "https://github.com/junegunn/fzf".to_owned(),
+                repository: Some("https://github.com/junegunn/fzf".to_owned()),
+                url: None,
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
                 save_path: None,

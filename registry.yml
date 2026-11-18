@@ -25,6 +25,8 @@
 #   {target}   the triple this host maps to under `targets`
 #   {ext}      `.zip` on Windows, `.tar.gz` elsewhere
 #   {exe}      `.exe` on Windows, empty elsewhere
+#   {url}      a `url` program's `url` (config syntax, left as-is)
+#   {tag}      the whole version, like `v10.4.2` (config syntax, left as-is)
 #
 # Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
 # linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
@@ -47,6 +49,13 @@
 # `releaseRegex` narrows which tags count, for repositories that publish several trains of
 # releases. `path` vendors a file from the repository instead of a release, with `hashVersionFile`
 # to track it by commit; it takes no `targets`, being the same everywhere.
+#
+# A program that is not released on GitHub sets `url` instead of `repository`, and `versionUrl` for
+# where its latest version comes from. `versionRegex` and `versionSelector` pick the version out of
+# a page. Its assets are URLs, usually `{url}` or `{url}/...`, and it takes no `path`,
+# `releaseRegex` or `hashVersionFile`. The README section "Downloading from other sites" explains
+# each key. A `url` program needs `version: 3` below, so older builds say to update rather than
+# fail on a key they don't know.
 #
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.

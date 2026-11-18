@@ -8,13 +8,18 @@
 //! Note what is *absent*: there is no `vendorFolder`. A registry entry says what to fetch; where
 //! it lands is the config's business.
 
+use std::borrow::Cow;
+
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use crate::template::browsable_url;
+
 /// The newest schema version this build understands.
 ///
-/// Version 2 added `description`. A version 1 file is still read, since it is a subset.
-pub const SUPPORTED_VERSION: u32 = 2;
+/// Version 2 added `description`. Version 3 added URL programs. Older files are still read,
+/// since each is a subset.
+pub const SUPPORTED_VERSION: u32 = 3;
 
 /// The whole file.
 #[derive(Debug, Clone, Deserialize)]
@@ -37,8 +42,21 @@ pub struct Program {
     /// One line on what the program does, which `vendor search` matches and prints.
     #[serde(default)]
     pub description: Option<String>,
-    /// The GitHub repository releases come from.
-    pub repository: String,
+    /// The GitHub repository releases come from. A program not on GitHub sets `url` instead.
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// Where a program that is not on GitHub downloads from. Its assets reference it as `{url}`.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Where the latest version of a `url` program comes from: a page, or a `.git` repository.
+    #[serde(rename = "versionUrl", default)]
+    pub version_url: Option<String>,
+    /// Picks the version out of the `versionUrl` answer.
+    #[serde(rename = "versionRegex", default)]
+    pub version_regex: Option<String>,
+    /// Picks one element of an HTML `versionUrl` page, whose text holds the version.
+    #[serde(rename = "versionSelector", default)]
+    pub version_selector: Option<String>,
     /// Which tags count, for repositories that publish more than one train of releases.
     ///
     /// `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, so without
@@ -73,6 +91,17 @@ pub struct Program {
 }
 
 impl Program {
+    /// Where the program lives: its repository, or the site of its `url`.
+    #[must_use]
+    pub fn link(&self) -> Cow<'_, str> {
+        browsable_url(
+            self.repository
+                .as_deref()
+                .or(self.url.as_deref())
+                .unwrap_or_default(),
+        )
+    }
+
     /// Whether it can be installed on `host`. A repository file is the same everywhere.
     #[must_use]
     pub fn covers(&self, host: &str) -> bool {
@@ -134,7 +163,7 @@ pub enum Target {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Explicit {
-    /// The release asset, including the `{release}/` prefix.
+    /// The release asset, including the `{release}/` prefix, or a URL for a `url` program.
     pub asset: String,
     /// The path to the executable inside it, or omitted when the asset is the executable.
     #[serde(default)]
@@ -149,7 +178,7 @@ mod tests {
     use super::{Document, Member, SUPPORTED_VERSION, Target};
 
     const COMPACT: &str = r#"
-version: 2
+version: 3
 programs:
   fd:
     aliases: [fdfind]
@@ -313,17 +342,28 @@ programs:
     }
 
     #[test]
-    fn a_missing_repository_is_refused() {
-        let refused = parse(
+    fn a_program_without_a_source_parses_but_does_not_resolve() {
+        // `repository` and `url` are each optional, so the rule that one is needed lives in
+        // `for_host`, which can say which is missing.
+        let document = parse(
             r"
-version: 2
+version: 3
 programs:
   nameless:
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
 ",
+        )
+        .expect("parses");
+        let program = &document.programs["nameless"];
+        let error =
+            crate::registry::resolve::for_host("nameless", program, "windows-x86_64").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("needs a 'repository' or a 'url'"),
+            "{error}"
         );
-        assert!(refused.is_err());
     }
 
     /// A file that ships at the repository root, two directories above this crate.
@@ -449,14 +489,51 @@ nope: 1
     fn the_schema_agrees_with_this_build_about_the_version() {
         let schema = published_schema();
         let declared = schema
-            .pointer("/properties/version/const")
+            .pointer("/properties/version/maximum")
             .and_then(serde_json::Value::as_u64)
-            .expect("a version constant");
+            .expect("a highest version");
         assert_eq!(
             u32::try_from(declared).unwrap(),
             SUPPORTED_VERSION,
             "the schema documents a format this build does not support"
         );
+    }
+
+    #[test]
+    fn the_schema_knows_a_program_needs_exactly_one_source() {
+        let validator = compiled_schema();
+        let doc = |program: serde_json::Value| serde_json::json!({ "version": 3, "programs": { "p": program } });
+        let targets = serde_json::json!({ "linux-x86_64": { "asset": "{url}" } });
+
+        for valid in [
+            serde_json::json!({ "url": "https://x.io", "targets": targets }),
+            serde_json::json!({ "repository": "https://github.com/a/b", "targets": targets }),
+            serde_json::json!({
+                "url": "https://x.io", "versionUrl": "https://x.io/changes",
+                "versionSelector": "h2", "targets": targets,
+            }),
+        ] {
+            let document = doc(valid);
+            assert!(
+                validator.is_valid(&document),
+                "{document}\n{}",
+                why_invalid(&validator, &document)
+            );
+        }
+        for invalid in [
+            serde_json::json!({ "targets": targets }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "url": "https://x.io", "targets": targets,
+            }),
+            serde_json::json!({ "url": "https://x.io", "releaseRegex": "^v", "targets": targets }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "versionUrl": "https://x.io",
+                "targets": targets,
+            }),
+        ] {
+            let document = doc(invalid);
+            assert!(!validator.is_valid(&document), "{document}");
+        }
     }
 
     #[test]
@@ -740,7 +817,7 @@ programs: {}
 "#,
         ),
         (
-            "a program with no repository to install from",
+            "a program with neither a repository nor a url to install from",
             r#"
 version: 2
 programs:
@@ -766,7 +843,7 @@ programs:
         (
             "a format version this build does not support",
             r"
-version: 3
+version: 4
 programs: {}
 ",
         ),

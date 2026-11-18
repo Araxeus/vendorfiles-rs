@@ -94,6 +94,10 @@ reqwest = { version = "0.13.5", default-features = false, features = [
     "stream",
 ] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+# Reads a version out of an HTML page with a CSS selector (`versionSelector`). It parses like a
+# browser, so a selector picks what `document.querySelector` would. Default features off: they
+# build a CLI.
+scraper = { version = "0.24.0", default-features = false }
 secrecy = "0.10.3"
 # Swapping a running binary is platform work: on Windows the file is locked, so the old image has
 # to be moved aside and deleted after exit. `vendor` uses it when an install lands on top of

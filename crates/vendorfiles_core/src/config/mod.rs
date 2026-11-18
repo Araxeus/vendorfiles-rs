@@ -332,6 +332,45 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
+    /// `vendorfiles.schema.json`, compiled as the draft it declares.
+    fn config_schema() -> jsonschema::Validator {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendorfiles.schema.json");
+        let schema = value(&std::fs::read_to_string(path).expect("vendorfiles.schema.json"));
+        jsonschema::draft202012::new(&schema).expect("the config schema compiles")
+    }
+
+    #[test]
+    fn the_config_schema_knows_a_dependency_needs_exactly_one_source() {
+        let validator = config_schema();
+        let config = |dependency: serde_json::Value| serde_json::json!({ "vendorDependencies": { "tool": dependency } });
+
+        for valid in [
+            serde_json::json!({ "url": "https://x.io", "files": [{ "{url}": "a" }] }),
+            serde_json::json!({ "repository": "https://github.com/a/b", "files": ["a"] }),
+            serde_json::json!({
+                "url": "https://x.io/v{tag}", "versionUrl": "https://x.io/changes",
+                "versionRegex": "v(\\d+)", "versionSelector": "#latest",
+                "hashVersionFile": false, "files": [{ "{url}": "a" }],
+            }),
+        ] {
+            assert!(validator.is_valid(&config(valid.clone())), "{valid}");
+        }
+        for invalid in [
+            serde_json::json!({ "files": ["a"] }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "url": "https://x.io", "files": ["a"],
+            }),
+            serde_json::json!({
+                "url": "https://x.io", "hashVersionFile": true, "files": [{ "{url}": "a" }],
+            }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "versionSelector": "h2", "files": ["a"],
+            }),
+        ] {
+            assert!(!validator.is_valid(&config(invalid.clone())), "{invalid}");
+        }
+    }
+
     #[test]
     fn vendor_config_defaults_when_absent_or_falsy() {
         assert_eq!(

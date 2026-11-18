@@ -65,12 +65,13 @@ fn rank(name: &str, program: &Program, word: &str) -> Option<Rank> {
             .split(|c: char| !c.is_alphanumeric())
             .any(|token| token.starts_with(word))
     });
-    let repository = program
-        .repository
-        .to_lowercase()
+    // The `owner/repo` of a repository, or everything after the scheme of a `url`.
+    let link = program.link().to_lowercase();
+    let linked = link
         .split_once("github.com/")
+        .or_else(|| link.split_once("://"))
         .is_some_and(|(_, path)| path.contains(word));
-    (described || repository).then_some(Rank::Described)
+    (described || linked).then_some(Rank::Described)
 }
 
 /// The canonical name followed by every alias.

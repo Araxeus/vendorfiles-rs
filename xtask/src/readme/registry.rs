@@ -80,7 +80,7 @@ fn table(registry: &Registry) -> Vec<String> {
             .replace('|', "\\|");
         lines.push(format!(
             "| [{name}]({}) | {aliases} | {description} | {} |",
-            program.repository,
+            program.link(),
             platforms(program)
         ));
     }

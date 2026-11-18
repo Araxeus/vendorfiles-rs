@@ -142,6 +142,32 @@ To vendor a file from the repository instead of a release asset, use `path`. Wit
     hashVersionFile: true      # track the file by commit; no `targets` needed
 ```
 
+## Programs that aren't on GitHub releases
+
+A program that ships from its own site sets `url` instead of `repository`, and `versionUrl` for
+where its latest version comes from. Its assets are URLs, usually `{url}` or `{url}/...`:
+
+```yaml
+  filepilot:
+    description: File manager for Windows
+    url: https://filepilot.tech/download/v{version}
+    versionUrl: https://filepilot.tech/download/latest
+    versionRegex: 'v(\d+\.\d+\.\d+)'
+    targets:
+      windows-x86_64: { asset: "{url}", as: FPilot.exe }
+```
+
+- `versionUrl` can be a page, a URL that redirects to a versioned file, or a `.git` repository
+  whose newest tag is the version.
+- `versionRegex` and `versionSelector` pick the version out of a page. The README section
+  "Downloading from other sites" explains both.
+- A `url` program takes no `path`, `releaseRegex`, `hashVersionFile` or `{release}/` assets.
+- The first `url` program raises `version` at the top of `registry.yml` to `3`. Older builds then
+  say to update instead of failing on a key they don't know.
+
+CI checks it the same way as a GitHub program: it looks the version up through `versionUrl`, then
+requests every host's asset.
+
 ## Testing your entry
 
 [`registry.schema.json`](../registry.schema.json) describes the format, and `registry.yml` points

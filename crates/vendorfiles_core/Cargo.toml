@@ -1,6 +1,6 @@
 [package]
 name = "vendorfiles_core"
-description = "Library powering the vendorfiles CLI: pull files from GitHub repositories and keep them up to date"
+description = "Library powering the vendorfiles CLI: pull files from GitHub repositories and URLs and keep them up to date"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -27,6 +27,7 @@ ratatui.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
+scraper.workspace = true
 secrecy.workspace = true
 self-replace.workspace = true
 serde.workspace = true
@@ -56,7 +57,7 @@ linux-keyutils-keyring-store.workspace = true
 [dev-dependencies]
 jsonschema.workspace = true
 lzma-rust2 = { workspace = true, features = ["encoder"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 
 [lints]
 workspace = true

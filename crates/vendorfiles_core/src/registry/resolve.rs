@@ -1,14 +1,15 @@
 //! Turning a registry entry into config for *this* host.
 //!
-//! `{release}` and `{version}` belong to the config layer and are left alone, so the entry that
-//! gets written keeps resolving new versions afterwards. Only the host-dependent placeholders are
-//! expanded here.
+//! `{release}`, `{version}`, `{tag}` and `{url}` belong to the config layer and are left alone,
+//! so the entry that gets written keeps resolving new versions afterwards. Only the
+//! host-dependent placeholders are expanded here.
 
 use indexmap::IndexMap;
 
 use super::schema::{Explicit, Member, Program, Target};
 use crate::error::{Result, VendorError};
 use crate::model::{FileEntry, FileTarget};
+use crate::template::is_http_url;
 
 /// The host key a registry entry is looked up under: `windows-x86_64`, `macos-aarch64`, …
 ///
@@ -41,8 +42,13 @@ fn executable_suffix(host: &str) -> &'static str {
 pub struct Entry {
     /// The canonical name, which becomes the config key.
     pub name: String,
-    /// The repository to install from.
-    pub repository: String,
+    /// The repository to install from, for a GitHub program.
+    pub repository: Option<String>,
+    /// The `url` to install from, for a program that is not on GitHub.
+    pub url: Option<String>,
+    pub version_url: Option<String>,
+    pub version_regex: Option<String>,
+    pub version_selector: Option<String>,
     /// The `files` array to write.
     pub files: Vec<FileEntry>,
     /// Which tags count as releases, when the repository publishes several trains.
@@ -59,6 +65,7 @@ pub struct Entry {
 /// and [`VendorError::RegistryInvalidEntry`] when it is malformed or names an output that would
 /// escape the vendor folder.
 pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
+    check_source(name, program)?;
     if let Some(path) = program.path.as_ref() {
         if !program.targets.is_empty() || program.asset.is_some() || program.member.is_some() {
             return Err(VendorError::RegistryInvalidEntry {
@@ -141,14 +148,72 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
         )
         .collect::<Result<Vec<_>>>()?;
     no_file_written_twice(name, host, &files)?;
+    if program.url.is_some() {
+        every_asset_is_a_url(name, &files)?;
+    }
 
-    Ok(Entry {
+    Ok(entry(name, program, files))
+}
+
+/// The entry for `program`, with its source copied as written.
+///
+/// `{url}`, `{version}` and `{tag}` stay in place, so the written config keeps resolving.
+fn entry(name: &str, program: &Program, files: Vec<FileEntry>) -> Entry {
+    Entry {
         name: name.to_owned(),
         repository: program.repository.clone(),
+        url: program.url.clone(),
+        version_url: program.version_url.clone(),
+        version_regex: program.version_regex.clone(),
+        version_selector: program.version_selector.clone(),
         files,
         release_regex: program.release_regex.clone(),
         hash_version_file: program.hash_version_file,
-    })
+    }
+}
+
+/// Refuses a program without exactly one of `repository` and `url`, and a `url` program that
+/// sets a key only a repository can use.
+fn check_source(name: &str, program: &Program) -> Result<()> {
+    let refuse = |reason: &str| VendorError::RegistryInvalidEntry {
+        name: name.to_owned(),
+        reason: reason.to_owned(),
+    };
+    match (&program.repository, &program.url) {
+        (Some(_), Some(_)) => Err(refuse("sets both 'repository' and 'url'; keep one")),
+        (None, None) => Err(refuse("needs a 'repository' or a 'url'")),
+        (Some(_), None) => Ok(()),
+        (None, Some(_)) => {
+            let repository_only = [
+                ("path", program.path.is_some()),
+                ("releaseRegex", program.release_regex.is_some()),
+                ("hashVersionFile", program.hash_version_file.is_some()),
+            ];
+            match repository_only.iter().find(|(_, set)| *set) {
+                Some((key, _)) => Err(refuse(&format!(
+                    "'{key}' only applies to a 'repository' program"
+                ))),
+                None => Ok(()),
+            }
+        }
+    }
+}
+
+/// Refuses a `url` program asset that is not a URL, like a `{release}/` one.
+fn every_asset_is_a_url(name: &str, files: &[FileEntry]) -> Result<()> {
+    let assets = files.iter().flat_map(|file| match file {
+        FileEntry::Mapped(mapped) => mapped.keys().collect(),
+        FileEntry::Simple(asset) => vec![asset],
+    });
+    for asset in assets {
+        if !(asset.starts_with("{url}") || is_http_url(asset)) {
+            return Err(VendorError::RegistryInvalidEntry {
+                name: name.to_owned(),
+                reason: format!("asset '{asset}' is not a URL"),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a host whose files would land on top of one another.
@@ -219,13 +284,7 @@ fn repository_file(name: &str, program: &Program, path: &str) -> Result<Entry> {
         output_name(name, path)?;
         FileEntry::Simple(path.to_owned())
     };
-    Ok(Entry {
-        name: name.to_owned(),
-        repository: program.repository.clone(),
-        files: vec![files],
-        release_regex: program.release_regex.clone(),
-        hash_version_file: program.hash_version_file,
-    })
+    Ok(entry(name, program, vec![files]))
 }
 
 /// Substitutes the host-dependent placeholders, leaving the config's own alone.
@@ -388,6 +447,12 @@ fn output_name(name: &str, member: &str) -> Result<String> {
     if basename.contains(':') || basename.starts_with('/') || basename.starts_with('\\') {
         return Err(refuse(&format!("'{basename}' is not a plain file name")));
     }
+    // `{url}` and `{release}` never expand in an output name, so a bare `{url}` asset needs `as`.
+    if basename.contains("{url}") || basename.contains("{release}") {
+        return Err(refuse(&format!(
+            "'{basename}' is not a file name, so the asset needs an 'as' name"
+        )));
+    }
     Ok(basename.to_owned())
 }
 
@@ -399,10 +464,84 @@ mod tests {
 
     use super::{Entry, for_host, host, member_path, output_name};
     use crate::model::{FileEntry, FileTarget};
-    use crate::registry::schema::Document;
+    use crate::registry::schema::{Document, Program};
 
     fn program(yaml: &str) -> Document {
         serde_yaml_ng::from_str(yaml).expect("valid registry")
+    }
+
+    fn one_program(yaml: &str) -> Program {
+        serde_yaml_ng::from_str(yaml).expect("a valid program")
+    }
+
+    const URL_PROGRAM: &str = r#"
+url: https://x.io/dl/v{version}
+versionUrl: https://x.io/latest
+versionRegex: 'v(\d+\.\d+\.\d+)'
+asset: "{url}/tool-{target}{ext}"
+member: "tool{exe}"
+targets:
+  windows-x86_64: x86_64-pc-windows-msvc
+  linux-x86_64: x86_64-unknown-linux-gnu
+"#;
+
+    #[test]
+    fn a_url_program_resolves_to_a_url_entry() {
+        let entry = for_host("tool", &one_program(URL_PROGRAM), "linux-x86_64").unwrap();
+        assert_eq!(entry.repository, None);
+        assert_eq!(entry.url.as_deref(), Some("https://x.io/dl/v{version}"));
+        assert_eq!(entry.version_url.as_deref(), Some("https://x.io/latest"));
+        let FileEntry::Mapped(files) = &entry.files[0] else {
+            panic!("{:?}", entry.files)
+        };
+        assert!(
+            files.contains_key("{url}/tool-x86_64-unknown-linux-gnu.tar.gz"),
+            "{files:?}"
+        );
+    }
+
+    #[test]
+    fn a_url_program_refuses_repository_only_keys() {
+        for (extra, reason) in [
+            (
+                "repository: https://github.com/a/b\n",
+                "sets both 'repository' and 'url'",
+            ),
+            (
+                "releaseRegex: '^v'\n",
+                "'releaseRegex' only applies to a 'repository' program",
+            ),
+            (
+                "hashVersionFile: true\n",
+                "'hashVersionFile' only applies to a 'repository' program",
+            ),
+        ] {
+            let yaml = format!("{URL_PROGRAM}{extra}");
+            let error = for_host("tool", &one_program(&yaml), "linux-x86_64").unwrap_err();
+            assert!(error.to_string().contains(reason), "{error}");
+        }
+        let release =
+            URL_PROGRAM.replace(r#""{url}/tool-{target}{ext}""#, r#""{release}/tool{ext}""#);
+        let error = for_host("tool", &one_program(&release), "linux-x86_64").unwrap_err();
+        assert!(error.to_string().contains("is not a URL"), "{error}");
+    }
+
+    #[test]
+    fn a_bare_url_asset_needs_an_as_name() {
+        let yaml = "url: https://x.io/tool\ntargets:\n  linux-x86_64: { asset: \"{url}\" }\n";
+        let error = for_host("tool", &one_program(yaml), "linux-x86_64").unwrap_err();
+        assert!(error.to_string().contains("'as'"), "{error}");
+    }
+
+    #[test]
+    fn a_program_needs_a_source() {
+        let error = for_host("tool", &one_program("targets: {}\n"), "linux-x86_64").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("needs a 'repository' or a 'url'"),
+            "{error}"
+        );
     }
 
     const FD: &str = r#"

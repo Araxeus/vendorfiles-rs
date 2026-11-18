@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Vendorfiles Configuration",
-  "description": "Configuration file for vendorfiles - a tool to pull files from GitHub repositories and keep them up to date",
+  "description": "Configuration file for vendorfiles - a tool to pull files from GitHub repositories and URLs and keep them up to date",
   "type": "object",
   "properties": {
     "vendorConfig": {
@@ -51,12 +51,40 @@
       "properties": {
         "repository": {
           "type": "string",
-          "description": "GitHub repository URL",
+          "description": "GitHub repository URL. Use url for anything else",
           "pattern": "^https://github\\.com/[^/]+/[^/]+/?$",
           "examples": [
             "https://github.com/mdbassit/Coloris",
             "https://github.com/junegunn/fzf"
           ]
+        },
+        "url": {
+          "type": "string",
+          "description": "Where a dependency that isn't on GitHub downloads from. Files reference it as {url}. It may hold {version} or {tag}",
+          "pattern": "^https?://",
+          "examples": [
+            "https://filepilot.tech/download/v{version}",
+            "https://codeberg.org/forgejo/forgejo/releases/download/{tag}"
+          ]
+        },
+        "versionUrl": {
+          "type": "string",
+          "description": "Where a url dependency's latest version comes from. A URL ending in .git gives the repository's newest tag. Any other URL is a page whose body, selected element or regex match is the version. Without one, the dependency installs once",
+          "pattern": "^https?://",
+          "examples": [
+            "https://filepilot.tech/download/latest",
+            "https://codeberg.org/forgejo/forgejo.git"
+          ]
+        },
+        "versionRegex": {
+          "type": "string",
+          "description": "Picks the version out of what versionUrl returns: capture group 1, or the whole match. For a .git versionUrl, only the tags it matches count. Use double escaping (\\\\d) in JSON",
+          "examples": ["v(\\d+\\.\\d+\\.\\d+)", "^v\\d+"]
+        },
+        "versionSelector": {
+          "type": "string",
+          "description": "A CSS selector for the element of a versionUrl page that holds the version, as document.querySelector takes. The element's text is the version, or what versionRegex searches",
+          "examples": ["#latest", ".release h2"]
         },
         "version": {
           "type": "string",
@@ -114,7 +142,38 @@
       "allOf": [
         { "$ref": "#/definitions/vendorDependencyBase" }
       ],
-      "required": ["repository", "files"]
+      "required": ["files"],
+      "oneOf": [
+        {
+          "description": "A GitHub dependency",
+          "required": ["repository"],
+          "not": {
+            "anyOf": [
+              { "required": ["url"] },
+              { "required": ["versionUrl"] },
+              { "required": ["versionRegex"] },
+              { "required": ["versionSelector"] }
+            ]
+          }
+        },
+        {
+          "description": "A dependency downloaded from a url",
+          "required": ["url"],
+          "not": {
+            "anyOf": [
+              { "required": ["repository"] },
+              {
+                "required": ["releaseRegex"],
+                "properties": { "releaseRegex": { "minLength": 1 } }
+              },
+              {
+                "required": ["hashVersionFile"],
+                "properties": { "hashVersionFile": { "not": { "const": false } } }
+              }
+            ]
+          }
+        }
+      ]
     },
     "defaultOptions": {
       "description": "Default options that apply to all dependencies. Individual dependencies can override these values",
@@ -122,7 +181,7 @@
     },
     "filesArray": {
       "type": "array",
-      "description": "List of files to download from the repository",
+      "description": "List of files to download from the repository or url",
       "items": {
         "$ref": "#/definitions/fileItem"
       },
@@ -136,7 +195,7 @@
       "oneOf": [
         {
           "type": "string",
-          "description": "Simple file path to download. Use {release}/ prefix for release assets and {version} for semver substitution",
+          "description": "Simple file path to download. Use {release}/ prefix for release assets, {version} for semver substitution and {tag} for the whole version",
           "examples": [
             "dist/coloris.min.js",
             "LICENSE",
@@ -145,7 +204,7 @@
         },
         {
           "type": "object",
-          "description": "File mapping object for renaming, moving, or extracting from archives",
+          "description": "File mapping object for renaming, moving, or extracting from archives. A url dependency maps each URL, often {url}, to its output name",
           "additionalProperties": {
             "$ref": "#/definitions/fileMapping"
           },
@@ -219,6 +278,16 @@
               }
             }
           ]
+        }
+      }
+    },
+    {
+      "vendorDependencies": {
+        "FilePilot": {
+          "url": "https://filepilot.tech/download/v{version}",
+          "versionUrl": "https://filepilot.tech/download/latest",
+          "versionRegex": "v(\\d+\\.\\d+\\.\\d+)",
+          "files": [{ "{url}": "FPilot.exe" }]
         }
       }
     },

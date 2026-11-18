@@ -6,10 +6,11 @@ use vendorfiles_core::{Workspace, ui};
 /// `vendor list` / `vendor config list` - the config's dependencies as a table.
 ///
 /// Config order, not sorted: the file is the source of truth, and reading the two side by side
-/// is the point. An unset column prints `-` rather than an empty cell, so a missing `repository`
-/// - the thing that stops `update` working - is visible rather than blank.
+/// is the point. An unset column prints `-` rather than an empty cell, so a missing source - the
+/// thing that stops `update` working - is visible rather than blank. The source is the
+/// `repository`, or the `url` of a dependency that is not on GitHub.
 pub(super) fn list_dependencies(workspace: &Workspace) {
-    const HEADERS: [&str; 3] = ["NAME", "VERSION", "REPOSITORY"];
+    const HEADERS: [&str; 3] = ["NAME", "VERSION", "SOURCE"];
 
     if workspace.dependencies.is_empty() {
         ui::info(workspace.no_dependencies_notice());
@@ -23,7 +24,7 @@ pub(super) fn list_dependencies(workspace: &Workspace) {
             [
                 name.as_str(),
                 field(entry.version.as_deref()),
-                field(entry.repository.as_deref()),
+                field(entry.repository.as_deref().or(entry.url.as_deref())),
             ]
         })
         .collect();

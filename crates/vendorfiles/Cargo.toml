@@ -1,6 +1,6 @@
 [package]
 name = "vendorfiles"
-description = "A CLI tool to manage vendor files pulled from GitHub repositories"
+description = "A CLI tool to manage vendor files pulled from GitHub repositories and URLs"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

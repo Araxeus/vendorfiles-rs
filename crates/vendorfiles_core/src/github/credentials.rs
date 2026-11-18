@@ -129,6 +129,16 @@ mod tests {
     fn secrets_round_trip_through_the_platform_store() {
         // Writing is the half that only shows up when a user runs `vendor login`, so exercise
         // it here - under a name of its own, never the real credential.
+        //
+        // Test runs on one machine take turns. Windows' store can lose a write, or keep a
+        // deleted credential, while another process writes to it at the same moment.
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(std::env::temp_dir().join("vendorfiles-credential-tests.lock"))
+            .expect("a lock file");
+        lock.lock().expect("a turn at the store");
         let handle = entry("vendorfiles-cli-test", "round-trip").expect("a store");
         match handle.set_password("ghp_roundtrip_0123456789") {
             Ok(()) => {}
