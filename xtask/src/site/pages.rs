@@ -97,6 +97,7 @@ pub const PAGES: &[PageSpec] = &[
         "configuration/other-sites",
         Some("Other sites"),
         Start::Heading("Downloading from other sites"),
+        "Download files from any URL and track their versions with a page, a regex or git tags.",
     ),
     page(
         "configuration/locking",
