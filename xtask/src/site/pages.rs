@@ -24,18 +24,32 @@ pub struct PageSpec {
     /// The page title when the heading's own text reads badly in a sidebar.
     pub title: Option<&'static str>,
     pub starts_at: Start,
+    /// One line for search results and link previews.
+    pub description: &'static str,
 }
 
-const fn page(slug: &'static str, title: Option<&'static str>, starts_at: Start) -> PageSpec {
+const fn page(
+    slug: &'static str,
+    title: Option<&'static str>,
+    starts_at: Start,
+    description: &'static str,
+) -> PageSpec {
+    assert!(!description.is_empty(), "every page needs a description");
     PageSpec {
         slug,
         title,
         starts_at,
+        description,
     }
 }
 
 const fn drop(heading: &'static str) -> PageSpec {
-    page("", None, Start::Drop(heading))
+    PageSpec {
+        slug: "",
+        title: None,
+        starts_at: Start::Drop(heading),
+        description: "",
+    }
 }
 
 /// Every page, in README order. Each `##` heading of the README must start one.
@@ -47,31 +61,37 @@ pub const PAGES: &[PageSpec] = &[
         "getting-started/installation",
         None,
         Start::Heading("Installation"),
+        "Install vendor with a one-line script on Linux, macOS or Windows, or with Cargo.",
     ),
     page(
         "getting-started/quick-start",
         None,
         Start::Heading("Quick start"),
+        "Write a small config file and pull your first files from GitHub with vendor sync.",
     ),
     page(
         "getting-started/global-programs",
         None,
         Start::Heading("Global programs"),
+        "Use vendor to install programs like rg and fd for your whole machine.",
     ),
     page(
         "configuration/config-files",
         Some("Config files"),
         Start::Heading("Configuration"),
+        "Where vendor looks for its config file, and the fields each dependency takes.",
     ),
     page(
         "configuration/paths",
         None,
         Start::Heading("Output folders and file names"),
+        "Choose where vendored files land, and rename them as they are saved.",
     ),
     page(
         "configuration/versions",
         None,
         Start::Heading("Versions and releases"),
+        "Track release tags, pull release assets, extract files from archives, and choose which releases count.",
     ),
     page(
         "configuration/other-sites",
@@ -82,41 +102,74 @@ pub const PAGES: &[PageSpec] = &[
         "configuration/locking",
         Some("Locking"),
         Start::Heading("Locking a dependency"),
+        "Keep a dependency at its current version so vendor update leaves it alone.",
     ),
     page(
         "configuration/defaults",
         Some("Defaults"),
         Start::Heading("Default options"),
+        "Set values once for every dependency that doesn't set them itself.",
     ),
-    page("reference/commands", None, Start::Heading("Commands")),
+    page(
+        "reference/commands",
+        None,
+        Start::Heading("Commands"),
+        "Every vendor command, with its short aliases and options.",
+    ),
     page(
         "getting-started/program-registry",
         None,
         Start::Heading("Program registry"),
+        "Programs vendor knows by name, so you can add them without looking up the repository or its release assets.",
+    ),
+    page(
+        "reference/program-list",
+        Some("Program list"),
+        Start::Heading("Programs you can add by name"),
+        "Every program you can add by name, with its aliases and supported platforms.",
     ),
     page(
         "reference/self-update",
         Some("Self-update"),
         Start::Heading("Keeping vendorfiles updated"),
+        "Let vendor update itself along with everything else.",
     ),
     page(
         "reference/authentication",
         None,
         Start::Heading("Authentication"),
+        "Log in to GitHub to raise the API rate limit above 60 requests an hour.",
     ),
-    page("reference/lockfile", None, Start::Heading("Lockfile")),
-    page("reference/json-schema", None, Start::Heading("JSON Schema")),
+    page(
+        "reference/lockfile",
+        None,
+        Start::Heading("Lockfile"),
+        "What vendor-lock.json records about each download, and how to keep one lockfile for everything.",
+    ),
+    page(
+        "reference/json-schema",
+        None,
+        Start::Heading("JSON Schema"),
+        "Point your config at the JSON Schema so your editor checks and autocompletes it.",
+    ),
     page(
         "about/differences",
         None,
         Start::Heading("Differences from the TypeScript version"),
+        "How this version compares to the TypeScript vendorfiles, and where its speedup comes from.",
     ),
-    page("about/development", None, Start::Heading("Development")),
+    page(
+        "about/development",
+        None,
+        Start::Heading("Development"),
+        "Build, test and lint vendorfiles, and find your way around the workspace.",
+    ),
     drop("License"),
     page(
         "about/adding-to-the-registry",
         None,
         Start::File("docs/add_to_registry.md"),
+        "Add a program to the registry so anyone can install it with vendor add <name>.",
     ),
 ];
 
@@ -146,6 +199,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
         "Reference",
         &[
             "reference/commands",
+            "reference/program-list",
             "reference/self-update",
             "reference/authentication",
             "reference/lockfile",
@@ -365,7 +419,11 @@ fn render(page: &Owned, links: &Links) -> Result<Page> {
 
 fn frontmatter(page: &Owned) -> String {
     let title = page.spec.title.unwrap_or(&page.title);
-    format!("---\ntitle: {}\n---\n", yaml_string(title))
+    format!(
+        "---\ntitle: {}\ndescription: {}\n---\n",
+        yaml_string(title),
+        yaml_string(page.spec.description)
+    )
 }
 
 /// A YAML scalar: bare when it is plain words, quoted otherwise.
@@ -403,8 +461,8 @@ mod tests {
     const ADD: &str = "### Adding a program to the registry\n";
 
     const TEST_PAGES: &[super::PageSpec] = &[
-        super::page("group", None, Start::Heading("Group")),
-        super::page("start", None, Start::Heading("Start")),
+        super::page("group", None, Start::Heading("Group"), "Group page."),
+        super::page("start", None, Start::Heading("Start"), "Start page."),
     ];
 
     #[test]
@@ -502,7 +560,7 @@ mod tests {
         let (pages, _) = generate(&readme(), ADD).unwrap();
         let by_name = pages
             .iter()
-            .find(|p| p.path == "getting-started/program-registry.mdx")
+            .find(|p| p.path == "reference/program-list.mdx")
             .unwrap();
         assert!(
             by_name

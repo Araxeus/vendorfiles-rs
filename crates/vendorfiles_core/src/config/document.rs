@@ -696,6 +696,28 @@ vendorDependencies:
     }
 
     #[test]
+    fn version_bumps_preserve_bare_mappings_in_every_format() {
+        for (format, source) in [
+            (
+                ConfigFormat::Json,
+                r#"{"vendorDependencies":{"a":{"version":"v1","files":{"LICENSE":"COPYING"}}}}"#,
+            ),
+            (
+                ConfigFormat::Yml,
+                "vendorDependencies:\n  a:\n    version: v1\n    files:\n      LICENSE: COPYING\n",
+            ),
+            (
+                ConfigFormat::Toml,
+                "[vendorDependencies.a]\nversion = 'v1'\n[ vendorDependencies.a.files ]\nLICENSE = 'COPYING'\n",
+            ),
+        ] {
+            let mut document = doc(format, source);
+            document.set_dependency_version("a", "v2").unwrap();
+            assert_eq!(document.render(), source.replace("v1", "v2").trim_end());
+        }
+    }
+
+    #[test]
     fn json_files_change_touches_only_the_files() {
         let mut d = doc(ConfigFormat::Json, JSON5);
         d.set_dependency_value("a", "files", &readme()).unwrap();

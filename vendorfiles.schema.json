@@ -94,8 +94,7 @@
         "files": {
           "oneOf": [
             {
-              "type": "string",
-              "description": "Single file path to download"
+              "$ref": "#/definitions/fileItem"
             },
             {
               "$ref": "#/definitions/filesArray"
@@ -115,10 +114,10 @@
             },
             {
               "type": "boolean",
-              "description": "When true, tracks the first file in the files array"
+              "description": "When true, tracks the first declared file"
             }
           ],
-          "description": "Enable commit-based versioning. Set to a file path to track that file's commits, or true to track the first file in the files array",
+          "description": "Enable commit-based versioning. Set to a file path to track that file's commits, or true to track the first declared file",
           "examples": ["package.json", "src/main.js", true]
         },
         "releaseRegex": {
@@ -209,7 +208,6 @@
           "additionalProperties": {
             "$ref": "#/definitions/fileMapping"
           },
-          "minProperties": 1,
           "examples": [
             { "LICENSE": "../licenses/COLORIS_LICENSE" },
             { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" },
@@ -229,23 +227,9 @@
           "type": "array",
           "description": "List of files to extract from an archive",
           "items": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "File to extract from the archive"
-              },
-              {
-                "type": "object",
-                "description": "File to extract with custom destination name",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "minProperties": 1,
-                "maxProperties": 1
-              }
-            ]
-          },
-          "minItems": 1
+            "type": "string",
+            "description": "File to extract from the archive"
+          }
         },
         {
           "type": "object",
