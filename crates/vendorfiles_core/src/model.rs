@@ -137,7 +137,7 @@ where
     Ok(serde_json::from_value(value).ok())
 }
 
-/// Like [`de_lenient`], but accepts a bare string as shorthand for a single-element array.
+/// Like [`de_lenient`], but accepts a bare string or mapping as a single-element array.
 fn de_files<'de, D>(deserializer: D) -> std::result::Result<Option<Vec<FileEntry>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -145,7 +145,7 @@ where
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum OneOrMany {
-        One(String),
+        One(FileEntry),
         Many(Vec<FileEntry>),
     }
 
@@ -154,7 +154,7 @@ where
     };
     Ok(match serde_json::from_value::<OneOrMany>(value).ok() {
         None => None,
-        Some(OneOrMany::One(single)) => Some(vec![FileEntry::Simple(single)]),
+        Some(OneOrMany::One(single)) => Some(vec![single]),
         Some(OneOrMany::Many(list)) => Some(list),
     })
 }
@@ -290,7 +290,7 @@ impl RawDependency {
         );
     }
 
-    /// Reproduces `validateVendorDependency`, including its exact messages.
+    /// Validates the fields needed to sync a dependency.
     ///
     /// # Errors
     ///
@@ -416,6 +416,100 @@ mod tests {
     }
 
     #[test]
+    fn file_shorthands_match_arrays_and_produce_the_same_lock() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../vendorfiles.schema.json")).unwrap();
+        let validator = jsonschema::draft202012::new(&schema).unwrap();
+        for files in [
+            serde_json::json!("LICENSE"),
+            serde_json::json!({"LICENSE": "../licenses/COLORIS_LICENSE"}),
+            serde_json::json!({
+                "LICENSE": "COPYING",
+                "{release}/a.zip": ["one"],
+                "{release}/b.zip": {"in": "out"}
+            }),
+        ] {
+            let raw = serde_json::json!({
+                "repository": "https://github.com/a/b", "files": files,
+                "hashVersionFile": true
+            });
+            let single: RawDependency = serde_json::from_value(raw.clone()).unwrap();
+            let mut wrapped = raw.clone();
+            wrapped["files"] = serde_json::json!([files]);
+            let array: RawDependency = serde_json::from_value(wrapped.clone()).unwrap();
+            single.validate("b").unwrap();
+            assert_eq!(single.files, array.files);
+            let single = single.resolve("b").unwrap();
+            let array = array.resolve("b").unwrap();
+            assert_eq!(
+                single.hash_version_target().unwrap(),
+                Some("LICENSE".into())
+            );
+            assert_eq!(
+                crate::lockfile::config_files_to_lock_files(&single.files, "v1"),
+                crate::lockfile::config_files_to_lock_files(&array.files, "v1")
+            );
+            for entry in [raw, wrapped] {
+                assert!(
+                    validator.is_valid(&serde_json::json!({"vendorDependencies": {"b": entry}}))
+                );
+                for key in ["default", "defaultVendorOptions"] {
+                    assert!(validator.is_valid(&serde_json::json!({
+                        "vendorDependencies": {}, key: {"files": entry["files"]}
+                    })));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mapping_defaults_work_in_every_config_format() {
+        use crate::config::ConfigFormat;
+        for (format, text) in [
+            (
+                ConfigFormat::Json,
+                r#"{"files":{"zeta":"COPYING","alpha":"a"}}"#,
+            ),
+            (ConfigFormat::Yml, "files:\n  zeta: COPYING\n  alpha: a\n"),
+            (
+                ConfigFormat::Toml,
+                "files = { zeta = 'COPYING', alpha = 'a' }\n",
+            ),
+        ] {
+            let value = format.parse(text, std::path::Path::new("vendor")).unwrap();
+            let defaults: super::DefaultOptions = serde_json::from_value(value.clone()).unwrap();
+            let direct: RawDependency = serde_json::from_value(value).unwrap();
+            let mut inherited = RawDependency::default();
+            inherited.apply_defaults(&defaults);
+            assert_eq!(inherited.files, direct.files);
+            assert_eq!(
+                flatten_files(inherited.files.as_ref().unwrap())[0].output,
+                FileTarget::Rename("COPYING".into())
+            );
+            let flat = flatten_files(inherited.files.as_ref().unwrap());
+            assert_eq!(
+                flat.iter()
+                    .map(|file| file.input.as_str())
+                    .collect::<Vec<_>>(),
+                ["zeta", "alpha"]
+            );
+            inherited.repository = Some("https://github.com/a/b".into());
+            inherited.hash_version_file = Some(HashVersionFile::Flag(true));
+            assert_eq!(
+                inherited
+                    .resolve("b")
+                    .unwrap()
+                    .hash_version_target()
+                    .unwrap(),
+                Some("zeta".into())
+            );
+            let mut explicit = dep(r#"{"files":"README.md"}"#);
+            explicit.apply_defaults(&defaults);
+            assert_eq!(explicit.files, dep(r#"{"files":["README.md"]}"#).files);
+        }
+    }
+
+    #[test]
     fn file_targets_discriminate_by_shape() {
         let d = dep(r#"{"files": [{"x": "y", "a.zip": ["one"], "b.zip": {"in": "out"}}]}"#);
         let FileEntry::Mapped(map) = &d.files.as_ref().unwrap()[0] else {
@@ -443,14 +537,14 @@ mod tests {
 
     #[test]
     fn wrong_types_degrade_to_absent_rather_than_failing_to_parse() {
-        let d = dep(r#"{"repository": 42, "files": {"not": "an array"}, "locked": "yes"}"#);
+        let d = dep(r#"{"repository": 42, "files": {"LICENSE": 42}, "locked": "yes"}"#);
         assert!(d.repository.is_none());
         assert!(d.files.is_none());
         assert!(d.locked.is_none());
     }
 
     #[test]
-    fn validate_reports_the_reference_messages() {
+    fn validate_reports_invalid_keys() {
         let d = dep(r#"{"files": ["a"]}"#);
         assert_eq!(
             d.validate("Foo").unwrap_err().to_string(),
@@ -460,7 +554,7 @@ mod tests {
         let d = dep(r#"{"repository": "https://github.com/a/b", "files": []}"#);
         assert_eq!(
             d.validate("Foo").unwrap_err().to_string(),
-            "config key 'vendorDependencies.Foo.files' is not a valid array"
+            "config key 'vendorDependencies.Foo.files' is not a valid file path, mapping, or array"
         );
 
         let d =

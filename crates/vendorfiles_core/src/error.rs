@@ -23,7 +23,9 @@ pub enum VendorError {
     #[error("config key 'vendorDependencies.{name}.repository' is not a valid github url")]
     InvalidRepositoryKey { name: String },
 
-    #[error("config key 'vendorDependencies.{name}.files' is not a valid array")]
+    #[error(
+        "config key 'vendorDependencies.{name}.files' is not a valid file path, mapping, or array"
+    )]
     InvalidFilesKey { name: String },
 
     #[error("config key 'vendorDependencies.{name}.hashVersionFile' must be a string or true")]

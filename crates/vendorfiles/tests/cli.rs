@@ -642,7 +642,7 @@ fn a_default_vendor_config_folder_without_a_config_reports_the_usual_error() {
 }
 
 #[test]
-fn invalid_config_keys_are_reported_with_the_reference_wording() {
+fn invalid_config_keys_are_reported() {
     let cases = [
         (
             r#"{"vendorDependencies": {"Foo": {"files": ["a"]}}}"#,
@@ -650,7 +650,7 @@ fn invalid_config_keys_are_reported_with_the_reference_wording() {
         ),
         (
             r#"{"vendorDependencies": {"Foo": {"repository": "https://github.com/a/b"}}}"#,
-            "config key 'vendorDependencies.Foo.files' is not a valid array",
+            "config key 'vendorDependencies.Foo.files' is not a valid file path, mapping, or array",
         ),
         (
             r#"{"vendorDependencies": {"Foo": {"repository": "https://github.com/a/b", "files": ["a"], "releaseRegex": "("}}}"#,
