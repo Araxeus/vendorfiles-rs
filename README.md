@@ -814,7 +814,7 @@ A dependency that isn't on GitHub sets `url` instead of `repository`. Its files 
             "url": "https://filepilot.tech/download/v{version}",
             "versionUrl": "https://filepilot.tech/download/latest",
             "versionRegex": "v(\\d+\\.\\d+\\.\\d+)",
-            "files": [{ "{url}": "FPilot.exe" }]
+            "files": { "{url}": "FPilot.exe" }
         }
     }
 }
@@ -832,7 +832,7 @@ vendorDependencies:
     versionUrl: https://filepilot.tech/download/latest
     versionRegex: v(\d+\.\d+\.\d+)
     files:
-      - '{url}': FPilot.exe
+      '{url}': FPilot.exe
 ```
 
 </details>
@@ -845,13 +845,15 @@ vendorDependencies:
 url = 'https://filepilot.tech/download/v{version}'
 versionUrl = 'https://filepilot.tech/download/latest'
 versionRegex = 'v(\d+\.\d+\.\d+)'
-files = [{ '{url}' = 'FPilot.exe' }]
+
+[vendorDependencies.FilePilot.files]
+'{url}' = 'FPilot.exe'
 ```
 
 </details>
 <!-- /formats -->
 
-- Every file maps a URL to the name it's saved under, like `{ "{url}": "FPilot.exe" }`.
+- Every file maps a URL to the name it's saved under, like `"files": { "{url}": "FPilot.exe" }`.
 - A file can also be a full URL, like `https://cdn.example.com/tool.js`.
 - Map a URL to a list or a map to [extract files from the archive](#extracting-files-from-archives).
 - `{version}` is the version's `x.y.z`, as for releases. `{tag}` is the version exactly as found,
@@ -880,7 +882,7 @@ A git repository works on any host that serves git over HTTPS, like Codeberg or 
         "forgejo": {
             "url": "https://codeberg.org/forgejo/forgejo/releases/download/{tag}",
             "versionUrl": "https://codeberg.org/forgejo/forgejo.git",
-            "files": [{ "{url}/forgejo-{version}-linux-amd64": "forgejo" }]
+            "files": { "{url}/forgejo-{version}-linux-amd64": "forgejo" }
         }
     }
 }
@@ -897,7 +899,7 @@ vendorDependencies:
     url: https://codeberg.org/forgejo/forgejo/releases/download/{tag}
     versionUrl: https://codeberg.org/forgejo/forgejo.git
     files:
-      - '{url}/forgejo-{version}-linux-amd64': forgejo
+      '{url}/forgejo-{version}-linux-amd64': forgejo
 ```
 
 </details>
@@ -909,7 +911,9 @@ vendorDependencies:
 [vendorDependencies.forgejo]
 url = 'https://codeberg.org/forgejo/forgejo/releases/download/{tag}'
 versionUrl = 'https://codeberg.org/forgejo/forgejo.git'
-files = [{ '{url}/forgejo-{version}-linux-amd64' = 'forgejo' }]
+
+[vendorDependencies.forgejo.files]
+'{url}/forgejo-{version}-linux-amd64' = 'forgejo'
 ```
 
 </details>

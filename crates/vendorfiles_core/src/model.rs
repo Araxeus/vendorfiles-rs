@@ -907,6 +907,7 @@ mod tests {
             r#"{"url":"https://x.io/v{version}","versionUrl":"https://x.io/latest","files":[{"{url}":"tool.exe"}]}"#,
             r#"{"url":"https://x.io/v{tag}","version":"v1.0.0","files":[{"{url}/a.zip":["a"]}]}"#,
             r#"{"url":"https://x.io","files":[{"https://cdn.x.io/b.js":"b.js","{url}/c.zip":{"c":"d"}}]}"#,
+            r#"{"url":"https://x.io/tool.exe","files":{"{url}":"tool.exe"}}"#,
             r##"{"url":"https://x.io/v{tag}","versionUrl":"https://x.io/changes","versionSelector":"#latest","files":[{"{url}":"t"}]}"##,
         ] {
             dep(ok).validate("Foo").unwrap();
