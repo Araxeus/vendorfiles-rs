@@ -1120,21 +1120,31 @@ mod tests {
 
     #[tokio::test]
     async fn a_version_bump_rewrites_only_the_version() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = format!(
-            r#"{{"vendorDependencies":{{"first":{{ /* keep */
-                "repository":"{REPOSITORY}","version":"v1","files":["LICENSE"]
+        for files in [
+            r#"["LICENSE"]"#,
+            r#""LICENSE""#,
+            r#"{"LICENSE":"COPYING"}"#,
+            r#"[{"LICENSE":"COPYING"}]"#,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = format!(
+                r#"{{"vendorDependencies":{{"first":{{ /* keep */
+                "repository":"{REPOSITORY}","version":"v1","files":{files}
             }}}}}}"#
-        );
-        let mut session = session(dir.path(), &config).await;
+            );
+            let mut session = session(dir.path(), &config).await;
 
-        commit(&mut session, dependency("first", "v1", "LICENSE"), "v2").await;
+            let dependency = session.workspace.dependencies["first"]
+                .resolve("first")
+                .unwrap();
+            commit(&mut session, dependency, "v2").await;
 
-        let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
-        assert_eq!(text, config.replace(r#""v1""#, r#""v2""#));
-        let locked = read_lockfile(&dir.path().join("vendor/first/vendor-lock.json"))
-            .await
-            .unwrap();
-        assert_eq!(locked["first"].version, "v2");
+            let text = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+            assert_eq!(text, config.replace(r#""v1""#, r#""v2""#));
+            let locked = read_lockfile(&dir.path().join("vendor/first/vendor-lock.json"))
+                .await
+                .unwrap();
+            assert_eq!(locked["first"].version, "v2");
+        }
     }
 }

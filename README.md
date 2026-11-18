@@ -508,6 +508,12 @@ files = ['dist/coloris.min.js', { LICENSE = '../licenses/COLORIS_LICENSE' }]
 
 An absolute destination is used exactly as written, like an absolute `vendorFolder`.
 
+If every file has a destination, you can leave out the array:
+
+```json
+"files": { "LICENSE": "../licenses/COLORIS_LICENSE" }
+```
+
 ### Versions and releases
 
 By default, `version` holds a release tag, and `vendor update` moves a dependency to the newest
