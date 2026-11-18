@@ -463,6 +463,72 @@ mod tests {
     }
 
     #[test]
+    fn schema_and_validation_reject_malformed_file_selections() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../vendorfiles.schema.json")).unwrap();
+        let validator = jsonschema::draft202012::new(&schema).unwrap();
+        for files in [
+            "null",
+            "true",
+            "42",
+            "[]",
+            "[null]",
+            "[[\"LICENSE\"]]",
+            r#"{"LICENSE": null}"#,
+            r#"{"LICENSE": false}"#,
+            r#"{"LICENSE": 42}"#,
+            r#"{"LICENSE": "COPYING", "bad": 42}"#,
+            r#"{"{release}/a.zip": ["one", {"two": "out"}]}"#,
+            r#"{"{release}/a.zip": {"one": ["out"]}}"#,
+        ] {
+            let value: serde_json::Value = serde_json::from_str(files).unwrap();
+            for selection in [value.clone(), serde_json::json!([value])] {
+                let entry = serde_json::json!({
+                    "repository": "https://github.com/a/b", "files": selection
+                });
+                let raw: RawDependency = serde_json::from_value(entry.clone()).unwrap();
+                assert!(raw.validate("b").is_err(), "accepted {selection}");
+                assert!(
+                    !validator.is_valid(&serde_json::json!({"vendorDependencies": {"b": entry}})),
+                    "schema accepted {selection}"
+                );
+                // Defaults use the same schema, without the required dependency fields.
+                assert!(
+                    !validator.is_valid(&serde_json::json!({
+                        "vendorDependencies": {}, "default": {"files": selection}
+                    })),
+                    "defaults schema accepted {selection}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_mappings_and_archive_selections_remain_valid() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../vendorfiles.schema.json")).unwrap();
+        let validator = jsonschema::draft202012::new(&schema).unwrap();
+        for files in [
+            serde_json::json!({}),
+            serde_json::json!({"{release}/a.zip": []}),
+            serde_json::json!({"{release}/a.zip": {}}),
+        ] {
+            for selection in [files.clone(), serde_json::json!([files])] {
+                let entry = serde_json::json!({
+                    "repository": "https://github.com/a/b", "files": selection
+                });
+                let raw: RawDependency = serde_json::from_value(entry.clone()).unwrap();
+                raw.validate("b").unwrap();
+                let locked = crate::lockfile::config_files_to_lock_files(&raw.files.unwrap(), "v1");
+                assert_eq!(crate::lockfile::flat_files(&locked), Vec::<String>::new());
+                assert!(
+                    validator.is_valid(&serde_json::json!({"vendorDependencies": {"b": entry}}))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn mapping_defaults_work_in_every_config_format() {
         use crate::config::ConfigFormat;
         for (format, text) in [

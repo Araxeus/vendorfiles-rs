@@ -149,7 +149,6 @@
           "additionalProperties": {
             "$ref": "#/definitions/fileMapping"
           },
-          "minProperties": 1,
           "examples": [
             { "LICENSE": "../licenses/COLORIS_LICENSE" },
             { "{release}/fzf-{version}-windows_amd64.zip": "fzf-windows.zip" },
@@ -169,23 +168,9 @@
           "type": "array",
           "description": "List of files to extract from an archive",
           "items": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "File to extract from the archive"
-              },
-              {
-                "type": "object",
-                "description": "File to extract with custom destination name",
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "minProperties": 1,
-                "maxProperties": 1
-              }
-            ]
-          },
-          "minItems": 1
+            "type": "string",
+            "description": "File to extract from the archive"
+          }
         },
         {
           "type": "object",
