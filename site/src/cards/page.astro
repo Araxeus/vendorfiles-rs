@@ -1,0 +1,77 @@
+---
+// The link preview image that chat apps and social sites show for a page.
+// Logo and title stay inside the middle 630 px square, which survives a square crop.
+
+import type { CardOptions } from 'astro-cards';
+import sans from 'starlight-theme-next/fonts/geist-sans/files/geist-sans-latin-600-normal.woff2?url';
+import mono from 'starlight-theme-next/fonts/geist-mono/files/geist-mono-latin-400-normal.woff2?url';
+
+interface Props {
+  title: string;
+}
+
+export const card = { width: 1200, height: 630 } satisfies CardOptions;
+
+const { title } = Astro.props;
+const logo = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/favicon.svg`;
+
+// Font URLs come from Vite imports, so the faces are written out here.
+const fonts = `
+  @font-face { font-family: 'Geist'; font-weight: 600; src: url(${sans}) format('woff2'); }
+  @font-face { font-family: 'Geist Mono'; font-weight: 400; src: url(${mono}) format('woff2'); }
+`;
+---
+
+<div class="card">
+  <div class="brand">
+    <img src={logo} width="64" height="64" alt="" />
+    <span>vendorfiles</span>
+  </div>
+
+  <div class="title">{title}</div>
+
+  <div class="url">araxeus.github.io/vendorfiles-rs</div>
+</div>
+
+<style is:inline set:html={fonts} />
+
+<style is:inline>
+  .card {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 64px 80px 56px;
+    background: #111111;
+    background-image: radial-gradient(circle at 50% 0%, rgba(138, 167, 247, 0.2), transparent 60%);
+    color: #ffffff;
+    font-family: 'Geist';
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 40px;
+    letter-spacing: -0.02em;
+  }
+
+  .title {
+    font-size: 64px;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    max-width: 600px;
+    text-align: center;
+  }
+
+  .url {
+    font-family: 'Geist Mono';
+    font-weight: 400;
+    font-size: 26px;
+    color: #8aa7f7;
+  }
+</style>
