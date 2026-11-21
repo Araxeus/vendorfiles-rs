@@ -1158,7 +1158,7 @@ description, or its repository. Name matches come first.
 ```bash
 vendor search          # everything
 vendor search disk     # bottom, btop, dust, dysk and gdu
-vendor search git      # delta, gh, lazygit and actionlint
+vendor search git      # delta, gh, lazygit, actionlint and pinact
 ```
 
 If you mistype a name the registry nearly knows, `vendor` suggests the right one before it searches
@@ -1178,7 +1178,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (49)</summary>
+<summary>Programs you can add by name (50)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1215,6 +1215,7 @@ list is out of date.
 | [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
 | [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [pinact](https://github.com/suzuki-shunsuke/pinact) |  | Pin GitHub Actions and workflows to commit SHAs and update versions | All |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
 | [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
