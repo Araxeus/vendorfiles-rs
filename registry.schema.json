@@ -52,7 +52,7 @@
           "pattern": "^https?://"
         },
         "versionRegex": {
-          "description": "Picks the version out of the `versionUrl` answer: capture group 1, or the whole match. For a `.git` `versionUrl`, only the tags it matches count.",
+          "description": "Picks the version out of the `versionUrl` answer: capture group 1, or the whole match. For a `.git` `versionUrl` or a `versionJsonPointer` list, only the versions it matches count.",
           "type": "string",
           "minLength": 1
         },
@@ -60,6 +60,11 @@
           "description": "A CSS selector for the element of a `versionUrl` page that holds the version. Its text is the version, or what `versionRegex` searches.",
           "type": "string",
           "minLength": 1
+        },
+        "versionJsonPointer": {
+          "description": "A JSON pointer to the value of a JSON `versionUrl` answer that holds the version. A string is read like a page. A list of versions gives the latest stable one.",
+          "type": "string",
+          "pattern": "^(/.*)?$"
         },
         "releaseRegex": {
           "description": "Which tags count, for a repository publishing several trains of releases. `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0`, and only the first carries binaries.",
@@ -103,7 +108,8 @@
               { "required": ["url"] },
               { "required": ["versionUrl"] },
               { "required": ["versionRegex"] },
-              { "required": ["versionSelector"] }
+              { "required": ["versionSelector"] },
+              { "required": ["versionJsonPointer"] }
             ]
           }
         },
@@ -113,6 +119,7 @@
           "not": {
             "anyOf": [
               { "required": ["repository"] },
+              { "required": ["versionSelector", "versionJsonPointer"] },
               { "required": ["path"] },
               { "required": ["releaseRegex"] },
               { "required": ["hashVersionFile"] }

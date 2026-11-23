@@ -1,4 +1,4 @@
-//! Reading a version out of a page: its whole body, one element, or a regex match.
+//! Reading a version out of a page: its whole body, one element, a JSON value, or a regex match.
 
 use scraper::{Html, Selector};
 
@@ -42,9 +42,43 @@ pub fn find_version(
         .or_else(|| regex.and_then(|_| extract_version(&element.html(), regex)))
 }
 
+/// The version at `pointer` in a JSON body, per `versionJsonPointer` and `versionRegex`.
+///
+/// A string or number there is read like a page's text. An array is a list of versions, and the
+/// latest one wins, ranked like the tags of a `.git` `versionUrl`. There `versionRegex` says
+/// which versions count.
+#[must_use]
+pub fn find_json_version(
+    body: &str,
+    pointer: &str,
+    regex: Option<&fancy_regex::Regex>,
+) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    match json.pointer(pointer)? {
+        serde_json::Value::Array(items) => {
+            let versions: Vec<String> = items
+                .iter()
+                .filter_map(scalar)
+                .filter(|version| super::is_plausible_version(version))
+                .collect();
+            super::tags::latest_tag(&versions, regex)
+        }
+        value => extract_version(&scalar(value)?, regex),
+    }
+}
+
+/// A JSON string or number as text.
+fn scalar(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{extract_version, find_version};
+    use super::{extract_version, find_json_version, find_version};
 
     #[test]
     fn a_plain_body_is_the_version() {
@@ -110,6 +144,58 @@ mod tests {
         assert_eq!(
             find_version(page, Some(&sel("a.dl")), Some(&re)).as_deref(),
             Some("4.5.6")
+        );
+    }
+
+    #[test]
+    fn a_pointer_reads_one_json_value() {
+        let search = r#"{"totalHits":1,"data":[{"id":"pkg","version":"23.1.5","versions":[{"version":"8.0.0"}]}]}"#;
+        assert_eq!(
+            find_json_version(search, "/data/0/version", None).as_deref(),
+            Some("23.1.5")
+        );
+        assert_eq!(
+            find_json_version(r#"{"v":"Release v1.2.3"}"#, "/v", None),
+            None
+        );
+        let re = fancy_regex::Regex::new(r"v(\d+\.\d+\.\d+)").unwrap();
+        assert_eq!(
+            find_json_version(r#"{"v":"Release v1.2.3"}"#, "/v", Some(&re)).as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            find_json_version(r#"{"build":42}"#, "/build", None).as_deref(),
+            Some("42")
+        );
+    }
+
+    #[test]
+    fn a_pointer_to_a_list_picks_the_latest_stable_version() {
+        let index =
+            r#"{"versions":["8.0.0","18.1.3","18.1.3.2","23.1.5","24.0.0-preview.1","9.0.0"]}"#;
+        assert_eq!(
+            find_json_version(index, "/versions", None).as_deref(),
+            Some("23.1.5")
+        );
+        assert_eq!(
+            find_json_version(r#"["v1.9.0","v1.10.0"]"#, "", None).as_deref(),
+            Some("v1.10.0")
+        );
+        let re = fancy_regex::Regex::new(r"^18\.").unwrap();
+        assert_eq!(
+            find_json_version(index, "/versions", Some(&re)).as_deref(),
+            Some("18.1.3.2")
+        );
+    }
+
+    #[test]
+    fn a_pointer_that_finds_nothing_usable_is_a_miss() {
+        assert_eq!(find_json_version("<html></html>", "/v", None), None);
+        assert_eq!(find_json_version(r#"{"v":"1.0"}"#, "/w", None), None);
+        assert_eq!(find_json_version(r#"{"v":{"x":"1.0"}}"#, "/v", None), None);
+        assert_eq!(
+            find_json_version(r#"{"v":["../x","{}"]}"#, "/v", None),
+            None
         );
     }
 }

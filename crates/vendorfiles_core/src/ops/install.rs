@@ -394,6 +394,7 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
             version_url: source.version_url.clone(),
             version_regex: source.version_regex.clone(),
             version_selector: source.version_selector.clone(),
+            version_json_pointer: source.version_json_pointer.clone(),
             ..entry
         },
     }

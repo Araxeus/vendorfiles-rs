@@ -404,6 +404,10 @@ async fn install_listed_url(
             .version_selector
             .clone()
             .or(listed.version_selector),
+        version_json_pointer: existing
+            .version_json_pointer
+            .clone()
+            .or(listed.version_json_pointer),
         files: Some(files),
         ..existing
     };

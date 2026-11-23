@@ -618,6 +618,7 @@ programs:
             version_url: program.version_url.clone(),
             version_regex: program.version_regex.clone(),
             version_selector: program.version_selector.clone(),
+            version_json_pointer: program.version_json_pointer.clone(),
         };
         match latest_version(github.http(), &source).await {
             Ok(version) => Some(version.unwrap_or_default()),

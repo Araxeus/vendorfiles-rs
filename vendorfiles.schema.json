@@ -69,7 +69,7 @@
         },
         "versionUrl": {
           "type": "string",
-          "description": "Where a url dependency's latest version comes from. A URL ending in .git gives the repository's newest tag. Any other URL is a page whose body, selected element or regex match is the version. Without one, the dependency installs once",
+          "description": "Where a url dependency's latest version comes from. A URL ending in .git gives the repository's newest tag. Any other URL is a page whose body, selected element, JSON value or regex match is the version. Without one, the dependency installs once",
           "pattern": "^https?://",
           "examples": [
             "https://filepilot.tech/download/latest",
@@ -78,13 +78,19 @@
         },
         "versionRegex": {
           "type": "string",
-          "description": "Picks the version out of what versionUrl returns: capture group 1, or the whole match. For a .git versionUrl, only the tags it matches count. Use double escaping (\\\\d) in JSON",
+          "description": "Picks the version out of what versionUrl returns: capture group 1, or the whole match. For a .git versionUrl or a versionJsonPointer list, only the versions it matches count. Use double escaping (\\\\d) in JSON",
           "examples": ["v(\\d+\\.\\d+\\.\\d+)", "^v\\d+"]
         },
         "versionSelector": {
           "type": "string",
           "description": "A CSS selector for the element of a versionUrl page that holds the version, as document.querySelector takes. The element's text is the version, or what versionRegex searches",
           "examples": ["#latest", ".release h2"]
+        },
+        "versionJsonPointer": {
+          "type": "string",
+          "description": "A JSON pointer to the value of a JSON versionUrl answer that holds the version. A string is read like a page. A list of versions gives the latest stable one",
+          "pattern": "^(/.*)?$",
+          "examples": ["/data/0/version", "/versions"]
         },
         "version": {
           "type": "string",
@@ -152,7 +158,8 @@
               { "required": ["url"] },
               { "required": ["versionUrl"] },
               { "required": ["versionRegex"] },
-              { "required": ["versionSelector"] }
+              { "required": ["versionSelector"] },
+              { "required": ["versionJsonPointer"] }
             ]
           }
         },
@@ -162,6 +169,7 @@
           "not": {
             "anyOf": [
               { "required": ["repository"] },
+              { "required": ["versionSelector", "versionJsonPointer"] },
               {
                 "required": ["releaseRegex"],
                 "properties": { "releaseRegex": { "minLength": 1 } }

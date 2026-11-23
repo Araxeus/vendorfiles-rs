@@ -49,6 +49,7 @@ pub struct Entry {
     pub version_url: Option<String>,
     pub version_regex: Option<String>,
     pub version_selector: Option<String>,
+    pub version_json_pointer: Option<String>,
     /// The `files` array to write.
     pub files: Vec<FileEntry>,
     /// Which tags count as releases, when the repository publishes several trains.
@@ -166,6 +167,7 @@ fn entry(name: &str, program: &Program, files: Vec<FileEntry>) -> Entry {
         version_url: program.version_url.clone(),
         version_regex: program.version_regex.clone(),
         version_selector: program.version_selector.clone(),
+        version_json_pointer: program.version_json_pointer.clone(),
         files,
         release_regex: program.release_regex.clone(),
         hash_version_file: program.hash_version_file,

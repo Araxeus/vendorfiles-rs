@@ -50,9 +50,19 @@ pub enum VendorError {
     InvalidVersionSelectorKey { name: String },
 
     #[error(
-        "config key 'vendorDependencies.{name}.versionSelector' needs a 'versionUrl' that isn't a .git URL"
+        "config key 'vendorDependencies.{name}.versionJsonPointer' must be a JSON pointer like '/data/0/version'"
     )]
-    SelectorNeedsPage { name: String },
+    InvalidVersionJsonPointerKey { name: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.{key}' needs a 'versionUrl' that isn't a .git URL"
+    )]
+    KeyNeedsPage { name: String, key: &'static str },
+
+    #[error(
+        "config keys 'vendorDependencies.{name}.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
+    )]
+    SelectorAndJsonPointer { name: String },
 
     /// A key that belongs to the other kind of dependency: `repository` or `url`.
     #[error("config key 'vendorDependencies.{name}.{key}' only applies to a '{needs}' dependency")]

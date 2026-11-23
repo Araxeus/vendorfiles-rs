@@ -191,6 +191,12 @@ pub struct DefaultOptions {
     pub version_regex: Option<String>,
     #[serde(rename = "versionSelector", default, deserialize_with = "de_lenient")]
     pub version_selector: Option<String>,
+    #[serde(
+        rename = "versionJsonPointer",
+        default,
+        deserialize_with = "de_lenient"
+    )]
+    pub version_json_pointer: Option<String>,
     #[serde(default, deserialize_with = "de_files")]
     pub files: Option<Vec<FileEntry>>,
     #[serde(default, deserialize_with = "de_lenient")]
@@ -257,6 +263,13 @@ pub struct RawDependency {
     )]
     pub version_selector: Option<String>,
     #[serde(
+        rename = "versionJsonPointer",
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_json_pointer: Option<String>,
+    #[serde(
         default,
         deserialize_with = "de_files",
         skip_serializing_if = "Option::is_none"
@@ -317,7 +330,12 @@ impl RawDependency {
             fill!(repository, hash_version_file, release_regex);
         }
         if self.repository.is_none() {
-            fill!(version_url, version_regex, version_selector);
+            fill!(
+                version_url,
+                version_regex,
+                version_selector,
+                version_json_pointer
+            );
         }
         fill!(files, version, vendor_folder, locked, name);
     }
@@ -340,6 +358,7 @@ impl RawDependency {
             version_url,
             version_regex,
             version_selector,
+            version_json_pointer,
             files,
             version,
             hash_version_file,
@@ -388,6 +407,7 @@ impl RawDependency {
             ("versionUrl", &self.version_url),
             ("versionRegex", &self.version_regex),
             ("versionSelector", &self.version_selector),
+            ("versionJsonPointer", &self.version_json_pointer),
         ];
         if let Some((key, _)) = url_only.iter().find(|(_, value)| value.is_some()) {
             return Err(VendorError::KeyNeedsOtherMode {
@@ -431,13 +451,32 @@ impl RawDependency {
         {
             return Err(VendorError::InvalidVersionRegexKey { name: name() });
         }
-        if let Some(selector) = self.version_selector.as_deref() {
-            if scraper::Selector::parse(selector).is_err() {
-                return Err(VendorError::InvalidVersionSelectorKey { name: name() });
-            }
-            if self.version_url.as_deref().is_none_or(is_git_url) {
-                return Err(VendorError::SelectorNeedsPage { name: name() });
-            }
+        if self
+            .version_selector
+            .as_deref()
+            .is_some_and(|selector| scraper::Selector::parse(selector).is_err())
+        {
+            return Err(VendorError::InvalidVersionSelectorKey { name: name() });
+        }
+        // A JSON pointer is empty, for the whole document, or a path of `/`-led segments.
+        if self
+            .version_json_pointer
+            .as_deref()
+            .is_some_and(|pointer| !pointer.is_empty() && !pointer.starts_with('/'))
+        {
+            return Err(VendorError::InvalidVersionJsonPointerKey { name: name() });
+        }
+        if self.version_selector.is_some() && self.version_json_pointer.is_some() {
+            return Err(VendorError::SelectorAndJsonPointer { name: name() });
+        }
+        let page_only = [
+            ("versionSelector", self.version_selector.is_some()),
+            ("versionJsonPointer", self.version_json_pointer.is_some()),
+        ];
+        if let Some((key, _)) = page_only.iter().find(|(_, set)| *set)
+            && self.version_url.as_deref().is_none_or(is_git_url)
+        {
+            return Err(VendorError::KeyNeedsPage { name: name(), key });
         }
 
         // The lockfile names every file before anything is downloaded, so each input needs an
@@ -497,6 +536,7 @@ impl RawDependency {
                 version_url: self.version_url.clone(),
                 version_regex: self.version_regex.clone().filter(|r| !r.is_empty()),
                 version_selector: self.version_selector.clone(),
+                version_json_pointer: self.version_json_pointer.clone(),
             };
             (Source::Url(source), url.clone(), host)
         } else {
@@ -870,6 +910,24 @@ mod tests {
             "config key 'vendorDependencies.Foo.versionSelector' needs a 'versionUrl' that isn't a .git URL"
         );
         assert_eq!(
+            err(
+                r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionJsonPointer":"data/0","files":[{"{url}":"a"}]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionJsonPointer' must be a JSON pointer like '/data/0/version'"
+        );
+        assert_eq!(
+            err(
+                r#"{"url":"https://x.io","versionUrl":"https://x.io/r.git","versionJsonPointer":"/v","files":[{"{url}":"a"}]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionJsonPointer' needs a 'versionUrl' that isn't a .git URL"
+        );
+        assert_eq!(
+            err(
+                r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionSelector":"h2","versionJsonPointer":"/v","files":[{"{url}":"a"}]}"#
+            ),
+            "config keys 'vendorDependencies.Foo.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
+        );
+        assert_eq!(
             err(r#"{"url":"https://x.io","hashVersionFile":true,"files":[{"{url}":"a"}]}"#),
             "config key 'vendorDependencies.Foo.hashVersionFile' only applies to a 'repository' dependency"
         );
@@ -899,6 +957,12 @@ mod tests {
             err(r#"{"repository":"https://github.com/a/b","versionSelector":"h2","files":["a"]}"#),
             "config key 'vendorDependencies.Foo.versionSelector' only applies to a 'url' dependency"
         );
+        assert_eq!(
+            err(
+                r#"{"repository":"https://github.com/a/b","versionJsonPointer":"/v","files":["a"]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionJsonPointer' only applies to a 'url' dependency"
+        );
     }
 
     #[test]
@@ -909,6 +973,8 @@ mod tests {
             r#"{"url":"https://x.io","files":[{"https://cdn.x.io/b.js":"b.js","{url}/c.zip":{"c":"d"}}]}"#,
             r#"{"url":"https://x.io/tool.exe","files":{"{url}":"tool.exe"}}"#,
             r##"{"url":"https://x.io/v{tag}","versionUrl":"https://x.io/changes","versionSelector":"#latest","files":[{"{url}":"t"}]}"##,
+            r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/index.json","versionJsonPointer":"/versions","files":[{"{url}":"t"}]}"#,
+            r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/list.json","versionJsonPointer":"","files":[{"{url}":"t"}]}"#,
         ] {
             dep(ok).validate("Foo").unwrap();
         }

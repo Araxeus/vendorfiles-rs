@@ -57,6 +57,9 @@ pub struct Program {
     /// Picks one element of an HTML `versionUrl` page, whose text holds the version.
     #[serde(rename = "versionSelector", default)]
     pub version_selector: Option<String>,
+    /// Points at the value of a JSON `versionUrl` answer that holds the version, or a list of them.
+    #[serde(rename = "versionJsonPointer", default)]
+    pub version_json_pointer: Option<String>,
     /// Which tags count, for repositories that publish more than one train of releases.
     ///
     /// `bitwarden/sdk` tags `bws-v2.1.0` alongside `rust-v2.1.0` and `python-v2.1.0`, so without

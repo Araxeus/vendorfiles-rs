@@ -1,7 +1,8 @@
 //! Versions and requests for dependencies that download from a plain URL.
 //!
 //! A `versionUrl` ending in `.git` names a git repository, and its latest tag is the version.
-//! Any other `versionUrl` is a page whose body, selected element or regex match is the version.
+//! Any other `versionUrl` is a page whose body, selected element, JSON value or regex match is
+//! the version.
 //!
 //! Every request here goes through the plain HTTP client, so a GitHub token never reaches
 //! another host.
@@ -46,6 +47,7 @@ pub struct UrlSource {
     pub version_url: Option<String>,
     pub version_regex: Option<String>,
     pub version_selector: Option<String>,
+    pub version_json_pointer: Option<String>,
 }
 
 /// Whether `version_url` names a git repository, read for its tags.
@@ -126,6 +128,7 @@ async fn look_up(
         let redirected = reqwest::Url::parse(version_url).ok().as_ref() != Some(response.url());
         if redirected
             && source.version_selector.is_none()
+            && source.version_json_pointer.is_none()
             && let Some(version) = regex
                 .as_ref()
                 .and_then(|re| page::extract_version(response.url().as_str(), Some(re)))
@@ -136,13 +139,17 @@ async fn look_up(
 
         let body = read_capped(response, MAX_VERSION_BODY).await?;
         let body = String::from_utf8_lossy(&body);
-        let selector = source
-            .version_selector
-            .as_deref()
-            .map(scraper::Selector::parse)
-            .transpose()
-            .map_err(|_| miss())?;
-        page::find_version(&body, selector.as_ref(), regex.as_ref())
+        if let Some(pointer) = source.version_json_pointer.as_deref() {
+            page::find_json_version(&body, pointer, regex.as_ref())
+        } else {
+            let selector = source
+                .version_selector
+                .as_deref()
+                .map(scraper::Selector::parse)
+                .transpose()
+                .map_err(|_| miss())?;
+            page::find_version(&body, selector.as_ref(), regex.as_ref())
+        }
     };
     found
         .filter(|version| is_plausible_version(version))
@@ -261,6 +268,7 @@ mod tests {
             version_url: Some(format!("{base}/o/r.git/")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         assert_eq!(
             latest_version(&client().unwrap(), &source)
@@ -285,6 +293,7 @@ mod tests {
             version_url: Some(format!("{base}/o/r.git")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         assert_eq!(
             latest_version(&client().unwrap(), &source)
@@ -306,6 +315,7 @@ mod tests {
             version_url: Some(format!("{base}/latest")),
             version_regex: Some(r"v(\d+\.\d+\.\d+)".into()),
             version_selector: None,
+            version_json_pointer: None,
         };
         assert_eq!(
             latest_version(&client().unwrap(), &source)
@@ -324,6 +334,7 @@ mod tests {
             version_url: None,
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         assert_eq!(latest_version(&http, &none).await.unwrap(), None);
 
@@ -350,6 +361,7 @@ mod tests {
             version_url: Some(format!("{base}/changelog")),
             version_regex: None,
             version_selector: Some("#latest".into()),
+            version_json_pointer: None,
         };
         assert_eq!(
             latest_version(&client().unwrap(), &source)
@@ -357,6 +369,30 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("v2.1.0")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_json_pointer_reads_a_served_list() {
+        let base = serve(vec![route(
+            "/index.json",
+            200,
+            "Content-Type: application/json\r\n",
+            br#"{"versions":["1.0.0","1.2.0","2.0.0-rc.1"]}"#,
+        )]);
+        let source = UrlSource {
+            url: base.clone(),
+            version_url: Some(format!("{base}/index.json")),
+            version_regex: None,
+            version_selector: None,
+            version_json_pointer: Some("/versions".into()),
+        };
+        assert_eq!(
+            latest_version(&client().unwrap(), &source)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("1.2.0")
         );
     }
 
@@ -375,6 +411,7 @@ mod tests {
                 version_url: Some(format!("{base}/{path}")),
                 version_regex: None,
                 version_selector: None,
+                version_json_pointer: None,
             };
             let error = latest_version(&http, &source).await.unwrap_err();
             assert_eq!(
@@ -394,6 +431,7 @@ mod tests {
             version_url: None,
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         send(latest_version(&http, &source));
     }
@@ -406,6 +444,7 @@ mod tests {
             version_url: Some(format!("{base}/busy")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         let error = latest_version(&client().unwrap(), &source)
             .await
@@ -430,6 +469,7 @@ mod tests {
                 version_url: Some(version_url),
                 version_regex: None,
                 version_selector: None,
+                version_json_pointer: None,
             };
             let outcome = tokio::time::timeout(
                 LOOKUP_TIMEOUT + LOOKUP_TIMEOUT / 10,
@@ -456,6 +496,7 @@ mod tests {
             version_url: Some(format!("{base}/{path}")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         for path in ["climb", "json", "word"] {
             let error = latest_version(&http, &lookup(path)).await.unwrap_err();
@@ -484,6 +525,7 @@ mod tests {
             version_url: Some(format!("{base}/latest")),
             version_regex: Some(r"[?&]v=([^&]+)".into()),
             version_selector: None,
+            version_json_pointer: None,
         };
         let error = latest_version(&client().unwrap(), &source)
             .await
@@ -525,6 +567,7 @@ mod tests {
             version_url: Some(format!("{base}/o/r.git")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         let error = latest_version(&client().unwrap(), &source)
             .await
@@ -551,6 +594,7 @@ mod tests {
             version_url: Some(format!("{base}/o/r.git")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         let error = latest_version(&client().unwrap(), &source)
             .await
@@ -574,6 +618,7 @@ mod tests {
             version_url: Some(format!("{base}/o/r.git")),
             version_regex: None,
             version_selector: None,
+            version_json_pointer: None,
         };
         assert_eq!(
             latest_version(&client().unwrap(), &source)
