@@ -337,6 +337,7 @@ files = ['cooltipz.min.css', 'LICENSE']
 | `versionUrl` | `url` dependencies only. Where the latest version comes from |
 | `versionRegex` | `url` dependencies only. Picks the version out of what `versionUrl` returns |
 | `versionSelector` | `url` dependencies only. Picks the element of a `versionUrl` page that holds the version |
+| `versionJsonPointer` | `url` dependencies only. Picks the value of a JSON `versionUrl` answer that holds the version |
 
 The first three are all most dependencies need.
 
@@ -959,6 +960,69 @@ A page can answer with just the version, like `v1.2.3`. For anything bigger, `ve
 - Searching the element's HTML finds a version kept in an attribute, like
   `<a href="/download/v1.2.3">`.
 - `vendor` reads the HTML the server sends. A version that JavaScript fills in later isn't there.
+
+#### Reading the version from JSON
+
+An API that answers in JSON takes `versionJsonPointer`, a
+[JSON pointer](https://datatracker.ietf.org/doc/html/rfc6901) to the value that holds the version.
+NuGet lists every version of a package:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "libclang": {
+            "url": "https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}",
+            "versionUrl": "https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json",
+            "versionJsonPointer": "/versions",
+            "files": { "{url}": { "runtimes/win-x64/native/libclang.dll": "libclang.dll" } }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  libclang:
+    url: https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}
+    versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
+    versionJsonPointer: /versions
+    files:
+      '{url}':
+        runtimes/win-x64/native/libclang.dll: libclang.dll
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.libclang]
+url = 'https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}'
+versionUrl = 'https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json'
+versionJsonPointer = '/versions'
+
+[vendorDependencies.libclang.files.'{url}']
+'runtimes/win-x64/native/libclang.dll' = 'libclang.dll'
+```
+
+</details>
+<!-- /formats -->
+
+- `/data/0/version` reads `data[0].version`. An empty pointer, `""`, is the whole answer.
+- A string or number there is the version, or what `versionRegex` searches.
+- A list holds versions, and the latest stable one wins. Versions compare like
+  [tags](#finding-the-latest-version), and with `versionRegex` only the versions it matches count.
+- `versionJsonPointer` and `versionSelector` can't both be set.
 
 ### Locking a dependency
 

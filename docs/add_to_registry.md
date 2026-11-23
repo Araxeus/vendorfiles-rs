@@ -159,8 +159,8 @@ where its latest version comes from. Its assets are URLs, usually `{url}` or `{u
 
 - `versionUrl` can be a page, a URL that redirects to a versioned file, or a `.git` repository
   whose newest tag is the version.
-- `versionRegex` and `versionSelector` pick the version out of a page. The README section
-  "Downloading from other sites" explains both.
+- `versionRegex`, `versionSelector` and `versionJsonPointer` pick the version out of a page. The
+  README section "Downloading from other sites" explains each.
 - A `url` program takes no `path`, `releaseRegex`, `hashVersionFile` or `{release}/` assets.
 - The first `url` program raises `version` at the top of `registry.yml` to `3`. Older builds then
   say to update instead of failing on a key they don't know.

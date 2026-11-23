@@ -51,11 +51,11 @@
 # to track it by commit; it takes no `targets`, being the same everywhere.
 #
 # A program that is not released on GitHub sets `url` instead of `repository`, and `versionUrl` for
-# where its latest version comes from. `versionRegex` and `versionSelector` pick the version out of
-# a page. Its assets are URLs, usually `{url}` or `{url}/...`, and it takes no `path`,
-# `releaseRegex` or `hashVersionFile`. The README section "Downloading from other sites" explains
-# each key. A `url` program needs `version: 3` below, so older builds say to update rather than
-# fail on a key they don't know.
+# where its latest version comes from. `versionRegex`, `versionSelector` and `versionJsonPointer`
+# pick the version out of a page. Its assets are URLs, usually `{url}` or `{url}/...`, and it takes
+# no `path`, `releaseRegex` or `hashVersionFile`. The README section "Downloading from other sites"
+# explains each key. A `url` program needs `version: 3` below, so older builds say to update rather
+# than fail on a key they don't know.
 #
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
