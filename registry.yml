@@ -693,15 +693,16 @@ programs:
         asset: "{release}/wsl-notify-send_windows_amd64.zip"
         member: "wsl-notify-send.exe"
 
-  # File Pilot ships only from its own website. fpilot-scraper mirrors each beta build as a GitHub
-  # release, an x64 Windows binary under tags like `Beta-v0.8.5`.
+  # File Pilot ships only from its own website. `/download/latest` redirects to a file named after
+  # the newest version.
   file-pilot:
     description: "Fast, lightweight file manager and Explorer replacement for Windows"
     aliases: [fpilot, filepilot]
-    repository: https://github.com/Araxeus/fpilot-scraper
+    url: https://filepilot.tech/download/v{version}
+    versionUrl: https://filepilot.tech/download/latest
+    versionRegex: 'v(\d+\.\d+\.\d+)'
     targets:
-      windows-x86_64:
-        asset: "{release}/FPilot.exe"
+      windows-x86_64: { asset: "{url}", as: FPilot.exe }
 
   # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
