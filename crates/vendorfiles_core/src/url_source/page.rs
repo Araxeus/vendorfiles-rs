@@ -97,7 +97,14 @@ pub fn find_json_version(
     regex: Option<&fancy_regex::Regex>,
 ) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
-    let found = select(&json, pointer);
+
+    // The leading `/` is optional, so `latest_version` reads that top-level key.
+    let pointer = if pointer.is_empty() || pointer.starts_with('/') {
+        pointer.to_owned()
+    } else {
+        format!("/{pointer}")
+    };
+    let found = select(&json, &pointer);
     let list = match found.as_slice() {
         [serde_json::Value::Array(items)] => items.iter().collect(),
         [single] if !pointer.split('/').any(|segment| segment == "*") => {
@@ -271,6 +278,14 @@ mod tests {
         assert_eq!(
             find_json_version(r#"{"build":42}"#, "/build", None).as_deref(),
             Some("42")
+        );
+        assert_eq!(
+            find_json_version(search, "data/0/version", None).as_deref(),
+            Some("23.1.5")
+        );
+        assert_eq!(
+            find_json_version(r#"{"latest_version":"3.2.1"}"#, "latest_version", None).as_deref(),
+            Some("3.2.1")
         );
     }
 

@@ -459,14 +459,6 @@ impl RawDependency {
         {
             return Err(VendorError::InvalidVersionSelectorKey { name: name() });
         }
-        // A JSON pointer is empty, for the whole document, or a path of `/`-led segments.
-        if self
-            .version_json_pointer
-            .as_deref()
-            .is_some_and(|pointer| !pointer.is_empty() && !pointer.starts_with('/'))
-        {
-            return Err(VendorError::InvalidVersionJsonPointerKey { name: name() });
-        }
         if self.version_selector.is_some() && self.version_json_pointer.is_some() {
             return Err(VendorError::SelectorAndJsonPointer { name: name() });
         }
@@ -912,12 +904,6 @@ mod tests {
         );
         assert_eq!(
             err(
-                r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionJsonPointer":"data/0","files":[{"{url}":"a"}]}"#
-            ),
-            "config key 'vendorDependencies.Foo.versionJsonPointer' must be a JSON pointer like '/data/0/version'"
-        );
-        assert_eq!(
-            err(
                 r#"{"url":"https://x.io","versionUrl":"https://x.io/r.git","versionJsonPointer":"/v","files":[{"{url}":"a"}]}"#
             ),
             "config key 'vendorDependencies.Foo.versionJsonPointer' needs a 'versionUrl' that isn't a .git URL"
@@ -974,7 +960,7 @@ mod tests {
             r#"{"url":"https://x.io","files":[{"https://cdn.x.io/b.js":"b.js","{url}/c.zip":{"c":"d"}}]}"#,
             r#"{"url":"https://x.io/tool.exe","files":{"{url}":"tool.exe"}}"#,
             r##"{"url":"https://x.io/v{tag}","versionUrl":"https://x.io/changes","versionSelector":"#latest","files":[{"{url}":"t"}]}"##,
-            r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/index.json","versionJsonPointer":"/versions","files":[{"{url}":"t"}]}"#,
+            r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/index.json","versionJsonPointer":"versions","files":[{"{url}":"t"}]}"#,
             r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/list.json","versionJsonPointer":"","files":[{"{url}":"t"}]}"#,
         ] {
             dep(ok).validate("Foo").unwrap();

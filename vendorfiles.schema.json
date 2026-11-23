@@ -88,9 +88,8 @@
         },
         "versionJsonPointer": {
           "type": "string",
-          "description": "A JSON pointer to the value of a JSON versionUrl answer that holds the version. A string is read like a page. A list of versions gives the latest stable one, and a * segment gathers a value from every entry",
-          "pattern": "^(/.*)?$",
-          "examples": ["/data/0/version", "/versions", "/*/version"]
+          "description": "A JSON pointer, with the leading / optional, to the value of a JSON versionUrl answer that holds the version. A string is read like a page. A list of versions gives the latest stable one, and a * segment gathers a value from every entry",
+          "examples": ["data/0/version", "versions", "*/version"]
         },
         "version": {
           "type": "string",
