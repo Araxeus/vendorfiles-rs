@@ -17,6 +17,7 @@ use crate::template::{
     basename, browsable_url, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url,
     uses_version,
 };
+use crate::url_source::page::VersionSelector;
 use crate::url_source::{UrlSource, is_git_url};
 
 /// `owner`/`name` pair extracted from a GitHub repository URL.
@@ -454,7 +455,7 @@ impl RawDependency {
         if self
             .version_selector
             .as_deref()
-            .is_some_and(|selector| scraper::Selector::parse(selector).is_err())
+            .is_some_and(|selector| VersionSelector::parse(selector).is_none())
         {
             return Err(VendorError::InvalidVersionSelectorKey { name: name() });
         }
@@ -897,7 +898,7 @@ mod tests {
             err(
                 r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionSelector":"h2[","files":[{"{url}":"a"}]}"#
             ),
-            "config key 'vendorDependencies.Foo.versionSelector' must be a valid CSS selector"
+            "config key 'vendorDependencies.Foo.versionSelector' must be a valid CSS selector, optionally ending in ::attr(name)"
         );
         assert_eq!(
             err(

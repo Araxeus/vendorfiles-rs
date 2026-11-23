@@ -21,22 +21,62 @@ pub fn extract_version(text: &str, regex: Option<&fancy_regex::Regex>) -> Option
     (!found.is_empty() && !found.contains(char::is_whitespace)).then(|| found.to_owned())
 }
 
+/// A parsed `versionSelector`: a CSS selector, and the attribute to read when it ends in
+/// `::attr(name)`, as Scrapy writes it.
+#[derive(Debug)]
+pub struct VersionSelector {
+    css: Selector,
+    attribute: Option<String>,
+}
+
+impl VersionSelector {
+    /// Parses `text`, or `None` when it is not a valid selector.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let (css, attribute) = match text
+            .strip_suffix(')')
+            .and_then(|rest| rest.rsplit_once("::attr("))
+        {
+            Some((css, name)) => {
+                let name = name.trim();
+                if name.is_empty() || name.contains(char::is_whitespace) {
+                    return None;
+                }
+                (css, Some(name.to_owned()))
+            }
+            None => (text, None),
+        };
+        let css = Selector::parse(css).ok()?;
+        Some(Self { css, attribute })
+    }
+}
+
 /// The version in a page body, per `versionSelector` and `versionRegex`.
 ///
 /// With a selector, the first matching element's text is searched. A regex that finds nothing
 /// there also tries the element's HTML, which reaches versions kept in attributes, like
-/// `<a href="/dl/v1.2.3">`.
+/// `<a href="/dl/v1.2.3">`. A selector ending in `::attr(name)` reads that attribute instead.
 #[must_use]
 pub fn find_version(
     body: &str,
-    selector: Option<&Selector>,
+    selector: Option<&VersionSelector>,
     regex: Option<&fancy_regex::Regex>,
 ) -> Option<String> {
     let Some(selector) = selector else {
         return extract_version(body, regex);
     };
     let page = Html::parse_document(body);
-    let element = page.select(selector).next()?;
+    let element = page.select(&selector.css).next()?;
+
+    // The HTML parser lowercases attribute names, so `Version` is matched in any case.
+    if let Some(name) = &selector.attribute {
+        let (_, value) = element
+            .value()
+            .attrs()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))?;
+        return extract_version(value, regex);
+    }
     let text = element.text().collect::<String>();
     extract_version(&text, regex)
         .or_else(|| regex.and_then(|_| extract_version(&element.html(), regex)))
@@ -102,7 +142,7 @@ fn scalar(value: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_version, find_json_version, find_version};
+    use super::{VersionSelector, extract_version, find_json_version, find_version};
 
     #[test]
     fn a_plain_body_is_the_version() {
@@ -137,8 +177,8 @@ mod tests {
         assert_eq!(extract_version("nothing here", Some(&bare)), None);
     }
 
-    fn sel(css: &str) -> scraper::Selector {
-        scraper::Selector::parse(css).unwrap()
+    fn sel(css: &str) -> VersionSelector {
+        VersionSelector::parse(css).unwrap()
     }
 
     #[test]
@@ -169,6 +209,47 @@ mod tests {
             find_version(page, Some(&sel("a.dl")), Some(&re)).as_deref(),
             Some("4.5.6")
         );
+    }
+
+    #[test]
+    fn attr_reads_an_attribute_of_the_selected_element() {
+        let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="github-vscode-theme" Version="6.3.5" Publisher="GitHub" />
+    <DisplayName>GitHub Theme 7.0.0</DisplayName>
+  </Metadata>
+</PackageManifest>"#;
+        assert_eq!(
+            find_version(manifest, Some(&sel("Identity::attr(Version)")), None).as_deref(),
+            Some("6.3.5")
+        );
+        assert_eq!(
+            find_version(manifest, Some(&sel("Identity::attr(Missing)")), None),
+            None
+        );
+        let page = r#"<a class="dl" href="/download/v4.5.6/tool.zip">Download</a>"#;
+        let re = fancy_regex::Regex::new(r"v(\d+\.\d+\.\d+)").unwrap();
+        assert_eq!(
+            find_version(page, Some(&sel("a.dl::attr(href)")), Some(&re)).as_deref(),
+            Some("4.5.6")
+        );
+    }
+
+    #[test]
+    fn a_selector_parses_with_or_without_attr() {
+        assert!(VersionSelector::parse("Identity::attr(Version)").is_some());
+        assert!(VersionSelector::parse(" meta[name=v]::attr( content ) ").is_some());
+        assert!(VersionSelector::parse("h2").is_some());
+        for bad in [
+            "::attr(Version)",
+            "h2::attr()",
+            "h2::attr(a b)",
+            "h2[",
+            "h2::attr(x",
+        ] {
+            assert!(VersionSelector::parse(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

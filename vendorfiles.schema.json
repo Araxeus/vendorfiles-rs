@@ -83,8 +83,8 @@
         },
         "versionSelector": {
           "type": "string",
-          "description": "A CSS selector for the element of a versionUrl page that holds the version, as document.querySelector takes. The element's text is the version, or what versionRegex searches",
-          "examples": ["#latest", ".release h2"]
+          "description": "A CSS selector for the element of a versionUrl page that holds the version, as document.querySelector takes. The element's text is the version, or what versionRegex searches. End it with ::attr(name) to read an attribute instead",
+          "examples": ["#latest", ".release h2", "Identity::attr(Version)"]
         },
         "versionJsonPointer": {
           "type": "string",

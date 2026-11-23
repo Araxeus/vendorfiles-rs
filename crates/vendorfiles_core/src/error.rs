@@ -46,7 +46,9 @@ pub enum VendorError {
     #[error("config key 'vendorDependencies.{name}.versionRegex' must be a valid regex string")]
     InvalidVersionRegexKey { name: String },
 
-    #[error("config key 'vendorDependencies.{name}.versionSelector' must be a valid CSS selector")]
+    #[error(
+        "config key 'vendorDependencies.{name}.versionSelector' must be a valid CSS selector, optionally ending in ::attr(name)"
+    )]
     InvalidVersionSelectorKey { name: String },
 
     #[error(

@@ -145,9 +145,8 @@ async fn look_up(
             let selector = source
                 .version_selector
                 .as_deref()
-                .map(scraper::Selector::parse)
-                .transpose()
-                .map_err(|_| miss())?;
+                .map(|text| page::VersionSelector::parse(text).ok_or_else(miss))
+                .transpose()?;
             page::find_version(&body, selector.as_ref(), regex.as_ref())
         }
     };

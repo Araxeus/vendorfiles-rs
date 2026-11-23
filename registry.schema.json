@@ -57,7 +57,7 @@
           "minLength": 1
         },
         "versionSelector": {
-          "description": "A CSS selector for the element of a `versionUrl` page that holds the version. Its text is the version, or what `versionRegex` searches.",
+          "description": "A CSS selector for the element of a `versionUrl` page that holds the version. Its text is the version, or what `versionRegex` searches. End it with `::attr(name)` to read an attribute instead.",
           "type": "string",
           "minLength": 1
         },

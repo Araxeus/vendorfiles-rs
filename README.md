@@ -953,6 +953,9 @@ A page can answer with just the version, like `v1.2.3`. For anything bigger, `ve
   it's a full 40-character commit hash. Anything else, like a path or a JSON body, is refused.
 - `versionSelector` takes a CSS selector, like `#latest` or `.release h2`. To get one, right-click
   the version in your browser, choose **Inspect**, then **Copy selector**.
+- End the selector with `::attr(name)` to read an attribute instead of the text. A VS Code
+  extension's manifest holds `<Identity Version="6.3.5" />`, so `Identity::attr(Version)` gives
+  `6.3.5`. This is Scrapy's syntax rather than CSS, so add it after copying a selector.
 - The example above follows `/download/latest` to a file named after the version. The
   [File Pilot starlog](https://filepilot.tech/starlog) works too. Its `.starlog-version` element
   reads `Beta v0.8.5`, so `"versionSelector": ".starlog-version"` with the same `versionRegex`
