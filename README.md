@@ -1816,7 +1816,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (51)</summary>
+<summary>Programs you can add by name (52)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1850,6 +1850,7 @@ list is out of date.
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
 | [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git that handles staging, commits, branches and rebases | All |
+| [libclang](https://www.nuget.org/api/v2/package) |  | Clang's C API as a shared library, for bindings and code analysis tools | Windows, macOS arm64, Linux |
 | [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing files and navigating directories | All |
 | [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |

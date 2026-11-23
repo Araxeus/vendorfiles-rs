@@ -65,7 +65,7 @@
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
 
-version: 2
+version: 3
 
 programs:
   # Most Rust projects name assets by target triple and ship the binary inside a directory of
@@ -897,3 +897,27 @@ programs:
       macos-aarch64: darwin_arm64
       linux-x86_64: linux_amd64
       linux-aarch64: linux_arm64
+
+  # A native library from NuGet. Each host has its own runtime package, and a .nupkg is a zip.
+  # No macos-x86_64: its package stopped at 18.1.3.
+  libclang:
+    description: "Clang's C API as a shared library, for bindings and code analysis tools"
+    url: https://www.nuget.org/api/v2/package
+    versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
+    versionJsonPointer: versions
+    targets:
+      windows-x86_64:
+        asset: "{url}/libclang.runtime.win-x64/{tag}"
+        member: "runtimes/win-x64/native/libclang.dll"
+      windows-aarch64:
+        asset: "{url}/libclang.runtime.win-arm64/{tag}"
+        member: "runtimes/win-arm64/native/libclang.dll"
+      macos-aarch64:
+        asset: "{url}/libclang.runtime.osx-arm64/{tag}"
+        member: "runtimes/osx-arm64/native/libclang.dylib"
+      linux-x86_64:
+        asset: "{url}/libclang.runtime.linux-x64/{tag}"
+        member: "runtimes/linux-x64/native/libclang.so"
+      linux-aarch64:
+        asset: "{url}/libclang.runtime.linux-arm64/{tag}"
+        member: "runtimes/linux-arm64/native/libclang.so"
