@@ -171,6 +171,14 @@ pub enum VendorError {
     #[error("found no version at {url}")]
     NoVersionAt { url: String },
 
+    /// A `versionUrl` refused the request with a status other than 404.
+    #[error("looking up the version at {url} failed: {source}")]
+    VersionUrlRefused {
+        url: String,
+        #[source]
+        source: Box<Self>,
+    },
+
     /// A `.git` `versionUrl` with no release tag, only package tags like a monorepo's `astro@5.0.0`.
     #[error(
         "{url} has no release tag, only package tags like '{example}'; set versionRegex to pick one"

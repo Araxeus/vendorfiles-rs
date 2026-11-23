@@ -92,6 +92,10 @@ async fn look_up(
     // versions, so it is reported as itself.
     let refused = |e| match e {
         VendorError::RequestFailed { status: 404, .. } => miss(),
+        e @ VendorError::RequestFailed { .. } => VendorError::VersionUrlRefused {
+            url: version_url.to_owned(),
+            source: Box::new(e),
+        },
         other => other,
     };
     // Validation already compiled both, so a failure here cannot happen in practice.
@@ -448,9 +452,11 @@ mod tests {
         let error = latest_version(&client().unwrap(), &source)
             .await
             .unwrap_err();
-        assert!(
-            matches!(error, VendorError::RequestFailed { status: 503, .. }),
-            "{error}"
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "looking up the version at {base}/busy failed: Request failed with status 503: Service Unavailable"
+            )
         );
     }
 
