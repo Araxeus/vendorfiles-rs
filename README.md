@@ -1022,6 +1022,8 @@ versionJsonPointer = '/versions'
 - A string or number there is the version, or what `versionRegex` searches.
 - A list holds versions, and the latest stable one wins. Versions compare like
   [tags](#finding-the-latest-version), and with `versionRegex` only the versions it matches count.
+- A `*` segment matches every entry of a list or object. Go's `https://go.dev/dl/?mode=json` is a
+  list of releases, so `/*/version` ranks the `version` of each.
 - `versionJsonPointer` and `versionSelector` can't both be set.
 
 ### Locking a dependency

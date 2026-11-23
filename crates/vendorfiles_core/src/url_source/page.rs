@@ -47,6 +47,9 @@ pub fn find_version(
 /// A string or number there is read like a page's text. An array is a list of versions, and the
 /// latest one wins, ranked like the tags of a `.git` `versionUrl`. There `versionRegex` says
 /// which versions count.
+///
+/// A `*` segment stands for every item of an array or value of an object, so `/*/version`
+/// gathers each entry's version into one list.
 #[must_use]
 pub fn find_json_version(
     body: &str,
@@ -54,17 +57,38 @@ pub fn find_json_version(
     regex: Option<&fancy_regex::Regex>,
 ) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
-    match json.pointer(pointer)? {
-        serde_json::Value::Array(items) => {
-            let versions: Vec<String> = items
-                .iter()
-                .filter_map(scalar)
-                .filter(|version| super::is_plausible_version(version))
-                .collect();
-            super::tags::latest_tag(&versions, regex)
+    let found = select(&json, pointer);
+    let list = match found.as_slice() {
+        [serde_json::Value::Array(items)] => items.iter().collect(),
+        [single] if !pointer.split('/').any(|segment| segment == "*") => {
+            return extract_version(&scalar(single)?, regex);
         }
-        value => extract_version(&scalar(value)?, regex),
+        _ => found,
+    };
+    let versions: Vec<String> = list
+        .into_iter()
+        .filter_map(scalar)
+        .filter(|version| super::is_plausible_version(version))
+        .collect();
+    super::tags::latest_tag(&versions, regex)
+}
+
+/// The values `pointer` reaches in `json`, where a `*` segment reaches every child.
+fn select<'a>(json: &'a serde_json::Value, pointer: &str) -> Vec<&'a serde_json::Value> {
+    let mut found = vec![json];
+    for segment in pointer.split('/').skip(1) {
+        found = found
+            .into_iter()
+            .flat_map(|value| -> Vec<&serde_json::Value> {
+                match (segment, value) {
+                    ("*", serde_json::Value::Array(items)) => items.iter().collect(),
+                    ("*", serde_json::Value::Object(map)) => map.values().collect(),
+                    _ => value.pointer(&format!("/{segment}")).into_iter().collect(),
+                }
+            })
+            .collect();
     }
+    found
 }
 
 /// A JSON string or number as text.
@@ -189,10 +213,37 @@ mod tests {
     }
 
     #[test]
+    fn a_wildcard_gathers_a_version_from_every_entry() {
+        let zig = r#"{"master":{"version":"0.18.0-dev.1+abc"},"0.17.1":{"version":"0.17.1"},"0.9.1":{"version":"0.9.1"}}"#;
+        assert_eq!(
+            find_json_version(zig, "/*/version", None).as_deref(),
+            Some("0.17.1")
+        );
+        let go = r#"[{"version":"go1.26.11"},{"version":"go1.27.4"},{"version":"go1.28rc1"}]"#;
+        assert_eq!(
+            find_json_version(go, "/*/version", None).as_deref(),
+            Some("go1.27.4")
+        );
+        let nested = r#"{"releases":[{"v":"1.0.0"},{"v":"1.1.0"},{"nope":true}]}"#;
+        assert_eq!(
+            find_json_version(nested, "/releases/*/v", None).as_deref(),
+            Some("1.1.0")
+        );
+        assert_eq!(
+            find_json_version(r#"{"only":{"version":"2.0.0"}}"#, "/*/version", None).as_deref(),
+            Some("2.0.0")
+        );
+    }
+
+    #[test]
     fn a_pointer_that_finds_nothing_usable_is_a_miss() {
         assert_eq!(find_json_version("<html></html>", "/v", None), None);
         assert_eq!(find_json_version(r#"{"v":"1.0"}"#, "/w", None), None);
         assert_eq!(find_json_version(r#"{"v":{"x":"1.0"}}"#, "/v", None), None);
+        assert_eq!(
+            find_json_version(r#"{"v":{"x":"1.0"}}"#, "/v/*/y", None),
+            None
+        );
         assert_eq!(
             find_json_version(r#"{"v":["../x","{}"]}"#, "/v", None),
             None
