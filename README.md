@@ -21,7 +21,7 @@ date. List the CSS libraries, binaries or config files you want in a config file
 `vendor sync`, and they land in your project.
 
 - Download any file from any GitHub repository, or from any URL
-- Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
+- Download release assets, and unpack only the files you need from zip, tar, tar.gz, 7z and crx
   archives
 - Track versions by release, by commit, by git tag or from a version URL
 - Write the config in TOML, YAML, JSON, JSON5 or `package.json`
@@ -651,11 +651,13 @@ files = [
 </details>
 <!-- /formats -->
 
-- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz and `.crx`/`.xpi`. `vendor` detects
-  the format from the file's contents, not its name.
+- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz, 7z and `.crx`/`.xpi`. `vendor`
+  detects the format from the file's contents, not its name.
 - Only the files you name are unpacked.
 - For a large `.zip`, only those files are downloaded, using HTTP range requests. The rest of the
   archive never is.
+- A `.7z` is downloaded whole. It packs files into blocks, and only the blocks that hold a file
+  you named are unpacked.
 
 #### Choosing which releases count
 
