@@ -57,7 +57,6 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
 - [Authentication](#authentication)
   - [Where the token comes from](#where-the-token-comes-from)
   - [Logging in](#logging-in)
-  - [Private repositories](#private-repositories)
   - [Checking your login](#checking-your-login)
   - [Where the token is stored](#where-the-token-is-stored)
 - [Lockfile](#lockfile)
@@ -1574,21 +1573,6 @@ SUCCESS: Logged in successfully
 `vendor logout` deletes the saved token. If something would still log you in, it tells you. That
 can be a `GITHUB_TOKEN` in the environment, or a token the npm CLI saved in its own keyring entry.
 `vendor` leaves that entry alone, because it belongs to npm.
-
-### Private repositories
-
-The browser login asks GitHub for no scopes, so its token reads public repositories only. GitHub
-answers a private repository it hides from a token with `404`, and `vendor` reports that as a
-repository that does not exist or that you cannot access.
-
-To vendor from a private repository, give `vendor` a token that can read it:
-
-- A [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only
-  **Contents** access to the repositories you need, saved with `vendor login <token>`
-- `GITHUB_TOKEN=$(gh auth token)`, if the GitHub CLI is logged in with access to them
-
-A repository with no releases also needs `hashVersionFile`, so `vendor` tracks a file's commits
-instead (see [Tracking commits instead of releases](#tracking-commits-instead-of-releases)).
 
 ### Checking your login
 
