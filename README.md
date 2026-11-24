@@ -1816,7 +1816,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (55)</summary>
+<summary>Programs you can add by name (56)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1870,6 +1870,7 @@ list is out of date.
 | [tmux](https://github.com/tmux/tmux-builds) |  | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
 | [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
 | [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
+| [vault](https://releases.hashicorp.com/) |  | HashiCorp secrets manager CLI and server for keys, tokens and passwords | Windows x64, macOS, Linux |
 | [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
 | [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |
 | [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |

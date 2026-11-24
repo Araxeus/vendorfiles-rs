@@ -969,3 +969,18 @@ programs:
       macos-aarch64: darwin_arm64
       linux-x86_64: linux_amd64
       linux-aarch64: linux_arm64
+
+  # Same layout as terraform. No windows-aarch64: HashiCorp builds no Windows arm64 vault.
+  vault:
+    description: "HashiCorp secrets manager CLI and server for keys, tokens and passwords"
+    url: https://releases.hashicorp.com/vault/{version}
+    versionUrl: https://checkpoint-api.hashicorp.com/v1/check/vault
+    versionJsonPointer: current_version
+    asset: "{url}/vault_{version}_{target}.zip"
+    member: "vault{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
