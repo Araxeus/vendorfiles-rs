@@ -1816,7 +1816,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (52)</summary>
+<summary>Programs you can add by name (53)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1849,6 +1849,7 @@ list is out of date.
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
+| [kubectl](https://dl.k8s.io/) | `k8s` | Kubernetes CLI for deploying apps and managing clusters, pods and logs | All |
 | [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git that handles staging, commits, branches and rebases | All |
 | [libclang](https://www.nuget.org/api/v2/package) |  | Clang's C API as a shared library, for bindings and code analysis tools | Windows, macOS arm64, Linux |
 | [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing files and navigating directories | All |
