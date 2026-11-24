@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::error::{Result, VendorError};
 use crate::fsx::anchor;
 use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
-use crate::model::{Dependency, Source};
+use crate::model::{Dependency, Repository, Source};
 use crate::ops::Session;
 use crate::url_source::latest_version;
 
@@ -50,14 +50,20 @@ impl Session {
             }
         };
         if let Some(path) = dependency.hash_version_target()? {
-            return self
-                .github
-                .file_commit_sha(repo, &path)
-                .await
-                .map_err(|source| VendorError::CommitShaLookup {
+            let error = match self.github.file_commit_sha(repo, &path).await {
+                Ok(sha) => return Ok(sha),
+                Err(error) => {
+                    self.unless_repository_missing(dependency, repo, error)
+                        .await
+                }
+            };
+            return Err(match error {
+                missing @ VendorError::RepositoryNotFound { .. } => missing,
+                source => VendorError::CommitShaLookup {
                     path,
                     source: Box::new(source),
-                });
+                },
+            });
         }
 
         match self
@@ -71,11 +77,42 @@ impl Session {
             // buries the reason - a refused token, an exhausted quota - under a sentence about
             // versions. Those are reported as themselves.
             Err(error) if !means_no_release(&error) => Err(error),
-            Err(_) if show_outdated_only => {
-                Err(VendorError::NoVersionFound(dependency.name.clone()))
-            }
+            Err(error) if show_outdated_only => Err(
+                match self
+                    .unless_repository_missing(dependency, repo, error)
+                    .await
+                {
+                    missing @ VendorError::RepositoryNotFound { .. } => missing,
+                    _ => VendorError::NoVersionFound(dependency.name.clone()),
+                },
+            ),
+            // An install reports a missing repository once its downloads fail, so a repository
+            // without releases costs no extra request here.
             Err(_) => Ok(String::new()),
         }
+    }
+
+    /// Turns a `404` into [`VendorError::RepositoryNotFound`] when the repository itself is
+    /// what GitHub cannot find.
+    ///
+    /// A private repository answers `404` to a token that cannot read it, so a missing release
+    /// or commit is often a missing repository. Telling them apart costs one request, and this
+    /// runs only after a lookup has already failed.
+    async fn unless_repository_missing(
+        &self,
+        dependency: &Dependency,
+        repo: &Repository,
+        error: VendorError,
+    ) -> VendorError {
+        if !matches!(error, VendorError::RequestFailed { status: 404, .. }) {
+            return error;
+        }
+        if self.github.repository_exists(repo).await == Some(false) {
+            return VendorError::RepositoryNotFound {
+                repository: dependency.repository.clone(),
+            };
+        }
+        error
     }
 
     /// Whether the dependency folder is out of step with what is being installed.
