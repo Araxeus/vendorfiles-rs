@@ -1816,7 +1816,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (56)</summary>
+<summary>Programs you can add by name (57)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1829,6 +1829,7 @@ list is out of date.
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | System monitor for processes, CPU, memory, disks and network, like htop | All |
 | [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
 | [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Shell completion for hundreds of commands in bash, zsh, fish and more | All |
+| [curl](https://curl.se/) |  | Transfer data over HTTP, HTTPS, FTP and more; official Windows build | Windows |
 | [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager and diff viewer for git, diff, grep and blame | Windows x64, macOS arm64, Linux |
 | [dust](https://github.com/bootandy/dust) |  | Disk usage viewer showing what takes up space, a more intuitive du | All |
 | [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
