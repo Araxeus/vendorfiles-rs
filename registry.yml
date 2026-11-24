@@ -33,7 +33,7 @@
 #
 # `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
-# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, crx or xpi.
+# member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, 7z, crx or xpi.
 #
 # A `member` may also name more than one file, for a program whose executable cannot run alone.
 # The forms name their outputs differently, because they mean different things. One member is the
