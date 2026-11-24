@@ -452,6 +452,9 @@ impl RawDependency {
         {
             return Err(VendorError::InvalidVersionRegexKey { name: name() });
         }
+        if self.version_regex.is_some() && self.version_url.is_none() {
+            return Err(VendorError::RegexNeedsVersionUrl { name: name() });
+        }
         if self
             .version_selector
             .as_deref()
@@ -913,6 +916,10 @@ mod tests {
                 r#"{"url":"https://x.io","versionUrl":"https://x.io/v","versionSelector":"h2","versionJsonPointer":"/v","files":[{"{url}":"a"}]}"#
             ),
             "config keys 'vendorDependencies.Foo.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
+        );
+        assert_eq!(
+            err(r#"{"url":"https://x.io","versionRegex":"v(.+)","files":[{"{url}":"a"}]}"#),
+            "config key 'vendorDependencies.Foo.versionRegex' needs a 'versionUrl' to read"
         );
         assert_eq!(
             err(r#"{"url":"https://x.io","hashVersionFile":true,"files":[{"{url}":"a"}]}"#),

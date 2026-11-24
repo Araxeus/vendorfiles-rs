@@ -56,6 +56,13 @@ pub enum VendorError {
     )]
     KeyNeedsPage { name: String, key: &'static str },
 
+    #[error("config key 'vendorDependencies.{name}.versionRegex' needs a 'versionUrl' to read")]
+    RegexNeedsVersionUrl { name: String },
+
+    /// A url-only key holding a list, map or number. YAML reads an unquoted `{url}` as a map.
+    #[error("config key '{key}' must be a string. In YAML, quote a value that starts with '{{'")]
+    KeyNotString { key: String },
+
     #[error(
         "config keys 'vendorDependencies.{name}.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
     )]
