@@ -31,6 +31,7 @@ scraper.workspace = true
 secrecy.workspace = true
 self-replace.workspace = true
 serde.workspace = true
+sevenz-rust2.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
 tar.workspace = true
@@ -57,6 +58,7 @@ linux-keyutils-keyring-store.workspace = true
 [dev-dependencies]
 jsonschema.workspace = true
 lzma-rust2 = { workspace = true, features = ["encoder"] }
+sevenz-rust2 = { workspace = true, features = ["compress"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 
 [lints]

@@ -3,10 +3,12 @@
 //! Mirrors the `unarchive` package the reference depends on: the *content* decides the format,
 //! not the file name, and Chrome/Firefox extension containers are unwrapped as ZIPs.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+use sevenz_rust2::EntryDecision;
 
 use crate::error::{Result, VendorError};
 use crate::fsx::join_normalized;
@@ -22,10 +24,20 @@ pub enum ArchiveKind {
     /// Xz: likewise a `.tar.xz`, or a single compressed file.
     Xz,
     Tar,
+    /// 7z: files packed into blocks, where a solid archive packs many files into one.
+    SevenZip,
 }
 
 const TAR_MAGIC_OFFSET: usize = 257;
 const TAR_HEADER_LEN: usize = 512;
+const SEVEN_ZIP_MAGIC: &[u8] = b"7z\xbc\xaf\x27\x1c";
+
+/// The 7z attribute bit that says the high 16 bits hold a Unix mode.
+const SEVEN_ZIP_UNIX_EXTENSION: u32 = 0x8000;
+
+/// The Unix file-type bits of a mode, and the type among them that marks a symlink.
+const S_IFMT: u32 = 0o170_000;
+const S_IFLNK: u32 = 0o120_000;
 
 /// Identifies an archive from its leading bytes.
 #[must_use]
@@ -41,6 +53,9 @@ pub fn sniff(header: &[u8]) -> Option<ArchiveKind> {
     }
     if header.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]) {
         return Some(ArchiveKind::Xz);
+    }
+    if header.starts_with(SEVEN_ZIP_MAGIC) {
+        return Some(ArchiveKind::SevenZip);
     }
     if is_tar(header) {
         return Some(ArchiveKind::Tar);
@@ -71,6 +86,7 @@ pub fn extract(archive: &Path, dest: &Path) -> Result<()> {
         Some(ArchiveKind::Tar) => untar(file, dest),
         Some(ArchiveKind::Gzip) => uncompress(archive, Compression::Gzip, file, dest),
         Some(ArchiveKind::Xz) => uncompress(archive, Compression::Xz, file, dest),
+        Some(ArchiveKind::SevenZip) => un7z(file, dest, None),
     }
 }
 
@@ -123,6 +139,7 @@ pub fn extract_members(archive: &Path, dest: &Path, wanted: &[String]) -> Result
         Some(ArchiveKind::Xz) => {
             uncompress_selected(archive, Compression::Xz, file, dest, &mut selection)?;
         }
+        Some(ArchiveKind::SevenZip) => un7z(file, dest, Some(&mut selection))?,
     }
 
     if selection.satisfied() {
@@ -396,6 +413,7 @@ pub fn members(archive: &Path) -> Result<Vec<String>> {
         Some(ArchiveKind::Tar) => tar_names(BufReader::new(file)),
         Some(ArchiveKind::Gzip) => compressed_names(archive, Compression::Gzip, file),
         Some(ArchiveKind::Xz) => compressed_names(archive, Compression::Xz, file),
+        Some(ArchiveKind::SevenZip) => seven_zip_names(file),
     }
 }
 
@@ -500,6 +518,142 @@ fn names_in(archive: &mut tar::Archive<impl Read>) -> Result<Vec<String>> {
         names.push(entry.path()?.to_string_lossy().into_owned());
     }
     Ok(names)
+}
+
+/// Writes out a 7z's regular files: all of them, or only those `selection` still wants.
+///
+/// A member is only reachable by decoding everything before it in its block, and a solid archive
+/// keeps most of its files in one block. So a selective pass skips, undecoded, each block that
+/// holds no wanted member, and stops once the last one is out.
+fn un7z(file: File, dest: &Path, mut selection: Option<&mut Selection>) -> Result<()> {
+    let mut reader =
+        sevenz_rust2::ArchiveReader::new(BufReader::new(file), sevenz_rust2::Password::empty())
+            .map_err(|error| seven_zip_error(&error))?;
+
+    // Each entry's block, and the blocks that hold a wanted member. Names key the lookup
+    // because the callback below is handed an entry, not its index.
+    let archive = reader.archive();
+    let block_of: HashMap<String, usize> = archive
+        .files
+        .iter()
+        .zip(&archive.stream_map.file_block_index)
+        .filter_map(|(entry, block)| Some((seven_zip_name(entry), (*block)?)))
+        .collect();
+    let wanted_blocks: HashSet<usize> = selection.as_deref().map_or_else(HashSet::new, |wanted| {
+        block_of
+            .iter()
+            .filter(|(name, _)| wanted.target(dest, name).is_some())
+            .map(|(_, block)| *block)
+            .collect()
+    });
+
+    reader
+        .for_each_entries_with_decision(|entry, data| {
+            let name = seven_zip_name(entry);
+            let out = match selection.as_deref() {
+                None => enclosed(&name).map(|relative| dest.join(relative)),
+                Some(wanted) if wanted.satisfied() => return Ok(EntryDecision::Stop),
+                Some(wanted) => {
+                    let target = wanted.target(dest, &name);
+                    if target.is_none()
+                        && block_of
+                            .get(&name)
+                            .is_some_and(|block| !wanted_blocks.contains(block))
+                    {
+                        return Ok(EntryDecision::SkipBlock);
+                    }
+                    target.filter(|_| enclosed(&name).is_some())
+                }
+            };
+            let Some(out) = out else {
+                return Ok(EntryDecision::Continue);
+            };
+            if entry.is_directory {
+                if selection.is_none() {
+                    std::fs::create_dir_all(&out)?;
+                }
+                return Ok(EntryDecision::Continue);
+            }
+            // Only regular files: a symlink's data is its target, and an anti-item deletes.
+            if entry.is_anti_item || unix_mode(entry).is_some_and(|mode| mode & S_IFMT == S_IFLNK) {
+                return Ok(EntryDecision::Continue);
+            }
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut sink = File::create(&out)?;
+            std::io::copy(data, &mut sink)?;
+            sink.flush()?;
+            drop(sink);
+            #[cfg(unix)]
+            if let Some(mode) = unix_mode(entry) {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode & 0o7777))?;
+            }
+            if let Some(wanted) = selection.as_deref_mut() {
+                wanted.claim(&out);
+            }
+            // `Continue` verifies the entry's checksum. The next entry stops the pass once
+            // nothing is left to find.
+            Ok(EntryDecision::Continue)
+        })
+        .map_err(|error| seven_zip_error(&error))
+}
+
+/// The file paths a 7z holds, read from its index alone.
+///
+/// Like [`zip_names`], this decodes no member, so a damaged payload lists cleanly and fails at
+/// extraction instead.
+fn seven_zip_names(file: File) -> Result<Vec<String>> {
+    let archive =
+        sevenz_rust2::Archive::read(&mut BufReader::new(file), &sevenz_rust2::Password::empty())
+            .map_err(|error| seven_zip_error(&error))?;
+    Ok(archive
+        .files
+        .iter()
+        .filter(|entry| {
+            !entry.is_directory
+                && !entry.is_anti_item
+                && unix_mode(entry).is_none_or(|mode| mode & S_IFMT != S_IFLNK)
+        })
+        .map(seven_zip_name)
+        .collect())
+}
+
+/// An entry's path with `/` separators. 7-Zip on Windows may store `\`.
+fn seven_zip_name(entry: &sevenz_rust2::ArchiveEntry) -> String {
+    entry.name.replace('\\', "/")
+}
+
+/// The Unix mode 7-Zip stores in an entry's attributes, when it stored one.
+const fn unix_mode(entry: &sevenz_rust2::ArchiveEntry) -> Option<u32> {
+    let attributes = entry.windows_attributes;
+    if entry.has_windows_attributes && attributes & SEVEN_ZIP_UNIX_EXTENSION != 0 {
+        Some(attributes >> 16)
+    } else {
+        None
+    }
+}
+
+/// `name` as a relative path that stays inside the folder it is joined to, or `None`.
+fn enclosed(name: &str) -> Option<PathBuf> {
+    if name.starts_with('/') {
+        return None;
+    }
+    let mut path = PathBuf::new();
+    for part in name.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return None,
+            _ if part.contains(':') => return None,
+            _ => path.push(part),
+        }
+    }
+    path.components().next().is_some().then_some(path)
+}
+
+fn seven_zip_error(error: &sevenz_rust2::Error) -> VendorError {
+    VendorError::Http(format!("cannot read the 7z archive: {error}"))
 }
 
 /// Unwraps a CRX container and extracts the ZIP inside it.
@@ -1218,5 +1372,127 @@ mod tests {
         let path = dir.path().join("x.bin");
         std::fs::write(&path, b"definitely not an archive").unwrap();
         assert!(extract(&path, &dir.path().join("out")).is_err());
+    }
+
+    mod seven_zip {
+        use std::path::Path;
+
+        use sevenz_rust2::{ArchiveEntry, ArchiveWriter, SourceReader};
+
+        use super::super::{ArchiveKind, extract, extract_members, members, sniff};
+
+        /// Writes a 7z of `files`, each in its own block, or all in one block when `solid`.
+        fn write(path: &Path, files: &[(&str, &[u8])], solid: bool) {
+            let mut writer = ArchiveWriter::create(path).unwrap();
+            if solid {
+                let entries = files
+                    .iter()
+                    .map(|(n, _)| ArchiveEntry::new_file(n))
+                    .collect();
+                let readers = files.iter().map(|(_, d)| SourceReader::new(*d)).collect();
+                writer.push_archive_entries(entries, readers).unwrap();
+            } else {
+                for (name, data) in files {
+                    writer
+                        .push_archive_entry(ArchiveEntry::new_file(name), Some(*data))
+                        .unwrap();
+                }
+            }
+            writer.finish().unwrap();
+        }
+
+        #[test]
+        fn a_7z_is_sniffed_and_extracts_whole() {
+            let dir = tempfile::tempdir().unwrap();
+            let archive = dir.path().join("download");
+            write(
+                &archive,
+                &[("bin/tool.exe", b"exe"), ("README.txt", b"hi")],
+                true,
+            );
+
+            assert_eq!(
+                sniff(&std::fs::read(&archive).unwrap()),
+                Some(ArchiveKind::SevenZip)
+            );
+            let out = dir.path().join("out");
+            extract(&archive, &out).unwrap();
+            assert_eq!(std::fs::read(out.join("bin/tool.exe")).unwrap(), b"exe");
+            assert_eq!(std::fs::read(out.join("README.txt")).unwrap(), b"hi");
+        }
+
+        #[test]
+        fn named_members_come_out_of_solid_and_split_archives() {
+            for solid in [true, false] {
+                let dir = tempfile::tempdir().unwrap();
+                let archive = dir.path().join("a.7z");
+                let files: [(&str, &[u8]); 3] =
+                    [("a.txt", b"a"), ("dir/b.txt", b"b"), ("c.txt", b"c")];
+                write(&archive, &files, solid);
+
+                let out = dir.path().join("out");
+                extract_members(&archive, &out, &["dir/b.txt".to_owned()]).unwrap();
+                assert_eq!(std::fs::read(out.join("dir/b.txt")).unwrap(), b"b");
+                assert!(!out.join("a.txt").exists(), "solid: {solid}");
+                assert!(!out.join("c.txt").exists(), "solid: {solid}");
+            }
+        }
+
+        #[test]
+        fn a_block_without_a_wanted_member_is_never_decoded() {
+            let dir = tempfile::tempdir().unwrap();
+            let archive = dir.path().join("a.7z");
+            let noise: Vec<u8> = (0..64 * 1024_u32).map(|i| (i * 7919 % 251) as u8).collect();
+            write(
+                &archive,
+                &[("skip.bin", &noise), ("keep.txt", b"kept")],
+                false,
+            );
+
+            // Packed data starts after the 32-byte start header, and the first block is
+            // `skip.bin`. Damaging it fails any pass that decodes that block.
+            let mut bytes = std::fs::read(&archive).unwrap();
+            for byte in &mut bytes[40..80] {
+                *byte ^= 0xff;
+            }
+            std::fs::write(&archive, &bytes).unwrap();
+
+            let out = dir.path().join("out");
+            extract_members(&archive, &out, &["keep.txt".to_owned()]).unwrap();
+            assert_eq!(std::fs::read(out.join("keep.txt")).unwrap(), b"kept");
+            assert!(extract(&archive, &dir.path().join("all")).is_err());
+        }
+
+        #[test]
+        fn members_lists_files_from_the_index() {
+            let dir = tempfile::tempdir().unwrap();
+            let archive = dir.path().join("a.7z");
+            let mut writer = ArchiveWriter::create(&archive).unwrap();
+            writer
+                .push_archive_entry::<&[u8]>(ArchiveEntry::new_directory("bin"), None)
+                .unwrap();
+            writer
+                .push_archive_entry(ArchiveEntry::new_file("bin/tool"), Some(&b"x"[..]))
+                .unwrap();
+            writer.finish().unwrap();
+
+            assert_eq!(members(&archive).unwrap(), ["bin/tool"]);
+        }
+
+        #[test]
+        fn an_entry_that_escapes_the_folder_is_not_written() {
+            let dir = tempfile::tempdir().unwrap();
+            let archive = dir.path().join("a.7z");
+            write(&archive, &[("../evil.txt", b"x"), ("ok.txt", b"y")], true);
+
+            let out = dir.path().join("out");
+            extract(&archive, &out).unwrap();
+            assert!(!dir.path().join("evil.txt").exists());
+            assert_eq!(std::fs::read(out.join("ok.txt")).unwrap(), b"y");
+
+            let picked = dir.path().join("picked");
+            extract_members(&archive, &picked, &["../evil.txt".to_owned()]).unwrap();
+            assert!(!dir.path().join("evil.txt").exists());
+        }
     }
 }

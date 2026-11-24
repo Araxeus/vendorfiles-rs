@@ -490,9 +490,9 @@ programs:
                     // release, which looks reasonable and cannot be opened. A URL often has no
                     // extension at all, so a `url` program is left to the live members check.
                     if !on_the_web && matches!(target, crate::model::FileTarget::ExtractMap(_)) {
-                        const CONTAINERS: [&str; 9] = [
-                            ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".crx",
-                            ".xpi",
+                        const CONTAINERS: [&str; 10] = [
+                            ".zip", ".tar.gz", ".tgz", ".tar", ".gz", ".tar.xz", ".xz", ".7z",
+                            ".crx", ".xpi",
                         ];
                         assert!(
                             CONTAINERS.iter().any(|ext| asset.ends_with(ext)),
