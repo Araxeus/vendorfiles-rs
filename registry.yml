@@ -561,6 +561,21 @@ programs:
         asset: "{release}/yt-dlp_linux_aarch64"
         as: "yt-dlp"
 
+  # Gyan's static Windows builds, x64 only. The repository also publishes git snapshots tagged
+  # like `2026-11-23-git-05c674c913`, so `releaseRegex` keeps to numbered releases. The
+  # essentials build covers the common codecs at half the size of the full one. ffplay is left
+  # out because it is a player, not a converter.
+  ffmpeg:
+    description: "Convert, transcode and stream video and audio media, plus ffprobe"
+    repository: https://github.com/GyanD/codexffmpeg
+    releaseRegex: '^\d+\.\d+(\.\d+)?$'
+    targets:
+      windows-x86_64:
+        asset: "{release}/ffmpeg-{version}-essentials_build.7z"
+        member:
+          "ffmpeg-{version}-essentials_build/bin/ffmpeg.exe": ffmpeg.exe
+          "ffmpeg-{version}-essentials_build/bin/ffprobe.exe": ffprobe.exe
+
   ttt:
     description: "Terminal text editor that feels like a GUI one, such as VS Code"
     repository: https://github.com/eugenioenko/ttt
