@@ -1418,7 +1418,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (50)</summary>
+<summary>Programs you can add by name (51)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1438,6 +1438,7 @@ list is out of date.
 | [edit](https://github.com/microsoft/edit) | `msedit` | Microsoft's small terminal text editor, a modern MS-DOS Edit | Windows, macOS arm64, Linux |
 | [fastfetch](https://github.com/fastfetch-cli/fastfetch) |  | Neofetch-like tool that shows system information in the terminal | All |
 | [fd](https://github.com/sharkdp/fd) | `fdfind`, `fd-find` | Fast, user-friendly alternative to find for locating files and folders | Windows, macOS arm64, Linux |
+| [ffmpeg](https://github.com/GyanD/codexffmpeg) |  | Convert, transcode and stream video and audio media, plus ffprobe | Windows x64 |
 | [file-pilot](https://github.com/Araxeus/fpilot-scraper) | `fpilot`, `filepilot` | Fast, lightweight file manager and Explorer replacement for Windows | Windows x64 |
 | [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
 | [fresh](https://github.com/sinelaw/fresh) |  | Fast, easy terminal text editor and IDE | All |
