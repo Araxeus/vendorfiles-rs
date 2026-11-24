@@ -15,6 +15,7 @@ use std::time::Duration;
 use reqwest::header::CONTENT_TYPE;
 
 use crate::error::{Result, VendorError};
+use crate::template::expand_url;
 
 /// A protocol v2 `ls-refs` request for tags alone.
 const LS_TAGS: &[u8] = b"0014command=ls-refs\n0001001aref-prefix refs/tags/\n0000";
@@ -60,6 +61,8 @@ pub fn is_git_url(version_url: &str) -> bool {
 
 /// The latest version of `source`, or `None` when it has no `versionUrl`.
 ///
+/// `{url}` in the `versionUrl` expands to the `url`, so a download can hold its own version.
+///
 /// # Errors
 ///
 /// [`VendorError::NoVersionAt`] when the answer holds no version or is a 404,
@@ -69,6 +72,7 @@ pub async fn latest_version(http: &reqwest::Client, source: &UrlSource) -> Resul
     let Some(version_url) = source.version_url.as_deref() else {
         return Ok(None);
     };
+    let version_url = &expand_url(version_url, &source.url);
     tokio::time::timeout(LOOKUP_TIMEOUT, look_up(http, source, version_url))
         .await
         .unwrap_or_else(|_| {
@@ -348,6 +352,29 @@ mod tests {
         };
         let error = latest_version(&http, &page).await.unwrap_err();
         assert_eq!(error.to_string(), format!("found no version at {base}/v"));
+    }
+
+    #[tokio::test]
+    async fn a_version_url_of_url_reads_the_download_itself() {
+        let script = b"// ==UserScript==
+// @version      1.4.2
+// ==/UserScript==
+";
+        let base = serve(vec![route("/a.user.js", 200, "", script)]);
+        let source = UrlSource {
+            url: format!("{base}/a.user.js"),
+            version_url: Some("{url}".into()),
+            version_regex: Some(r"@version +([0-9.]+)".into()),
+            version_selector: None,
+            version_json_pointer: None,
+        };
+        assert_eq!(
+            latest_version(&client().unwrap(), &source)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("1.4.2")
+        );
     }
 
     #[tokio::test]

@@ -869,6 +869,7 @@ versionRegex = 'v(\d+\.\d+\.\d+)'
 | --- | --- |
 | A git repository ending in `.git` | Its newest tag |
 | Any other URL | Read from the page it returns |
+| `{url}` | Read from the download itself, like a userscript's `// @version 1.4.2` line. Quote it in YAML |
 | Not set | `version` as written. Without one, the dependency installs once and `--force` downloads it again |
 
 A git repository works on any host that serves git over HTTPS, like Codeberg or GitLab:

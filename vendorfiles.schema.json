@@ -69,8 +69,8 @@
         },
         "versionUrl": {
           "type": "string",
-          "description": "Where a url dependency's latest version comes from. A URL ending in .git gives the repository's newest tag. Any other URL is a page whose body, selected element, JSON value or regex match is the version. Without one, the dependency installs once",
-          "pattern": "^https?://",
+          "description": "Where a url dependency's latest version comes from. A URL ending in .git gives the repository's newest tag. Any other URL is a page whose body, selected element, JSON value or regex match is the version. {url} expands to the url value, for a download that holds its own version. Without one, the dependency installs once",
+          "pattern": "^(https?://|[{]url[}])",
           "examples": [
             "https://filepilot.tech/download/latest",
             "https://codeberg.org/forgejo/forgejo.git"

@@ -47,9 +47,9 @@
           "pattern": "^https?://"
         },
         "versionUrl": {
-          "description": "Where the latest version of a `url` program comes from. A URL ending in `.git` gives the repository's newest tag. Any other URL is a page, or a redirect to a versioned file.",
+          "description": "Where the latest version of a `url` program comes from. A URL ending in `.git` gives the repository's newest tag. Any other URL is a page, or a redirect to a versioned file. `{url}` expands to the `url` value.",
           "type": "string",
-          "pattern": "^https?://"
+          "pattern": "^(https?://|[{]url[}])"
         },
         "versionRegex": {
           "description": "Picks the version out of the `versionUrl` answer: capture group 1, or the whole match. For a `.git` `versionUrl` or a `versionJsonPointer` list, only the versions it matches count.",

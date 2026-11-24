@@ -444,15 +444,20 @@ impl RawDependency {
                 });
             }
         }
-        if self.version_url.as_deref().is_some_and(|v| !is_http_url(v)) {
+        // `{url}` is expanded first, so the version can come from the downloaded file itself.
+        let version_url = self.version_url.as_deref().map(|v| expand_url(v, url));
+        if version_url.as_deref().is_some_and(|v| !is_http_url(v)) {
             return Err(VendorError::InvalidVersionUrlKey { name: name() });
+        }
+        if version_url.as_deref().is_some_and(uses_version) {
+            return Err(VendorError::VersionUrlUsesVersion { name: name() });
         }
         if let Some(regex) = self.version_regex.as_deref()
             && fancy_regex::Regex::new(regex).is_err()
         {
             return Err(VendorError::InvalidVersionRegexKey { name: name() });
         }
-        if self.version_regex.is_some() && self.version_url.is_none() {
+        if self.version_regex.is_some() && version_url.is_none() {
             return Err(VendorError::RegexNeedsVersionUrl { name: name() });
         }
         if self
@@ -470,7 +475,7 @@ impl RawDependency {
             ("versionJsonPointer", self.version_json_pointer.is_some()),
         ];
         if let Some((key, _)) = page_only.iter().find(|(_, set)| *set)
-            && self.version_url.as_deref().is_none_or(is_git_url)
+            && version_url.as_deref().is_none_or(is_git_url)
         {
             return Err(VendorError::KeyNeedsPage { name: name(), key });
         }
@@ -922,6 +927,12 @@ mod tests {
             "config key 'vendorDependencies.Foo.versionRegex' needs a 'versionUrl' to read"
         );
         assert_eq!(
+            err(
+                r#"{"url":"https://x.io/v{version}","version":"1.0.0","versionUrl":"{url}","files":[{"{url}":"a"}]}"#
+            ),
+            "config key 'vendorDependencies.Foo.versionUrl' can't hold {version} or {tag}, since it is what finds the version"
+        );
+        assert_eq!(
             err(r#"{"url":"https://x.io","hashVersionFile":true,"files":[{"{url}":"a"}]}"#),
             "config key 'vendorDependencies.Foo.hashVersionFile' only applies to a 'repository' dependency"
         );
@@ -966,6 +977,7 @@ mod tests {
             r#"{"url":"https://x.io/v{tag}","version":"v1.0.0","files":[{"{url}/a.zip":["a"]}]}"#,
             r#"{"url":"https://x.io","files":[{"https://cdn.x.io/b.js":"b.js","{url}/c.zip":{"c":"d"}}]}"#,
             r#"{"url":"https://x.io/tool.exe","files":{"{url}":"tool.exe"}}"#,
+            r#"{"url":"https://x.io/a.user.js","versionUrl":"{url}","versionRegex":"@version +([0-9.]+)","files":{"{url}":"a.js"}}"#,
             r##"{"url":"https://x.io/v{tag}","versionUrl":"https://x.io/changes","versionSelector":"#latest","files":[{"{url}":"t"}]}"##,
             r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/index.json","versionJsonPointer":"versions","files":[{"{url}":"t"}]}"#,
             r#"{"url":"https://x.io/{version}","versionUrl":"https://x.io/list.json","versionJsonPointer":"","files":[{"{url}":"t"}]}"#,
