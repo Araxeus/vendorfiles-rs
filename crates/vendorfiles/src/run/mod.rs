@@ -205,7 +205,7 @@ async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
         .cloned()
         .ok_or_else(|| VendorError::NoDependencyNamed(name.to_owned()))?;
 
-    if entry.repository.is_none() {
+    if entry.repository.is_none() && !entry.is_url() {
         bail!(VendorError::NoRepositoryForDependency(name.to_owned()));
     }
     if entry.files.as_ref().is_none_or(Vec::is_empty) {
@@ -215,6 +215,11 @@ async fn upgrade_one(session: &mut Session, name: &str) -> Result<()> {
         bail!(VendorError::DependencyLocked(name.to_owned()));
     }
 
+    // A `url` entry is checked up front: its files are URLs, and a bad one would otherwise
+    // surface as a failed request.
+    if entry.is_url() {
+        entry.validate(name)?;
+    }
     let dependency = entry.resolve(name)?;
     session
         .install(

@@ -765,10 +765,88 @@ fn a_missing_config_is_reported_by_config_too() {
     assert_eq!(code(&out), 1);
 }
 
+fn url_project(locked: bool) -> tempfile::TempDir {
+    project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://x.io/t", "version": "1", "locked": locked, "files": [{ "{url}": "t" }],
+        } } })
+        .to_string(),
+    )
+}
+
+#[test]
+fn add_refuses_a_name_held_by_a_url_dependency_on_github() {
+    // The url names the same repository, but it is still a url entry: adding a repository to it
+    // would leave both keys set.
+    let dir = project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://github.com/owner/tool/releases/download/{tag}", "version": "v1",
+            "files": [{ "{url}/t": "t" }],
+        } } })
+        .to_string(),
+    );
+    let out = vendor(
+        dir.path(),
+        &["add", "owner/tool", "-f", "LICENSE", "--dry-run"],
+    );
+    assert!(
+        stderr(&out).contains("'tool' already vendors"),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+}
+
+#[test]
+fn list_shows_the_url_of_a_url_dependency() {
+    let dir = url_project(false);
+    let out = stdout(&vendor(dir.path(), &["list"]));
+    let row = out
+        .lines()
+        .find(|line| line.starts_with("tool"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(row.contains("https://x.io/t"), "{out}");
+}
+
+#[test]
+fn update_does_not_ask_a_url_dependency_for_a_repository() {
+    let dir = url_project(true);
+    let err = stderr(&vendor(dir.path(), &["update", "tool"]));
+    assert!(
+        err.contains("Dependency tool is locked and cannot be upgraded"),
+        "{err}"
+    );
+}
+
+#[test]
+fn update_validates_a_url_dependency_before_downloading() {
+    let dir = project(
+        &serde_json::json!({ "vendorDependencies": { "tool": {
+            "url": "https://x.io/t", "files": ["{url}"],
+        } } })
+        .to_string(),
+    );
+    let err = stderr(&vendor(dir.path(), &["update", "tool"]));
+    assert!(err.contains("needs an output name"), "{err}");
+}
+
+#[test]
+fn add_refuses_a_name_held_by_a_url_dependency() {
+    let dir = url_project(false);
+    let out = vendor(dir.path(), &["add", "owner/tool", "-f", "LICENSE"]);
+    assert!(
+        stderr(&out).contains("'tool' already vendors https://x.io/t"),
+        "{}",
+        stderr(&out)
+    );
+    let config = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+    assert!(!config.contains("repository"), "{config}");
+}
+
 #[test]
 fn list_prints_a_column_per_field_in_config_order() {
     let dir = project(LISTABLE);
-    let expected = "\u{1b}[36mNAME           VERSION  REPOSITORY\u{1b}[0m
+    let expected = "\u{1b}[36mNAME           VERSION  SOURCE\u{1b}[0m
 React          v18.2.0  https://github.com/facebook/react
 youtube-music  v3.3.1   https://github.com/th-ch/youtube-music
 bare           -        -
@@ -1328,7 +1406,7 @@ fn registry(dir: &Path) -> std::path::PathBuf {
     std::fs::write(
         &path,
         r#"
-version: 2
+version: 3
 programs:
   fd:
     aliases: [fdfind]
@@ -1360,6 +1438,17 @@ programs:
     targets:
       plan9-x86_64:
         asset: "{release}/plan9-tool"
+  urltool:
+    description: "A program served from its own website"
+    url: https://x.io/dl/v{version}
+    versionUrl: https://x.io/latest
+    targets:
+      windows-x86_64: { asset: "{url}/urltool.exe", as: urltool.exe }
+      windows-aarch64: { asset: "{url}/urltool.exe", as: urltool.exe }
+      macos-aarch64: { asset: "{url}/urltool", as: urltool }
+      macos-x86_64: { asset: "{url}/urltool", as: urltool }
+      linux-x86_64: { asset: "{url}/urltool", as: urltool }
+      linux-aarch64: { asset: "{url}/urltool", as: urltool }
 "#,
     )
     .expect("writing the registry");
@@ -1380,6 +1469,39 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
         .env("VENDOR_REGISTRY", &registry)
         .output()
         .expect("running the vendor binary")
+}
+
+#[test]
+fn add_writes_a_url_entry_for_a_url_program() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "urltool", "--dry-run"]);
+    let printed = stdout(&out);
+    assert!(
+        printed.contains(r#""url": "https://x.io/dl/v{version}""#),
+        "{printed}{}",
+        stderr(&out)
+    );
+    assert!(
+        printed.contains(r#""versionUrl": "https://x.io/latest""#),
+        "{printed}"
+    );
+    assert!(!printed.contains("repository"), "{printed}");
+}
+
+#[test]
+fn add_refuses_to_put_a_url_program_over_a_github_entry() {
+    let dir = project(
+        r#"{ "vendorDependencies": { "urltool": {
+        "repository": "https://github.com/a/urltool", "files": ["x"] } } }"#,
+    );
+    let err = stderr(&vendor_with_registry(
+        dir.path(),
+        &["add", "urltool", "--dry-run"],
+    ));
+    assert!(
+        err.contains("'urltool' already vendors https://github.com/a/urltool"),
+        "{err}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------

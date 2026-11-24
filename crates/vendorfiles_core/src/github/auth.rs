@@ -129,9 +129,9 @@ enum Logout {
     NotStored,
 }
 
-/// Deletes a stored token, or reports that there was none.
-fn forget(service: &str, user: &str) -> Result<Logout> {
-    let Some(entry) = credentials::entry(service, user) else {
+/// Deletes the token `entry` holds, or reports that there was none.
+fn forget(entry: Option<keyring_core::Entry>) -> Result<Logout> {
+    let Some(entry) = entry else {
         return Ok(Logout::NotStored);
     };
     match entry.delete_credential() {
@@ -151,7 +151,7 @@ fn forget(service: &str, user: &str) -> Result<Logout> {
 /// Returns [`VendorError::KeyringDelete`] if the store had a token but would not delete it.
 pub async fn logout() -> Result<()> {
     let (outcome, leftover) = tokio::task::spawn_blocking(|| {
-        let outcome = forget(KEYRING_SERVICE, KEYRING_USER);
+        let outcome = forget(credentials::entry(KEYRING_SERVICE, KEYRING_USER));
         // Read after the delete, so this can only be the reference tool's entry.
         let leftover = outcome.is_ok() && keyring_token().is_some();
         (outcome, leftover)
@@ -492,7 +492,6 @@ mod tests {
     use super::{
         Check, Found, Logout, Origin, Token, check, forget, interpret, is_plausible_token,
     };
-    use crate::github::credentials;
 
     const NOW: u64 = 1_000_000;
 
@@ -640,18 +639,25 @@ mod tests {
 
     #[test]
     fn forgetting_a_token_removes_it_once_and_then_says_so() {
-        const USER: &str = "logout";
-        let entry = credentials::entry("vendorfiles-cli-test", USER).expect("a store");
-        if entry.set_password("ghp_logout_0123456789").is_err() {
-            return; // No writable store here; `credentials`'s own tests report that.
-        }
-        assert_eq!(
-            forget("vendorfiles-cli-test", USER).expect("delete"),
-            Logout::Removed
-        );
-        assert_eq!(
-            forget("vendorfiles-cli-test", USER).expect("delete again"),
-            Logout::NotStored
-        );
+        // An in-memory store, so the answer depends on `forget` alone. The platform store gives
+        // inconsistent answers while other test processes write to it, and `credentials`'s own
+        // tests already cover writing to it for real.
+        let store: std::sync::Arc<keyring_core::CredentialStore> =
+            keyring_core::mock::Store::new().expect("a mock store");
+        let entry = || {
+            Some(
+                store
+                    .build("vendorfiles", "logout", None)
+                    .expect("an entry"),
+            )
+        };
+        entry()
+            .unwrap()
+            .set_password("ghp_logout_0123456789")
+            .expect("a mock store takes a password");
+
+        assert_eq!(forget(entry()).expect("delete"), Logout::Removed);
+        assert_eq!(forget(entry()).expect("delete again"), Logout::NotStored);
+        assert_eq!(forget(None).expect("no store"), Logout::NotStored);
     }
 }

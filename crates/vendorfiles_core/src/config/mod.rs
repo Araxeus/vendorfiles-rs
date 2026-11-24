@@ -102,6 +102,7 @@ impl Workspace {
         let display_path = path.display().to_string();
 
         let config = read_vendor_config(&canonical, &display_path)?;
+        check_url_keys(&canonical)?;
         let defaults = read_defaults(&canonical);
         let mut dependencies = read_dependencies(&canonical, &display_path)?;
         for dependency in dependencies.values_mut() {
@@ -281,6 +282,46 @@ fn read_dependencies(
     }
 }
 
+/// The keys only `url` dependencies take. Each must be a string when set.
+const URL_KEYS: [&str; 5] = [
+    "url",
+    "versionUrl",
+    "versionRegex",
+    "versionSelector",
+    "versionJsonPointer",
+];
+
+/// Refuses a url-only key that holds anything but a string.
+///
+/// The rest of the config is read leniently, as the reference reads it, so a wrong type counts as
+/// absent. Dropping one of these keys would silently turn a tracked dependency into one that
+/// installs once, and YAML makes that easy because it reads an unquoted `{url}` as a map.
+fn check_url_keys(canonical: &serde_json::Value) -> Result<()> {
+    let dependencies = canonical
+        .get("vendorDependencies")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(name, block)| (format!("vendorDependencies.{name}"), block));
+    let defaults = ["defaultVendorOptions", "default"]
+        .into_iter()
+        .filter_map(|key| canonical.get(key).map(|block| (key.to_owned(), block)));
+    for (prefix, block) in dependencies.chain(defaults) {
+        let Some(map) = block.as_object() else {
+            continue;
+        };
+        if let Some(key) = URL_KEYS.iter().find(|key| {
+            map.get(**key)
+                .is_some_and(|v| !v.is_null() && !v.is_string())
+        }) {
+            return Err(VendorError::KeyNotString {
+                key: format!("{prefix}.{key}"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Reads `defaultVendorOptions`, then `default`.
 fn read_defaults(canonical: &serde_json::Value) -> DefaultOptions {
     ["defaultVendorOptions", "default"]
@@ -330,6 +371,75 @@ mod tests {
 
     fn value(json: &str) -> serde_json::Value {
         serde_json::from_str(json).unwrap()
+    }
+
+    /// `vendorfiles.schema.json`, compiled as the draft it declares.
+    fn config_schema() -> jsonschema::Validator {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendorfiles.schema.json");
+        let schema = value(&std::fs::read_to_string(path).expect("vendorfiles.schema.json"));
+        jsonschema::draft202012::new(&schema).expect("the config schema compiles")
+    }
+
+    #[test]
+    fn the_config_schema_knows_a_dependency_needs_exactly_one_source() {
+        let validator = config_schema();
+        let config = |dependency: serde_json::Value| serde_json::json!({ "vendorDependencies": { "tool": dependency } });
+
+        for valid in [
+            serde_json::json!({ "url": "https://x.io", "files": [{ "{url}": "a" }] }),
+            serde_json::json!({ "repository": "https://github.com/a/b", "files": ["a"] }),
+            serde_json::json!({
+                "url": "https://x.io/v{tag}", "versionUrl": "https://x.io/changes",
+                "versionRegex": "v(\\d+)", "versionSelector": "#latest",
+                "hashVersionFile": false, "files": [{ "{url}": "a" }],
+            }),
+        ] {
+            assert!(validator.is_valid(&config(valid.clone())), "{valid}");
+        }
+        for invalid in [
+            serde_json::json!({ "files": ["a"] }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "url": "https://x.io", "files": ["a"],
+            }),
+            serde_json::json!({
+                "url": "https://x.io", "hashVersionFile": true, "files": [{ "{url}": "a" }],
+            }),
+            serde_json::json!({
+                "repository": "https://github.com/a/b", "versionSelector": "h2", "files": ["a"],
+            }),
+        ] {
+            assert!(!validator.is_valid(&config(invalid.clone())), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn a_url_key_that_is_not_a_string_is_refused_by_name() {
+        let message = |json: &str| {
+            super::check_url_keys(&value(json))
+                .map_err(|e| e.to_string())
+                .err()
+        };
+        assert_eq!(
+            message(
+                r#"{"vendorDependencies":{"a":{"url":"https://x.io","versionUrl":{"url":null}}}}"#
+            )
+            .as_deref(),
+            Some(
+                "config key 'vendorDependencies.a.versionUrl' must be a string. In YAML, quote a value that starts with '{'"
+            )
+        );
+        assert_eq!(
+            message(r#"{"default":{"versionRegex":["v1"]}}"#).as_deref(),
+            Some(
+                "config key 'default.versionRegex' must be a string. In YAML, quote a value that starts with '{'"
+            )
+        );
+        assert_eq!(
+            message(
+                r#"{"vendorDependencies":{"a":{"url":"https://x.io","versionUrl":null,"locked":1}}}"#
+            ),
+            None
+        );
     }
 
     #[test]

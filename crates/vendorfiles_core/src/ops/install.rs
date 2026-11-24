@@ -21,12 +21,15 @@ use crate::lockfile::{
     VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
     retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
-use crate::model::{Dependency, FileSpec, FileTarget, RawDependency, flatten_files};
+use crate::model::{
+    Dependency, FileSpec, FileTarget, RawDependency, Repository, Source, flatten_files,
+};
 use crate::ops::{OpResult, Session};
 use crate::progress;
 use crate::remote_zip;
-use crate::template::{is_release_path, replace_version, strip_release_prefix};
+use crate::template::{expand_url, is_release_path, replace_version, strip_release_prefix};
 use crate::ui;
+use crate::url_source::{self, UrlSource};
 
 /// How an install should behave.
 #[derive(Debug, Clone, Default)]
@@ -83,7 +86,7 @@ impl Session {
         let progress = Arc::new(
             self.progress
                 .dependency(&dependency.name)
-                .linked_to(&dependency.repository),
+                .linked_to(&dependency.link()),
         );
         progress.status("resolving version");
         let version = match self.decide_version(&dependency, &options).await {
@@ -203,7 +206,8 @@ impl Session {
         } = prepared;
 
         if options.show_outdated_only {
-            if needs_update {
+            // An unversioned `url` dependency has nothing newer to offer.
+            if needs_update && !(version.is_empty() && dependency.is_url()) {
                 progress.finish_with_line(outdated_line(&dependency, &version));
             } else {
                 progress.finish_quietly();
@@ -239,7 +243,8 @@ impl Session {
         write_lockfile(
             &dependency.name,
             VendorLock {
-                repository: dependency.repository.clone(),
+                repository: (!dependency.is_url()).then(|| dependency.repository.clone()),
+                url: dependency.is_url().then(|| dependency.repository.clone()),
                 version: version.clone(),
                 files: config_files_to_lock_files(&dependency.files, &version),
                 save_path,
@@ -271,11 +276,13 @@ impl Session {
         let Some(configured) = self.workspace.dependencies.get(&dependency.name) else {
             return EntryChange::New;
         };
+        let url = dependency.is_url();
         EntryChange::Existing {
             // An existing URL stays as written. A missing one is filled so `sync` finds it again.
-            repository: configured.repository.is_none(),
+            repository: !url && configured.repository.is_none(),
             files: configured.files.as_deref() != Some(dependency.files.as_slice()),
-            version: configured.version.as_deref() != Some(version),
+            // An unversioned `url` dependency installs at "", which is not worth writing down.
+            version: configured.version.as_deref() != Some(version) && !(url && version.is_empty()),
         }
     }
 
@@ -320,11 +327,15 @@ impl Session {
             .dependencies
             .entry(dependency.name.clone())
             .or_insert_with(|| new_entry(dependency, version));
-        entry.version = Some(version.to_owned());
+        if !(dependency.is_url() && version.is_empty()) {
+            entry.version = Some(version.to_owned());
+        }
         entry.files = Some(dependency.files.clone());
-        entry
-            .repository
-            .get_or_insert_with(|| dependency.repository.clone());
+        if !dependency.is_url() {
+            entry
+                .repository
+                .get_or_insert_with(|| dependency.repository.clone());
+        }
         self.workspace.file.write().await
     }
 
@@ -363,21 +374,35 @@ impl EntryChange {
 
 /// The config entry for a dependency the config does not list yet.
 fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
-    RawDependency {
+    let entry = RawDependency {
         version: Some(version.to_owned()),
-        repository: Some(dependency.repository.clone()),
         files: Some(dependency.files.clone()),
         hash_version_file: dependency.hash_version_file.clone(),
         vendor_folder: dependency.vendor_folder.clone(),
         release_regex: dependency.release_regex.clone(),
         locked: dependency.locked.then_some(true),
-        name: None,
+        ..RawDependency::default()
+    };
+    match &dependency.source {
+        Source::GitHub(_) => RawDependency {
+            repository: Some(dependency.repository.clone()),
+            ..entry
+        },
+        Source::Url(source) => RawDependency {
+            version: entry.version.filter(|v| !v.is_empty()),
+            url: Some(source.url.clone()),
+            version_url: source.version_url.clone(),
+            version_regex: source.version_regex.clone(),
+            version_selector: source.version_selector.clone(),
+            version_json_pointer: source.version_json_pointer.clone(),
+            ..entry
+        },
     }
 }
 
 /// One line of `vendor outdated` output.
 fn outdated_line(dependency: &Dependency, new_version: &str) -> String {
-    let name = ui::link(&dependency.name, &dependency.repository);
+    let name = ui::link(&dependency.name, &dependency.link());
     match dependency.version.as_deref() {
         Some(old) if old != new_version => {
             format!("{name} {} -> {}", ui::red(old), ui::green(new_version))
@@ -504,10 +529,9 @@ async fn remove_previously_installed(
     Ok(())
 }
 
-/// Downloads every declared file: repository files first, then release assets.
+/// Downloads every declared file.
 ///
-/// Each batch runs concurrently, and every file in it gets its own bar for as long as it is in
-/// flight.
+/// Files download concurrently, and every file gets its own bar for as long as it is in flight.
 async fn download_all(
     github: &GitHubClient,
     dependency: &Dependency,
@@ -515,9 +539,16 @@ async fn download_all(
     version: &str,
     progress: &progress::Dependency,
 ) -> Result<()> {
-    match download_each(github, dependency, folder, version, progress).await {
+    let repo = match &dependency.source {
+        Source::GitHub(repo) => repo,
+        Source::Url(source) => {
+            return download_urls(github.http(), dependency, source, folder, version, progress)
+                .await;
+        }
+    };
+    match download_each(github, dependency, repo, folder, version, progress).await {
         Ok(()) => Ok(()),
-        Err(error) => Err(explain_absence(github, dependency, error).await),
+        Err(error) => Err(explain_absence(github, dependency, repo, error).await),
     }
 }
 
@@ -529,6 +560,7 @@ async fn download_all(
 async fn explain_absence(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     error: VendorError,
 ) -> VendorError {
     let cause = match &error {
@@ -538,7 +570,7 @@ async fn explain_absence(
     if !matches!(cause, VendorError::RequestFailed { status: 404, .. }) {
         return error;
     }
-    if github.repository_exists(&dependency.repo).await == Some(false) {
+    if github.repository_exists(repo).await == Some(false) {
         return VendorError::RepositoryNotFound {
             repository: dependency.repository.clone(),
         };
@@ -546,9 +578,11 @@ async fn explain_absence(
     error
 }
 
+/// Downloads a GitHub dependency's files: repository files first, then release assets.
 async fn download_each(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     folder: &Path,
     version: &str,
     progress: &progress::Dependency,
@@ -560,11 +594,10 @@ async fn download_each(
 
     if !repo_files.is_empty() {
         progress.status(format!("downloading {} file(s)", repo_files.len()));
-        let saved =
-            futures_util::future::try_join_all(repo_files.iter().map(|spec| {
-                download_repo_file(github, dependency, folder, version, spec, progress)
-            }))
-            .await?;
+        let saved = futures_util::future::try_join_all(repo_files.iter().map(|spec| {
+            download_repo_file(github, dependency, repo, folder, version, spec, progress)
+        }))
+        .await?;
         record(progress, saved.iter());
     }
 
@@ -574,7 +607,7 @@ async fn download_each(
             release_files.len()
         ));
         let saved = futures_util::future::try_join_all(release_files.iter().map(|spec| {
-            download_release_file(github, dependency, folder, version, spec, progress)
+            download_release_file(github, dependency, repo, folder, version, spec, progress)
         }))
         .await?;
         record(progress, saved.iter().flatten());
@@ -597,6 +630,7 @@ fn record<'a>(progress: &progress::Dependency, saved: impl Iterator<Item = &'a P
 async fn download_repo_file(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     folder: &Path,
     version: &str,
     spec: &FileSpec,
@@ -609,7 +643,7 @@ async fn download_repo_file(
     };
 
     let response = github
-        .download_file(&dependency.repo, &spec.input, Some(version))
+        .download_file(repo, &spec.input, Some(version))
         .await
         .map_err(|source| VendorError::FileDownloadFailed {
             file: spec.input.clone(),
@@ -629,6 +663,7 @@ async fn download_repo_file(
 async fn download_release_file(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     folder: &Path,
     version: &str,
     spec: &FileSpec,
@@ -641,11 +676,9 @@ async fn download_release_file(
             unreachable!("extraction_pairs returns None only for Rename");
         };
         // The asset itself is the file, so all of it is wanted.
-        let response = fetch_asset(github, dependency, &asset, version).await?;
+        let response = fetch_asset(github, dependency, repo, &asset, version).await?;
         let save_path = anchor(folder, replace_version(output, version).as_str());
-        let transfer = progress.transfer(response.content_length());
-        stream_to_file(response, &save_path, Some(&transfer)).await?;
-        drop(transfer);
+        save(response, &save_path, progress).await?;
         return Ok(vec![save_path]);
     };
 
@@ -664,13 +697,14 @@ async fn download_release_file(
     let extracted = temp.path().join("extracted");
 
     if !read_remotely(
-        github, dependency, &asset, version, &wanted, &extracted, progress,
+        github, dependency, repo, &asset, version, &wanted, &extracted, progress,
     )
     .await
     {
         download_and_extract(
             github,
             dependency,
+            repo,
             &asset,
             version,
             &wanted,
@@ -680,30 +714,147 @@ async fn download_release_file(
         .await?;
     }
 
+    place_members(&extracted, &pairs, version, folder).await
+}
+
+/// Moves extracted archive members into the dependency folder, in declaration order.
+async fn place_members(
+    extracted: &Path,
+    pairs: &[(String, String)],
+    version: &str,
+    folder: &Path,
+) -> Result<Vec<PathBuf>> {
     let mut saved = Vec::with_capacity(pairs.len());
     for (from, to) in pairs {
-        let source = join_normalized(&extracted, &[replace_version(&from, version).as_str()]);
-        let destination = anchor(folder, replace_version(&to, version).as_str());
+        let source = join_normalized(extracted, &[replace_version(from, version).as_str()]);
+        let destination = anchor(folder, replace_version(to, version).as_str());
         move_extracted(&source, &destination).await?;
         saved.push(destination);
     }
     Ok(saved)
 }
 
+/// Streams a response to `path` with its own bar.
+async fn save(
+    response: reqwest::Response,
+    path: &Path,
+    progress: &progress::Dependency,
+) -> Result<()> {
+    let transfer = progress.transfer(response.content_length());
+    stream_to_file(response, path, Some(&transfer)).await
+}
+
+/// Downloads every file of a `url` dependency, all at once.
+///
+/// The GitHub token is never involved: `http` is the plain client.
+async fn download_urls(
+    http: &reqwest::Client,
+    dependency: &Dependency,
+    source: &UrlSource,
+    folder: &Path,
+    version: &str,
+    progress: &progress::Dependency,
+) -> Result<()> {
+    let specs = flatten_files(&dependency.files);
+    progress.status(format!("downloading {} file(s)", specs.len()));
+    let saved =
+        futures_util::future::try_join_all(specs.iter().map(|spec| {
+            download_url_file(http, dependency, source, folder, version, spec, progress)
+        }))
+        .await?;
+    record(progress, saved.iter().flatten());
+    Ok(())
+}
+
+/// Downloads one file of a `url` dependency, extracting it when the target names archive
+/// members.
+async fn download_url_file(
+    http: &reqwest::Client,
+    dependency: &Dependency,
+    source: &UrlSource,
+    folder: &Path,
+    version: &str,
+    spec: &FileSpec,
+    progress: &progress::Dependency,
+) -> Result<Vec<PathBuf>> {
+    let url = replace_version(&expand_url(&spec.input, &source.url), version);
+    let response =
+        url_source::fetch(http, &url)
+            .await
+            .map_err(|cause| VendorError::FileDownloadFailed {
+                file: spec.input.clone(),
+                repository: dependency.repository.clone(),
+                version: version.to_owned(),
+                source: Box::new(cause),
+            })?;
+
+    let Some(pairs) = spec.output.extraction_pairs() else {
+        let FileTarget::Rename(output) = &spec.output else {
+            unreachable!("extraction_pairs returns None only for Rename");
+        };
+        let save_path = anchor(folder, replace_version(output, version).as_str());
+        save(response, &save_path, progress).await?;
+        return Ok(vec![save_path]);
+    };
+
+    let wanted: Vec<String> = pairs
+        .iter()
+        .map(|(from, _)| replace_version(from, version))
+        .collect();
+    let temp = tempfile::Builder::new()
+        .prefix("vendorfiles-")
+        .tempdir()
+        .map_err(VendorError::from)?;
+    // After redirects, so `/latest` saves under the versioned name it points at.
+    let name = archive_name(response.url().as_str());
+    progress.status(format!("downloading {name}"));
+    save_and_extract(response, &name, &wanted, temp.path(), progress).await?;
+    place_members(&temp.path().join("extracted"), &pairs, version, folder).await
+}
+
+/// The file name to save a downloaded archive under: the URL's last path segment.
+///
+/// The name matters, because a lone `.gz` or `.xz` extracts to its name minus the suffix.
+/// Characters no file system takes become `_`, and an empty segment becomes `download`.
+pub(crate) fn archive_name(url: &str) -> String {
+    let segment = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(str::to_owned))
+        .unwrap_or_default();
+    if segment.is_empty() {
+        return "download".to_owned();
+    }
+    let unsafe_in_names =
+        |c: char| matches!(c, '<' | '>' | ':' | '"' | '|' | '*' | '\\') || c.is_control();
+    let mut name: String = segment
+        .chars()
+        .map(|c| if unsafe_in_names(c) { '_' } else { c })
+        .collect();
+    // Windows reserves these names whatever the extension, and a write to one goes nowhere.
+    let stem_len = name.find('.').unwrap_or(name.len());
+    let stem = name[..stem_len].to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || (stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.ends_with(|c: char| ('1'..='9').contains(&c)));
+    if reserved {
+        name.insert(stem_len, '_');
+    }
+    name
+}
+
 /// Starts a streaming download of one of a dependency's release assets.
 async fn fetch_asset(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     asset: &str,
     version: &str,
 ) -> Result<reqwest::Response> {
     github
-        .download_release_asset(
-            &dependency.repo,
-            asset,
-            version,
-            dependency.release_regex.as_deref(),
-        )
+        .download_release_asset(repo, asset, version, dependency.release_regex.as_deref())
         .await
 }
 
@@ -714,9 +865,14 @@ async fn fetch_asset(
 /// storage that will not serve ranges, an index that does not hold one of the members - simply
 /// hands the work back to [`download_and_extract`]. A user should never see a failure that only
 /// this route could produce.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct input the route needs"
+)]
 async fn read_remotely(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     asset: &str,
     version: &str,
     wanted: &[String],
@@ -733,7 +889,7 @@ async fn read_remotely(
     // JSON already knows how big the asset is - so a small one is ruled out without a request.
     let Ok(Some(source)) = github
         .asset_range_source(
-            &dependency.repo,
+            repo,
             asset,
             version,
             dependency.release_regex.as_deref(),
@@ -768,9 +924,14 @@ async fn read_remotely(
 }
 
 /// Downloads the whole asset into `temp` and extracts the wanted members from it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct input the route needs"
+)]
 async fn download_and_extract(
     github: &GitHubClient,
     dependency: &Dependency,
+    repo: &Repository,
     asset: &str,
     version: &str,
     wanted: &[String],
@@ -780,23 +941,36 @@ async fn download_and_extract(
     // Said again because the range route may have set its own status before handing the work
     // back: what happens next is a download, and the line has to say so.
     progress.status(format!("downloading {asset}"));
-    let response = fetch_asset(github, dependency, asset, version).await?;
-    // Saved under the asset's own name: a lone `.gz` or `.xz` extracts to its name minus the
-    // suffix, so a random temporary name would produce the wrong member.
-    let archive_path = temp.join(asset);
-    let transfer = progress.transfer(response.content_length());
+    let response = fetch_asset(github, dependency, repo, asset, version).await?;
+    save_and_extract(response, asset, wanted, temp, progress).await
+}
+
+/// Saves an archive into `temp` under `archive_name` and extracts the wanted members into
+/// `temp/extracted`.
+async fn save_and_extract(
+    response: reqwest::Response,
+    archive_name: &str,
+    wanted: &[String],
+    temp: &Path,
+    progress: &progress::Dependency,
+) -> Result<()> {
+    // Saved under the archive's own name: a lone `.gz` or `.xz` extracts to its name minus the
+    // suffix, so a random temporary name would produce the wrong member. Its own folder keeps
+    // that name, whatever it is, clear of `extracted`.
+    let archive_folder = temp.join("archive");
+    tokio::fs::create_dir_all(&archive_folder).await?;
+    let archive_path = archive_folder.join(archive_name);
     // Reported as the extraction failure the reference prints for it, because that is what a
     // half-written archive amounts to - but carrying the reason, which used to be dropped here
     // so that extraction could rediscover the symptom and not the cause.
-    stream_to_file(response, &archive_path, Some(&transfer))
+    save(response, &archive_path, progress)
         .await
-        .map_err(|source| cannot_extract(asset, source))?;
-    drop(transfer);
+        .map_err(|source| cannot_extract(archive_name, source))?;
 
     let extract_target = temp.join("extracted");
     let wanted = wanted.to_vec();
-    progress.status(format!("extracting {asset}"));
-    let name = asset.to_owned();
+    progress.status(format!("extracting {archive_name}"));
+    let name = archive_name.to_owned();
     tokio::task::spawn_blocking(move || {
         archive::extract_members(&archive_path, &extract_target, &wanted)
     })
@@ -844,14 +1018,20 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use std::path::Path;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    use serde_json::json;
 
     use super::InstallOptions;
     use crate::config::Workspace;
+    use crate::error::VendorError;
     use crate::github::GitHubClient;
     use crate::lockfile::read_lockfile;
     use crate::model::{Dependency, RawDependency};
     use crate::ops::Session;
+    use crate::ops::SyncOptions;
     use crate::progress::Reporter;
+    use crate::test_server::{Route, route, serve, serve_counted};
 
     const REPOSITORY: &str = "https://github.com/a/b";
 
@@ -1146,5 +1326,252 @@ mod tests {
                 .unwrap();
             assert_eq!(locked["first"].version, "v2");
         }
+    }
+
+    async fn sync(
+        session: &mut Session,
+        should_update: bool,
+        show_outdated_only: bool,
+    ) -> crate::error::Result<()> {
+        session
+            .sync(SyncOptions {
+                should_update,
+                show_outdated_only,
+                ..SyncOptions::default()
+            })
+            .await
+    }
+
+    fn tool_config(dependency: &serde_json::Value) -> String {
+        json!({ "vendorDependencies": { "tool": dependency } }).to_string()
+    }
+
+    fn zip_bytes(members: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in members {
+            writer
+                .start_file::<_, ()>(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn gz_bytes(content: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(content).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_archive_is_named_after_where_its_url_lands() {
+        // A lone `.gz` extracts to its own name minus the suffix, so the name has to come from
+        // the redirect target, not from `/latest`.
+        let base = serve(vec![
+            route("/latest", 302, "Location: /files/tool.gz\r\n", b""),
+            Route {
+                path: "/files/tool.gz",
+                status: 200,
+                headers: "",
+                body: gz_bytes(b"tool bytes"),
+            },
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1", "files": [{ "{url}/latest": { "tool": "tool" } }],
+            })),
+        )
+        .await;
+        sync(&mut session, false, false).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/tool")).unwrap(),
+            b"tool bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_archive_may_be_named_like_the_extraction_folder() {
+        let base = serve(vec![Route {
+            path: "/extracted",
+            status: 200,
+            headers: "",
+            body: zip_bytes(&[("tool", b"tool bytes")]),
+        }]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1", "files": [{ "{url}/extracted": ["tool"] }],
+            })),
+        )
+        .await;
+        sync(&mut session, false, false).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/tool")).unwrap(),
+            b"tool bytes"
+        );
+    }
+
+    #[test]
+    fn an_archive_is_named_after_the_last_segment_of_its_url() {
+        assert_eq!(
+            super::archive_name("https://x.io/a/tool.tar.gz?x=1#f"),
+            "tool.tar.gz"
+        );
+        assert_eq!(super::archive_name("https://x.io/dl/v1:2.zip"), "v1_2.zip");
+        assert_eq!(super::archive_name("https://x.io/"), "download");
+        // Windows device names save nowhere, so they get an underscore.
+        assert_eq!(super::archive_name("https://x.io/aux.zip"), "aux_.zip");
+        assert_eq!(super::archive_name("https://x.io/NUL"), "NUL_");
+        assert_eq!(
+            super::archive_name("https://x.io/com1.tar.gz"),
+            "com1_.tar.gz"
+        );
+        assert_eq!(
+            super::archive_name("https://x.io/console.zip"),
+            "console.zip"
+        );
+        assert_eq!(super::archive_name("https://x.io/CONIN$"), "CONIN$_");
+        assert_eq!(super::archive_name("https://x.io"), "download");
+    }
+
+    #[tokio::test]
+    async fn a_url_dependency_installs_and_records_its_version() {
+        let base = serve(vec![
+            route("/latest", 200, "", b"v1.2.3\n"),
+            route("/dl/v1.2.3", 302, "Location: /cdn/tool\r\n", b""),
+            route("/cdn/tool", 200, "", b"tool bytes"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": format!("{base}/dl/{{tag}}"),
+                "versionUrl": format!("{base}/latest"),
+                "files": [{ "{url}": "tool.bin" }],
+            })),
+        )
+        .await;
+        sync(&mut session, true, false).await.unwrap();
+
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/tool.bin")).unwrap(),
+            b"tool bytes"
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("vendor.json")).unwrap())
+                .unwrap();
+        let entry = &written["vendorDependencies"]["tool"];
+        assert_eq!(entry["version"], "v1.2.3", "{written}");
+        assert!(entry.get("repository").is_none(), "{written}");
+
+        let lock = read_lockfile(&dir.path().join("vendor/tool/vendor-lock.json"))
+            .await
+            .unwrap();
+        let entry = &lock["tool"];
+        assert_eq!(
+            entry.url.as_deref(),
+            Some(format!("{base}/dl/{{tag}}").as_str())
+        );
+        assert_eq!(entry.repository, None);
+    }
+
+    #[tokio::test]
+    async fn an_archive_url_extracts_the_named_members() {
+        let archive = zip_bytes(&[("bin/tool", b"tool bytes"), ("README", b"readme")]);
+        let base = serve(vec![Route {
+            path: "/a.zip?x=1",
+            status: 200,
+            headers: "",
+            body: archive,
+        }]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1",
+                "files": [{ "{url}/a.zip?x=1": { "bin/tool": "tool" } }],
+            })),
+        )
+        .await;
+        sync(&mut session, false, false).await.unwrap();
+
+        let folder = dir.path().join("vendor/tool");
+        assert_eq!(std::fs::read(folder.join("tool")).unwrap(), b"tool bytes");
+        assert!(!folder.join("README").exists());
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_fails_naming_it_and_writes_nothing() {
+        let base = serve(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": base, "version": "1", "files": [{ "{url}/gone.js": "gone.js" }],
+            })),
+        )
+        .await;
+        let error = sync(&mut session, false, false).await.unwrap_err();
+
+        let VendorError::FileDownloadFailed { file, source, .. } = &error else {
+            panic!("{error}")
+        };
+        assert_eq!(file, "{url}/gone.js");
+        assert!(
+            matches!(**source, VendorError::RequestFailed { status: 404, .. }),
+            "{source}"
+        );
+        assert!(!dir.path().join("vendor/tool/gone.js").exists());
+        let lock = read_lockfile(&dir.path().join("vendor/tool/vendor-lock.json")).await;
+        assert!(lock.map_or(true, |l| l.get("tool").is_none_or(|entry| entry.pending)));
+    }
+
+    #[tokio::test]
+    async fn a_changed_url_downloads_again() {
+        let (base, hits) = serve_counted(vec![
+            route("/v1/f.txt", 200, "", b"one"),
+            route("/v2/f.txt", 200, "", b"two"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let config = |path: &str| {
+            tool_config(&json!({
+                "url": format!("{base}/{path}"), "files": [{ "{url}": "f.txt" }],
+            }))
+        };
+        let mut first = session(dir.path(), &config("v1/f.txt")).await;
+        sync(&mut first, false, false).await.unwrap();
+        let mut second = session(dir.path(), &config("v2/f.txt")).await;
+        sync(&mut second, false, false).await.unwrap();
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            std::fs::read(dir.path().join("vendor/tool/f.txt")).unwrap(),
+            b"two"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unversioned_url_dependency_installs_once() {
+        let (base, hits) = serve_counted(vec![route("/f.txt", 200, "", b"data")]);
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(
+            dir.path(),
+            &tool_config(&json!({
+                "url": format!("{base}/f.txt"), "files": [{ "{url}": "f.txt" }],
+            })),
+        )
+        .await;
+        sync(&mut session, true, false).await.unwrap();
+        sync(&mut session, true, false).await.unwrap();
+        sync(&mut session, true, true).await.unwrap();
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        let written = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+        assert!(!written.contains("\"version\""), "{written}");
     }
 }

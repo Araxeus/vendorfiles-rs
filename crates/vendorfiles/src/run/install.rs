@@ -12,8 +12,8 @@ use crate::{known, source};
 
 /// What a `source` argument turned out to name.
 struct Source {
-    /// The repository's URL.
-    repository: String,
+    /// The repository's URL, or `None` for a registry program that downloads from a `url`.
+    repository: Option<String>,
     /// A name this tool knows describes itself.
     known: Option<known::Known>,
     /// A name the hosted registry describes.
@@ -55,17 +55,17 @@ async fn resolve_source(
 
     let mut searched = None;
     let repository = if let Some(known) = known.as_ref() {
-        known.repository.to_owned()
+        Some(known.repository.to_owned())
     } else if let Some(listed) = listed.as_ref() {
         listed.repository.clone()
     } else if is_github_url(source) {
-        source.to_owned()
+        Some(source.to_owned())
     } else if is_owner_repo_shorthand(source) {
-        format!("https://github.com/{source}")
+        Some(format!("https://github.com/{source}"))
     } else {
         let found = search_github(session, source, unlisted).await?;
         searched = Some(unlisted);
-        found
+        Some(found)
     };
 
     Ok(Source {
@@ -247,6 +247,10 @@ async fn install(
         searched,
     } = resolve_source(session, source, files.is_some(), preview.refresh).await?;
 
+    let Some(repository) = repository else {
+        let listed = listed.expect("only a registry entry comes without a repository");
+        return install_listed_url(session, listed, version, name, preview).await;
+    };
     if !is_github_url(&repository) {
         bail!(VendorError::InvalidGitHubUrlQuoted(repository));
     }
@@ -263,13 +267,11 @@ async fn install(
         },
     };
 
-    // `add` never repoints an entry, so a name holding another repository is a clash.
-    if let Some(held) = session
-        .workspace
-        .dependencies
-        .get(&name)
-        .and_then(|entry| entry.repository.as_deref())
-        && !same_repository(held, &repository)
+    // `add` never repoints an entry, so a name holding another repository, or any `url`, is a
+    // clash. A `url` on github.com can name this very repository and still be a url entry.
+    if let Some(entry) = session.workspace.dependencies.get(&name)
+        && let Some(held) = entry.repository.as_deref().or(entry.url.as_deref())
+        && (entry.is_url() || !same_repository(held, &repository))
     {
         bail!(VendorError::NameTaken {
             name,
@@ -336,6 +338,86 @@ async fn install(
         return report_entry(session, &name, &entry, version.as_deref());
     }
 
+    session
+        .install(
+            dependency,
+            InstallOptions {
+                should_update: version.is_none(),
+                new_version: version,
+                ..InstallOptions::default()
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+/// `vendor add <name>` for a registry program that downloads from a `url`.
+///
+/// Shorter than the GitHub path: an existing entry is found by name only, because a `url` has no
+/// `owner/repo` to match a neighbour by.
+async fn install_listed_url(
+    session: &mut Session,
+    listed: registry::Entry,
+    version: Option<String>,
+    name: Option<String>,
+    preview: Preview,
+) -> Result<()> {
+    let url = listed.url.clone().unwrap_or_default();
+    let name = name
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| listed.name.clone());
+    let existing = session.workspace.dependencies.get(&name).cloned();
+
+    // `add` never repoints an entry, so a name holding a repository, or another `url`, is a
+    // clash.
+    if let Some(held) = existing.as_ref().and_then(|entry| {
+        entry
+            .repository
+            .clone()
+            .or_else(|| entry.url.clone().filter(|held| *held != url))
+    }) {
+        bail!(VendorError::NameTaken {
+            name,
+            held,
+            repository: url,
+        });
+    }
+    if existing
+        .as_ref()
+        .is_some_and(|entry| entry.locked == Some(true))
+    {
+        bail!(VendorError::DependencyLocked(name));
+    }
+
+    // An entry already in the config keeps what it says. The registry fills the rest.
+    let existing = existing.unwrap_or_default();
+    let files = existing
+        .files
+        .clone()
+        .filter(|files| !files.is_empty())
+        .unwrap_or(listed.files);
+    let mut entry = RawDependency {
+        url: Some(url),
+        version_url: existing.version_url.clone().or(listed.version_url),
+        version_regex: existing.version_regex.clone().or(listed.version_regex),
+        version_selector: existing
+            .version_selector
+            .clone()
+            .or(listed.version_selector),
+        version_json_pointer: existing
+            .version_json_pointer
+            .clone()
+            .or(listed.version_json_pointer),
+        files: Some(files),
+        ..existing
+    };
+    entry.apply_defaults(&session.workspace.defaults);
+    entry.validate(&name)?;
+    let dependency = entry.resolve(&name)?;
+
+    if preview.dry_run {
+        return report_entry(session, &name, &entry, version.as_deref());
+    }
     session
         .install(
             dependency,

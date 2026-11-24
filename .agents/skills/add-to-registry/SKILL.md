@@ -86,6 +86,28 @@ its own entry even when it copies a name: `tmux` and `psmux` are separate.
 Add a comment only for what the entry cannot show, such as missing hosts or an odd layout. Verify
 each claim in it.
 
+### Programs that aren't on GitHub releases
+
+A program that ships from its own site sets `url` instead of `repository`, and `versionUrl` for
+where its latest version comes from. Its assets are URLs, usually `{url}` or `{url}/...`:
+
+```yaml
+  filepilot:
+    description: File manager for Windows
+    url: https://filepilot.tech/download/v{version}
+    versionUrl: https://filepilot.tech/download/latest
+    versionRegex: 'v(\d+\.\d+\.\d+)'
+    targets:
+      windows-x86_64: { asset: "{url}", as: FPilot.exe }
+```
+
+Find the version source first. A `/download/latest` link that redirects to a versioned file, a
+page with the version in one element (`versionSelector`), a JSON API (`versionJsonPointer`), or a
+`.git` repository of tags all work.
+Confirm it with `curl -sIL <versionUrl>`. A `url` program needs `version: 3` at the top of
+`registry.yml`, and the parser refuses it otherwise. CI checks it like any entry: it resolves the version
+through `versionUrl`, then requests every host's asset.
+
 ### Descriptions
 
 A test caps descriptions at 72 characters, so measure them before applying. Names, aliases and the

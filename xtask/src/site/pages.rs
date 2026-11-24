@@ -94,6 +94,12 @@ pub const PAGES: &[PageSpec] = &[
         "Track release tags, pull release assets, extract files from archives, and choose which releases count.",
     ),
     page(
+        "configuration/other-sites",
+        Some("Other sites"),
+        Start::Heading("Downloading from other sites"),
+        "Download files from any URL and track their versions with a page, a regex or git tags.",
+    ),
+    page(
         "configuration/locking",
         Some("Locking"),
         Start::Heading("Locking a dependency"),
@@ -185,6 +191,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/config-files",
             "configuration/paths",
             "configuration/versions",
+            "configuration/other-sites",
             "configuration/locking",
             "configuration/defaults",
         ],

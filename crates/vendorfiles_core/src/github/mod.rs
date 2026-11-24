@@ -129,6 +129,13 @@ impl GitHubClient {
         })
     }
 
+    /// The plain HTTP client. It carries no credentials, so it is safe for hosts other than
+    /// GitHub.
+    #[must_use]
+    pub const fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     /// Notes a request charged to the core rate limit, and starts the quota lookup if this is
     /// the first of the run.
     fn note_api_request(&self) {

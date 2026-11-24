@@ -1,4 +1,4 @@
-//! `vendorfiles_core` - pull files from GitHub repositories and keep them up to date.
+//! `vendorfiles_core` - pull files from GitHub repositories and URLs and keep them up to date.
 //!
 //! This crate holds all behaviour; the `vendor` binary is a thin shell that owns the terminal
 //! contract (help text, exit codes, the `ERROR:` prefix). Nothing here exits the process or
@@ -32,12 +32,17 @@ pub mod progress;
 pub mod registry;
 pub mod remote_zip;
 pub mod template;
+#[cfg(test)]
+mod test_server;
 pub mod ui;
+pub mod url_source;
 
 pub use config::{ConfigFile, ConfigFormat, Workspace};
 pub use error::{Result, VendorError};
 pub use github::{GitHubClient, auth};
-pub use model::{Dependency, FileEntry, FileTarget, RawDependency, Repository, VendorConfig};
+pub use model::{
+    Dependency, FileEntry, FileTarget, RawDependency, Repository, Source, VendorConfig,
+};
 pub use ops::{InstallOptions, Session, SyncOptions};
 
 /// The version reported by `vendor --version`.

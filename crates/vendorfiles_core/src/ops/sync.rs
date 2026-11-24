@@ -188,11 +188,7 @@ impl Session {
         for (name, raw) in &self.workspace.dependencies {
             raw.validate(name)?;
             let dependency = raw.resolve(name)?;
-            let progress = Arc::new(
-                self.progress
-                    .dependency(name)
-                    .linked_to(&dependency.repository),
-            );
+            let progress = Arc::new(self.progress.dependency(name).linked_to(&dependency.link()));
             plans.push(Plan {
                 options: InstallOptions {
                     should_update: !dependency.locked && options.should_update,
@@ -229,7 +225,7 @@ impl BumpCandidate {
     fn of(prepared: &Prepared) -> Self {
         Self {
             name: prepared.dependency.name.clone(),
-            url: prepared.dependency.repository.clone(),
+            url: prepared.dependency.link().into_owned(),
             old_version: prepared.dependency.version.clone(),
             tracked: prepared.options.should_update && !prepared.options.show_outdated_only,
         }

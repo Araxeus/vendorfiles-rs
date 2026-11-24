@@ -16,14 +16,14 @@
   </a>
 </p>
 
-vendorfiles pulls files from GitHub repositories and keeps them up to date. List the CSS libraries,
-binaries or config files you want in a config file, run `vendor sync`, and they land in your
-project.
+vendorfiles pulls files from GitHub repositories, git hosts and plain URLs, and keeps them up to
+date. List the CSS libraries, binaries or config files you want in a config file, run
+`vendor sync`, and they land in your project.
 
-- Download any file from any GitHub repository
+- Download any file from any GitHub repository, or from any URL
 - Download release assets, and unpack only the files you need from zip, tar, tar.gz and crx
   archives
-- Track versions by release or by commit
+- Track versions by release, by commit, by git tag or from a version URL
 - Write the config in TOML, YAML, JSON, JSON5 or `package.json`
 - Download in parallel, streaming each file straight to disk
 - Install one static binary, with nothing else to set up
@@ -42,6 +42,7 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
   - [Dependency fields](#dependency-fields)
   - [Output folders and file names](#output-folders-and-file-names)
   - [Versions and releases](#versions-and-releases)
+  - [Downloading from other sites](#downloading-from-other-sites)
   - [Locking a dependency](#locking-a-dependency)
   - [Default options](#default-options)
 - [Commands](#commands)
@@ -325,13 +326,18 @@ files = ['cooltipz.min.css', 'LICENSE']
 
 | Field | What it holds |
 | --- | --- |
-| `repository` | The GitHub repository URL |
+| `repository` | The GitHub repository URL. Use `url` instead for anything else |
 | `version` | A release tag like `v1.0.0`, or a commit hash when tracking commits |
 | `files` | The files to download |
 | `vendorFolder` | Where to save this dependency's files ([output folders](#output-folders)) |
 | `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
 | `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
 | `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
+| `url` | Where a dependency that isn't on GitHub downloads from ([details](#downloading-from-other-sites)) |
+| `versionUrl` | `url` dependencies only. Where the latest version comes from |
+| `versionRegex` | `url` dependencies only. Picks the version out of what `versionUrl` returns |
+| `versionSelector` | `url` dependencies only. Picks the element of a `versionUrl` page that holds the version |
+| `versionJsonPointer` | `url` dependencies only. Picks the value of a JSON `versionUrl` answer that holds the version |
 
 The first three are all most dependencies need.
 
@@ -581,7 +587,7 @@ files = [
 <!-- /formats -->
 
 `{version}` stays as written in your config, so the same paths keep working after
-`vendor update`.
+`vendor update`. `{tag}` works the same way but expands to the whole tag, like `v0.38.0`.
 
 #### Extracting files from archives
 
@@ -792,6 +798,240 @@ files = ['dist/coloris.min.js']
 
 - A path tracks that file's latest commit.
 - `true` tracks the first file in `files`.
+
+### Downloading from other sites
+
+A dependency that isn't on GitHub sets `url` instead of `repository`. Its files are URLs, and
+`{url}` in a file expands to the `url` value:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "FilePilot": {
+            "url": "https://filepilot.tech/download/v{version}",
+            "versionUrl": "https://filepilot.tech/download/latest",
+            "versionRegex": "v(\\d+\\.\\d+\\.\\d+)",
+            "files": { "{url}": "FPilot.exe" }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  FilePilot:
+    url: https://filepilot.tech/download/v{version}
+    versionUrl: https://filepilot.tech/download/latest
+    versionRegex: v(\d+\.\d+\.\d+)
+    files:
+      '{url}': FPilot.exe
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.FilePilot]
+url = 'https://filepilot.tech/download/v{version}'
+versionUrl = 'https://filepilot.tech/download/latest'
+versionRegex = 'v(\d+\.\d+\.\d+)'
+
+[vendorDependencies.FilePilot.files]
+'{url}' = 'FPilot.exe'
+```
+
+</details>
+<!-- /formats -->
+
+- Every file maps a URL to the name it's saved under, like `"files": { "{url}": "FPilot.exe" }`.
+- A file can also be a full URL, like `https://cdn.example.com/tool.js`.
+- Map a URL to a list or a map to [extract files from the archive](#extracting-files-from-archives).
+- `{version}` is the version's `x.y.z`, as for releases. `{tag}` is the version exactly as found,
+  like `v1.2.3`.
+- `vendor` never sends your GitHub token to these sites.
+
+#### Finding the latest version
+
+`versionUrl` says where the latest version comes from:
+
+| `versionUrl` | The version is |
+| --- | --- |
+| A git repository ending in `.git` | Its newest tag |
+| Any other URL | Read from the page it returns |
+| `{url}` | Read from the download itself, like a userscript's `// @version 1.4.2` line. Quote it in YAML |
+| Not set | `version` as written. Without one, the dependency installs once and `--force` downloads it again |
+
+A git repository works on any host that serves git over HTTPS, like Codeberg or GitLab:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "forgejo": {
+            "url": "https://codeberg.org/forgejo/forgejo/releases/download/{tag}",
+            "versionUrl": "https://codeberg.org/forgejo/forgejo.git",
+            "files": { "{url}/forgejo-{version}-linux-amd64": "forgejo" }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  forgejo:
+    url: https://codeberg.org/forgejo/forgejo/releases/download/{tag}
+    versionUrl: https://codeberg.org/forgejo/forgejo.git
+    files:
+      '{url}/forgejo-{version}-linux-amd64': forgejo
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.forgejo]
+url = 'https://codeberg.org/forgejo/forgejo/releases/download/{tag}'
+versionUrl = 'https://codeberg.org/forgejo/forgejo.git'
+
+[vendorDependencies.forgejo.files]
+'{url}/forgejo-{version}-linux-amd64' = 'forgejo'
+```
+
+</details>
+<!-- /formats -->
+
+- Tags compare by number, so `v1.10.0` beats `v1.9.0`. `_` separates numbers too, as in
+  `curl-8_10_0`. A dotted version beats a bare build number or date like `r1234` or
+  `20240101`, but not a bare major like `v263` beside `v262.1`.
+- Tags with `@`, like a monorepo's `plugin-legacy@6.1.0`, count only when `versionRegex` matches
+  them. Scoped tags like `@astrojs/react@4.0.0` hold a `/`, so they never count.
+- A tag is a prerelease, and is skipped, when its numbers are followed by a `-` (`v2.0.0-rc.1`),
+  by `rc`, `cr`, `alpha`, `beta`, `pre` or `dev` (`go1.25rc1`), or by `a`, `b` or `m` and a digit
+  (`v3.14.0a1`). Date tags like `2024-01-15` are skipped too.
+- A `-` and digits alone, like ImageMagick's `7.1.1-41`, is a patch level when most tags look like
+  that. It's a prerelease when plain releases outnumber it, or when releases often share its
+  numbers, like npm's `v1.0.1-0` beside `v1.0.1`.
+- With `versionRegex`, only the tags it matches count, prereleases included. A stable release
+  still beats a prerelease of the same version.
+- A repository with several tag schemes needs a `versionRegex` to say which one is current.
+  golang/go keeps old `release.r60.3` tags beside `go1.25.0`, so it takes `"versionRegex": "^go"`.
+
+#### Reading the version from a page
+
+A page can answer with just the version, like `v1.2.3`. For anything bigger, `versionSelector` and
+`versionRegex` pick the version out:
+
+| `versionSelector` | `versionRegex` | `vendor` reads |
+| --- | --- | --- |
+| - | - | The whole response, which must be just the version |
+| - | Set | The URL after redirects, then the page |
+| Set | - | The text of the first element the selector matches |
+| Set | Set | That element's text, then its HTML |
+
+- `versionRegex` takes its first capture group, or the whole match when it has none.
+- A version holds letters, digits and `.`, `_`, `+`, `-` or `@`, with at least one digit unless
+  it's a full 40-character commit hash. Anything else, like a path or a JSON body, is refused.
+- `versionSelector` takes a CSS selector, like `#latest` or `.release h2`. To get one, right-click
+  the version in your browser, choose **Inspect**, then **Copy selector**.
+- End the selector with `::attr(name)` to read an attribute instead of the text. A VS Code
+  extension's manifest holds `<Identity Version="6.3.5" />`, so `Identity::attr(Version)` gives
+  `6.3.5`. This is Scrapy's syntax rather than CSS, so add it after copying a selector.
+- The example above follows `/download/latest` to a file named after the version. The
+  [File Pilot starlog](https://filepilot.tech/starlog) works too. Its `.starlog-version` element
+  reads `Beta v0.8.5`, so `"versionSelector": ".starlog-version"` with the same `versionRegex`
+  gives `0.8.5`.
+- Searching the element's HTML finds a version kept in an attribute, like
+  `<a href="/download/v1.2.3">`.
+- `vendor` reads the HTML the server sends. A version that JavaScript fills in later isn't there.
+
+#### Reading the version from JSON
+
+An API that answers in JSON takes `versionJsonPointer`, a
+[JSON pointer](https://datatracker.ietf.org/doc/html/rfc6901) to the value that holds the version.
+NuGet lists every version of a package:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "libclang": {
+            "url": "https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}",
+            "versionUrl": "https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json",
+            "versionJsonPointer": "versions",
+            "files": { "{url}": { "runtimes/win-x64/native/libclang.dll": "libclang.dll" } }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  libclang:
+    url: https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}
+    versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
+    versionJsonPointer: versions
+    files:
+      '{url}':
+        runtimes/win-x64/native/libclang.dll: libclang.dll
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.libclang]
+url = 'https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}'
+versionUrl = 'https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json'
+versionJsonPointer = 'versions'
+
+[vendorDependencies.libclang.files.'{url}']
+'runtimes/win-x64/native/libclang.dll' = 'libclang.dll'
+```
+
+</details>
+<!-- /formats -->
+
+- NuGet versions can have four parts, like `18.1.3.2`, so the example uses `{tag}`. `{version}`
+  keeps only `18.1.3`.
+- `data/0/version` reads `data[0].version`. A leading `/`, as the standard writes it, is optional.
+  An empty pointer, `""`, is the whole answer.
+- A string or number there is the version, or what `versionRegex` searches.
+- A list holds versions, and the latest stable one wins. Versions compare like
+  [tags](#finding-the-latest-version), and with `versionRegex` only the versions it matches count.
+- A `*` segment matches every entry of a list or object. Go's `https://go.dev/dl/?mode=json` is a
+  list of releases, so `*/version` ranks the `version` of each.
+- `versionJsonPointer` and `versionSelector` can't both be set.
 
 ### Locking a dependency
 
@@ -1396,7 +1636,8 @@ You can keep the token across reboots in two ways.
 ```
 
 Under `files`, each key is a path from your config, with `{version}` left as written. Each value is
-the file that landed on disk.
+the file that landed on disk. A [`url` dependency](#downloading-from-other-sites) records its `url`
+where a GitHub one records `repository`.
 
 `vendor sync` downloads a dependency again when any of these is true:
 
@@ -1458,7 +1699,8 @@ vendorDependencies:
 
 ## Differences from the TypeScript version
 
-Configs and lockfiles work with both versions. This version looks up versions and downloads files in
+Configs and lockfiles work with both versions, except
+[`url` dependencies](#downloading-from-other-sites), which only this version reads. This version looks up versions and downloads files in
 parallel, which is where most of the speedup comes from. These timings compare the two on a config
 with 8 dependencies, against `vendorfiles@1.4.2`:
 

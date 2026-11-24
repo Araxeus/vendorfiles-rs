@@ -34,6 +34,66 @@ pub enum VendorError {
     #[error("config key 'vendorDependencies.{name}.releaseRegex' must be a valid regex string")]
     InvalidReleaseRegexKey { name: String },
 
+    #[error("vendorDependencies.{name} sets both 'repository' and 'url'; keep one")]
+    RepositoryAndUrl { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.url' is not a valid http(s) url")]
+    InvalidUrlKey { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.versionUrl' is not a valid http(s) url")]
+    InvalidVersionUrlKey { name: String },
+
+    #[error("config key 'vendorDependencies.{name}.versionRegex' must be a valid regex string")]
+    InvalidVersionRegexKey { name: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.versionSelector' must be a valid CSS selector, optionally ending in ::attr(name)"
+    )]
+    InvalidVersionSelectorKey { name: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.{key}' needs a 'versionUrl' that isn't a .git URL"
+    )]
+    KeyNeedsPage { name: String, key: &'static str },
+
+    #[error("config key 'vendorDependencies.{name}.versionRegex' needs a 'versionUrl' to read")]
+    RegexNeedsVersionUrl { name: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.versionUrl' can't hold {{version}} or {{tag}}, since it is what finds the version"
+    )]
+    VersionUrlUsesVersion { name: String },
+
+    /// A url-only key holding a list, map or number. YAML reads an unquoted `{url}` as a map.
+    #[error("config key '{key}' must be a string. In YAML, quote a value that starts with '{{'")]
+    KeyNotString { key: String },
+
+    #[error(
+        "config keys 'vendorDependencies.{name}.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
+    )]
+    SelectorAndJsonPointer { name: String },
+
+    /// A key that belongs to the other kind of dependency: `repository` or `url`.
+    #[error("config key 'vendorDependencies.{name}.{key}' only applies to a '{needs}' dependency")]
+    KeyNeedsOtherMode {
+        name: String,
+        key: &'static str,
+        needs: &'static str,
+    },
+
+    #[error(
+        "'{input}' in vendorDependencies.{name}.files needs an output name, like {{ \"{input}\": \"file\" }}"
+    )]
+    UrlFileNeedsName { name: String, input: String },
+
+    #[error("'{input}' in vendorDependencies.{name}.files is not a URL")]
+    UrlFileNotUrl { name: String, input: String },
+
+    #[error(
+        "vendorDependencies.{name} uses {{version}} or {{tag}} but sets neither 'version' nor 'versionUrl'"
+    )]
+    UrlNeedsVersion { name: String },
+
     #[error("Dependency {name} not found in {path}")]
     DependencyNotFound { name: String, path: String },
 
@@ -118,6 +178,24 @@ pub enum VendorError {
 
     #[error("Could not find a version for {0}")]
     NoVersionFound(String),
+
+    /// A `versionUrl` answered, but nothing in the answer reads as a version.
+    #[error("found no version at {url}")]
+    NoVersionAt { url: String },
+
+    /// A `versionUrl` refused the request with a status other than 404.
+    #[error("looking up the version at {url} failed: {source}")]
+    VersionUrlRefused {
+        url: String,
+        #[source]
+        source: Box<Self>,
+    },
+
+    /// A `.git` `versionUrl` with no release tag, only package tags like a monorepo's `astro@5.0.0`.
+    #[error(
+        "{url} has no release tag, only package tags like '{example}'; set versionRegex to pick one"
+    )]
+    OnlyPackageTags { url: String, example: String },
 
     // ---- files & downloads ---------------------------------------------------------
     #[error("File {0}\nis not a string, and {{release}} is not used}}")]
