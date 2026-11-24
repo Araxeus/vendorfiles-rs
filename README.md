@@ -979,7 +979,7 @@ NuGet lists every version of a package:
 {
     "vendorDependencies": {
         "libclang": {
-            "url": "https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}",
+            "url": "https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}",
             "versionUrl": "https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json",
             "versionJsonPointer": "versions",
             "files": { "{url}": { "runtimes/win-x64/native/libclang.dll": "libclang.dll" } }
@@ -996,7 +996,7 @@ NuGet lists every version of a package:
 ```yml
 vendorDependencies:
   libclang:
-    url: https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}
+    url: https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}
     versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
     versionJsonPointer: versions
     files:
@@ -1011,7 +1011,7 @@ vendorDependencies:
 
 ```toml
 [vendorDependencies.libclang]
-url = 'https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{version}'
+url = 'https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}'
 versionUrl = 'https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json'
 versionJsonPointer = 'versions'
 
@@ -1022,6 +1022,8 @@ versionJsonPointer = 'versions'
 </details>
 <!-- /formats -->
 
+- NuGet versions can have four parts, like `18.1.3.2`, so the example uses `{tag}`. `{version}`
+  keeps only `18.1.3`.
 - `data/0/version` reads `data[0].version`. A leading `/`, as the standard writes it, is optional.
   An empty pointer, `""`, is the whole answer.
 - A string or number there is the version, or what `versionRegex` searches.
