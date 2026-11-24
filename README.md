@@ -651,13 +651,11 @@ files = [
 </details>
 <!-- /formats -->
 
-- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz, 7z and `.crx`/`.xpi`. `vendor`
-  detects the format from the file's contents, not its name.
+- The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz, 7z and `.crx`/`.xpi`.
+  `vendor` detects the format from the file's contents, not its name.
 - Only the files you name are unpacked.
 - For a large `.zip`, only those files are downloaded, using HTTP range requests. The rest of the
   archive never is.
-- A `.7z` is downloaded whole. It packs files into blocks, and only the blocks that hold a file
-  you named are unpacked.
 
 #### Choosing which releases count
 
