@@ -1816,7 +1816,7 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (53)</summary>
+<summary>Programs you can add by name (54)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
@@ -1844,6 +1844,7 @@ list is out of date.
 | [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub's official CLI for pull requests, issues, releases and repos | All |
 | [gum](https://github.com/charmbracelet/gum) |  | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
+| [helm](https://get.helm.sh) |  | Package manager for Kubernetes that installs and upgrades charts | All |
 | [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
