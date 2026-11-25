@@ -73,7 +73,9 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
     // Set before the session builds its display: `--pr` means stdout is a machine-readable
     // summary, so nothing should animate. It only applies to a whole-project update, matching
     // the reference.
-    if let Command::Update { names, pr: true } = &cli.command
+    if let Command::Update {
+        names, pr: true, ..
+    } = &cli.command
         && names.is_empty()
     {
         vendorfiles_core::ui::set_pr_mode(true);
@@ -102,6 +104,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
     } else {
         Session::new(github, workspace)
     };
+    session.allow_installers |= cli.command.allows_installers();
 
     let outcome = run_command(&mut session, cli.command).await;
 
@@ -118,7 +121,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
 
 async fn run_command(session: &mut Session, command: Command) -> Result<()> {
     match command {
-        Command::Sync { force } => {
+        Command::Sync { force, .. } => {
             session
                 .sync(SyncOptions {
                     should_update: false,
@@ -128,7 +131,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
                 .await?;
         }
 
-        Command::Update { names, pr: _ } => {
+        Command::Update { names, .. } => {
             if names.is_empty() {
                 session
                     .sync(SyncOptions {
@@ -160,7 +163,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
             files,
             refresh,
             dry_run,
-            list: _,
+            ..
         } => {
             install_all(
                 session,
