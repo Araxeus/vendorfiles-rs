@@ -31,6 +31,7 @@ pub fn install(
     name: &str,
     path: &Path,
     version: &str,
+    reinstall: bool,
     kind: InstallerKind,
     options: &InstallerOptions,
     previous: Option<&Installed>,
@@ -41,6 +42,32 @@ pub fn install(
     let previous_key = previous.and_then(|p| p.uninstall_key.as_deref());
     let before = arp::snapshot();
     let existing = arp::existing(name, &before, previous_key);
+
+    if !reinstall
+        && let Some(entry) = &existing
+        && is_installed_release(
+            entry,
+            kind,
+            options,
+            version,
+            entry
+                .program()
+                .and_then(|program| shell::file_version(&program))
+                .map(dotted)
+                .as_deref(),
+        )
+    {
+        return Ok(Outcome {
+            installed: Installed {
+                kind,
+                uninstall_key: Some(entry.key.clone()),
+                display_name: entry.name.clone(),
+                package: None,
+            },
+            reboot: false,
+            ran: false,
+        });
+    }
 
     // An installer cannot replace files a running program holds open, and often reports success
     // anyway.
@@ -130,7 +157,43 @@ fn run_install(
             package: None,
         },
         reboot,
+        ran: true,
     })
+}
+
+/// Whether the entry already holds this release, installed the way the dependency asks.
+///
+/// Every check has to pass, and any doubt runs the installer. The entry and the program's own
+/// file version, when it has one, must both name the release. Its key must have the shape the
+/// installer type writes, so the uninstaller vendor picks later fits it. A requested scope must
+/// match the hive. Extra `args` always run the installer, since they may install something the
+/// existing copy lacks.
+fn is_installed_release(
+    entry: &arp::Entry,
+    kind: InstallerKind,
+    options: &InstallerOptions,
+    release: &str,
+    program_version: Option<&str>,
+) -> bool {
+    let is_release = |found: &str| super::is_release_version(found, release) == Some(true);
+    let id = entry.id();
+    let shaped = match kind {
+        InstallerKind::Inno => id.ends_with("_is1"),
+        InstallerKind::Msi => id.starts_with('{'),
+        InstallerKind::Nsis => !id.ends_with("_is1") && !id.starts_with('{'),
+        InstallerKind::Exe => true,
+        InstallerKind::Msix => false,
+    };
+    let scoped = match options.scope {
+        Some(Scope::User) => !entry.is_machine_wide(),
+        Some(Scope::Machine) => entry.is_machine_wide(),
+        None => true,
+    };
+    options.args.is_empty()
+        && shaped
+        && scoped
+        && entry.version.as_deref().is_some_and(is_release)
+        && program_version.is_none_or(is_release)
 }
 
 /// The old version an install left in place, if it left one.
@@ -511,6 +574,7 @@ fn install_msix(name: &str, path: &Path) -> Result<Outcome> {
             package: Some(package),
         },
         reboot: false,
+        ran: true,
     })
 }
 
@@ -612,6 +676,65 @@ mod tests {
         assert!(elevate);
         assert!(!launch(InstallerKind::Msi, &user).2);
         assert_eq!(launch(InstallerKind::Exe, &plain).1, "");
+    }
+
+    #[test]
+    fn only_a_clear_match_skips_the_installer() {
+        use super::{InstallerKind as Kind, Scope, arp::Entry, is_installed_release};
+        let entry = |key: &str, version: &str| Entry {
+            key: key.to_owned(),
+            name: Some("qBittorrent".to_owned()),
+            version: Some(version.to_owned()),
+            uninstall: None,
+            quiet_uninstall: None,
+            install_location: None,
+            display_icon: None,
+            system: false,
+        };
+        let plain = InstallerOptions::default();
+        let release = "release-5.3.1";
+        let installed = entry(r"HKLM\x\qBittorrent", "5.3.1");
+        let check = |entry: &Entry, kind, options: &InstallerOptions, program: Option<&str>| {
+            is_installed_release(entry, kind, options, release, program)
+        };
+
+        assert!(check(&installed, Kind::Nsis, &plain, Some("5.3.1.0")));
+        assert!(check(&installed, Kind::Nsis, &plain, None));
+
+        // The half-finished install: the entry says 5.3.1, the program is still 5.3.0.
+        assert!(!check(&installed, Kind::Nsis, &plain, Some("5.3.0.0")));
+        assert!(!check(
+            &entry(r"HKLM\x\qBittorrent", "5.3.0"),
+            Kind::Nsis,
+            &plain,
+            None
+        ));
+
+        // An entry another installer type wrote gets the installer run, so its uninstaller fits.
+        assert!(!check(&installed, Kind::Inno, &plain, None));
+        assert!(check(
+            &entry(r"HKCU\x\App_is1", "5.3.1"),
+            Kind::Inno,
+            &plain,
+            None
+        ));
+        assert!(!check(
+            &entry(r"HKLM\x\{GUID}", "5.3.1"),
+            Kind::Nsis,
+            &plain,
+            None
+        ));
+
+        let user = InstallerOptions {
+            scope: Some(Scope::User),
+            ..InstallerOptions::default()
+        };
+        assert!(!check(&installed, Kind::Nsis, &user, None));
+        let args = InstallerOptions {
+            args: vec!["/D=C:\\Apps".to_owned()],
+            ..InstallerOptions::default()
+        };
+        assert!(!check(&installed, Kind::Nsis, &args, None));
     }
 
     #[test]

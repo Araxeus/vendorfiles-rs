@@ -168,13 +168,16 @@ pub struct Outcome {
     pub installed: Installed,
     /// The installer reported that a restart is needed to finish.
     pub reboot: bool,
+    /// Whether the installer ran. It does not when the release is already installed.
+    pub ran: bool,
 }
 
 /// Runs the installer at `path` silently and works out what it installed. Blocking.
 ///
 /// `name` is the dependency's name, used to recognise the program among the Apps & Features
-/// entries. `version` is the release being installed. `previous` is what the last install
-/// recorded, which an upgrade usually reuses.
+/// entries. `version` is the release being installed. A release that is already installed is
+/// recorded without running anything, unless `reinstall` is set. `previous` is what the last
+/// install recorded, which an upgrade usually reuses.
 ///
 /// # Errors
 ///
@@ -188,6 +191,7 @@ pub fn install(
     name: &str,
     path: &Path,
     version: &str,
+    reinstall: bool,
     options: &InstallerOptions,
     previous: Option<&Installed>,
 ) -> Result<Outcome> {
@@ -199,11 +203,11 @@ pub fn install(
     };
     #[cfg(windows)]
     {
-        windows::install(name, path, version, kind, options, previous)
+        windows::install(name, path, version, reinstall, kind, options, previous)
     }
     #[cfg(not(windows))]
     {
-        let _ = (name, version, kind, previous);
+        let _ = (name, version, reinstall, kind, previous);
         Err(VendorError::InstallersUnsupported)
     }
 }

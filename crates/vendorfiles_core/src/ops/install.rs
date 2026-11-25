@@ -242,6 +242,7 @@ impl Session {
                     run_installer(
                         &dependency,
                         &version,
+                        options.force,
                         self.workspace.config.relaunch_programs,
                         staging.path(),
                         previous.as_ref(),
@@ -558,11 +559,12 @@ async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
 
 /// Runs a dependency's downloaded installer from `staging` and reports what it installed.
 ///
-/// `relaunch` is `vendorConfig.relaunchPrograms`, which the entry's own `installer.relaunch`
-/// overrides.
+/// `reinstall` runs the installer even when the release is already installed. `relaunch` is
+/// `vendorConfig.relaunchPrograms`, which the entry's own `installer.relaunch` overrides.
 async fn run_installer(
     dependency: &Dependency,
     version: &str,
+    reinstall: bool,
     relaunch: bool,
     staging: &Path,
     previous: Option<&VendorLock>,
@@ -585,11 +587,28 @@ async fn run_installer(
     let release = version.to_owned();
     let previous = previous.and_then(|lock| lock.installed.clone());
     let outcome = tokio::task::spawn_blocking(move || {
-        installer::install(&name, &path, &release, &options, previous.as_ref())
+        installer::install(
+            &name,
+            &path,
+            &release,
+            reinstall,
+            &options,
+            previous.as_ref(),
+        )
     })
     .await
     .map_err(|error| VendorError::Http(error.to_string()))??;
     let installed = &outcome.installed;
+    if !outcome.ran {
+        progress.note(format!(
+            "{} is already installed at this version, so its installer did not run",
+            installed
+                .display_name
+                .as_deref()
+                .unwrap_or(&dependency.name)
+        ));
+        return Ok(outcome.installed);
+    }
     progress.note(match (&installed.display_name, &installed.package) {
         (Some(display), _) => format!("Ran the {} installer for {display}", installed.kind),
         (None, Some(package)) => format!("Installed the {package} package"),

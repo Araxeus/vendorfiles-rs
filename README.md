@@ -1144,6 +1144,10 @@ lockfile records the program's Apps & Features entry instead of any files, and `
 runs its uninstaller silently. If you remove the program from Settings, the next `vendor sync`
 installs it again. `vendor update` installs a newer release over the old one.
 
+If the program is already installed at the release's version, vendor records that install and
+skips the installer, so adding a program you installed by hand raises no UAC prompt.
+`vendor sync --force` runs the installer anyway.
+
 vendor detects the installer's type from the file:
 
 | Type | Installers | Silent switches vendor adds |

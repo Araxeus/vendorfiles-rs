@@ -664,6 +664,11 @@ code and the complete resulting file tree (including binary payloads). Covered:
    install fails. After it runs, a program whose file version is unchanged and is not the release
    fails the install. That file version only counts when it agreed with the entry's
    `DisplayVersion` beforehand, since some programs never bump it.
+   An entry that already holds the release is recorded without running anything. Every check
+   must pass, and any doubt runs the installer. Both the entry and the program's file version
+   must name the release, the key must have the shape the installer type writes (`_is1` for
+   Inno, a product code for MSI), a requested scope must match the hive, and the entry gives no
+   `args`. `sync --force` always runs it.
    Installers launch through `ShellExecuteExW`, the one launcher that honours an executable's
    manifest and raises UAC for an installer that needs admin. That needs `unsafe`, so the crate
    moved from `forbid(unsafe_code)` to `deny`, with one module allowed. Inno and NSIS uninstallers
