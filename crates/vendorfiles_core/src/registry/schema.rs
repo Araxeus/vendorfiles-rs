@@ -108,6 +108,15 @@ impl Program {
         )
     }
 
+    /// Whether adding it runs an installer rather than keeping files.
+    #[must_use]
+    pub fn is_installer(&self) -> bool {
+        self.installer
+            .as_ref()
+            .and_then(crate::installer::InstallerKey::options)
+            .is_some()
+    }
+
     /// Whether it can be installed on `host`. A repository file is the same everywhere.
     #[must_use]
     pub fn covers(&self, host: &str) -> bool {

@@ -1374,7 +1374,8 @@ For an [installer](#installers), it runs the program's uninstaller instead.
 
 ### `vendor list`
 
-`vendor list` prints the dependencies in the config. `vendor config list` does the same.
+`vendor list` prints the dependencies in the config. `vendor config list` does the same. When the
+config has an [installer](#installers), a `TYPE` column marks which dependencies run one.
 
 ---
 
@@ -1492,7 +1493,8 @@ keeps working afterwards.
 
 `vendor search` lists every program the registry knows, and `vendor add --list` does the same. Add
 words to narrow the list. Each word has to match a program's name, an alias, a word in its
-description, or its repository. Name matches come first.
+description, or its repository. Name matches come first. A program that runs an
+[installer](#installers) is marked `(installer)`.
 
 ```bash
 vendor search          # everything

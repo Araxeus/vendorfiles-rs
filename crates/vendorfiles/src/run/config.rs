@@ -9,50 +9,73 @@ use vendorfiles_core::{Workspace, ui};
 /// is the point. An unset column prints `-` rather than an empty cell, so a missing source - the
 /// thing that stops `update` working - is visible rather than blank. The source is the
 /// `repository`, or the `url` of a dependency that is not on GitHub.
+///
+/// A `TYPE` column marks the dependencies that run an installer. It only appears when the config
+/// has one.
 pub(super) fn list_dependencies(workspace: &Workspace) {
-    const HEADERS: [&str; 3] = ["NAME", "VERSION", "SOURCE"];
-
     if workspace.dependencies.is_empty() {
         ui::info(workspace.no_dependencies_notice());
         return;
     }
 
-    let rows: Vec<[&str; 3]> = workspace
+    let is_installer: Vec<bool> = workspace
         .dependencies
         .iter()
-        .map(|(name, entry)| {
-            [
-                name.as_str(),
-                field(entry.version.as_deref()),
-                field(entry.repository.as_deref().or(entry.url.as_deref())),
-            ]
+        .map(|(name, entry)| matches!(entry.installer(name), Ok(Some(_))))
+        .collect();
+    let typed = is_installer.contains(&true);
+
+    let mut headers = vec!["NAME", "VERSION"];
+    if typed {
+        headers.push("TYPE");
+    }
+    headers.push("SOURCE");
+
+    let rows: Vec<Vec<&str>> = workspace
+        .dependencies
+        .iter()
+        .zip(&is_installer)
+        .map(|((name, entry), &installer)| {
+            let mut row = vec![name.as_str(), field(entry.version.as_deref())];
+            if typed {
+                row.push(if installer { "installer" } else { "-" });
+            }
+            row.push(field(entry.repository.as_deref().or(entry.url.as_deref())));
+            row
         })
         .collect();
 
     // Character counts, not bytes: a non-ASCII name would otherwise pad short.
-    let widths: [usize; 3] = std::array::from_fn(|column| {
-        rows.iter()
-            .map(|row| row[column].chars().count())
-            .chain(std::iter::once(HEADERS[column].chars().count()))
-            .max()
-            .unwrap_or(0)
-    });
+    let widths: Vec<usize> = (0..headers.len())
+        .map(|column| {
+            rows.iter()
+                .map(|row| row[column].chars().count())
+                .chain(std::iter::once(headers[column].chars().count()))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
 
     // The last column is never padded, so nothing trails a line.
-    let line = |cells: [&str; 3]| {
-        format!(
-            "{:<name$}  {:<version$}  {}",
-            cells[0],
-            cells[1],
-            cells[2],
-            name = widths[0],
-            version = widths[1]
-        )
+    let line = |cells: &[&str]| {
+        let last = cells.len() - 1;
+        cells
+            .iter()
+            .enumerate()
+            .map(|(column, cell)| {
+                if column == last {
+                    (*cell).to_owned()
+                } else {
+                    format!("{cell:<width$}", width = widths[column])
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
     };
 
-    vendorfiles_core::progress::print_out(&ui::cyan(&line(HEADERS)));
+    vendorfiles_core::progress::print_out(&ui::cyan(&line(&headers)));
     for row in rows {
-        vendorfiles_core::progress::print_out(&line(row));
+        vendorfiles_core::progress::print_out(&line(&row));
     }
 }
 

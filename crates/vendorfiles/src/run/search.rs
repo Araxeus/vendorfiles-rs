@@ -6,7 +6,8 @@ use vendorfiles_core::{registry, ui};
 /// `vendor search [terms]` / `vendor add --list` - the programs `install` knows by name.
 ///
 /// One row per program, best match first. A program with no build for this machine stays in
-/// the list, marked, so a search never seems to come up short for no reason.
+/// the list, marked, so a search never seems to come up short for no reason. A program that
+/// installs through an installer is marked too.
 pub(super) async fn search(query: &str, refresh: bool) -> Result<()> {
     const HEADERS: [&str; 3] = ["NAME", "ALIASES", "DESCRIPTION"];
 
@@ -26,11 +27,18 @@ pub(super) async fn search(query: &str, refresh: bool) -> Result<()> {
             } else {
                 program.aliases.join(", ")
             };
+            let mut tags = Vec::new();
+            if program.is_installer() {
+                tags.push("installer".to_owned());
+            }
+            if !program.covers(&host) {
+                tags.push(format!("no {host} build"));
+            }
             let description = program.description.as_deref().unwrap_or_default();
-            let description = if program.covers(&host) {
+            let description = if tags.is_empty() {
                 description.to_owned()
             } else {
-                format!("{description} (no {host} build)")
+                format!("{description} ({})", tags.join(", "))
             };
             [(*name).to_owned(), aliases, description]
         })

@@ -893,6 +893,23 @@ bare           -        -
 }
 
 #[test]
+fn list_adds_a_type_column_only_when_a_dependency_runs_an_installer() {
+    let dir = project(
+        r#"{ "vendorDependencies": {
+            "fd": { "version": "v10.0.0", "repository": "https://github.com/sharkdp/fd", "files": ["fd"] },
+            "qbittorrent": { "version": "release-5.3.1", "repository": "https://github.com/qbittorrent/qBittorrent",
+                "files": ["{release}/qbittorrent_{version}_x64_setup.exe"], "installer": true }
+        } }"#,
+    );
+    let expected = "\u{1b}[36mNAME         VERSION        TYPE       SOURCE\u{1b}[0m
+fd           v10.0.0        -          https://github.com/sharkdp/fd
+qbittorrent  release-5.3.1  installer  https://github.com/qbittorrent/qBittorrent
+";
+    let out = vendor(dir.path(), &["list"]);
+    assert_eq!(stdout(&out), expected, "{}", stderr(&out));
+}
+
+#[test]
 fn listing_an_empty_config_says_so_rather_than_printing_a_bare_header() {
     let dir = project(r#"{"vendorDependencies":{}}"#);
     let out = vendor(dir.path(), &["list"]);
@@ -1475,6 +1492,12 @@ programs:
       macos-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-aarch64: { asset: "{url}/urltool", as: urltool }
+  setuptool:
+    description: "A desktop program that ships a setup"
+    repository: https://github.com/example/setuptool
+    installer: true
+    targets:
+      windows-x86_64: { asset: "{release}/setuptool-setup.exe" }
 "#,
     )
     .expect("writing the registry");
@@ -1581,6 +1604,23 @@ fn search_marks_a_program_this_machine_cannot_install() {
 
     let available = stdout(&vendor_with_registry(dir.path(), &["search", "fd"]));
     assert!(!available.contains("(no "), "{available}");
+}
+
+#[test]
+fn search_marks_a_program_that_runs_an_installer() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let printed = stdout(&vendor_with_registry(dir.path(), &["search", "setup"]));
+    let row = printed
+        .lines()
+        .find(|line| line.contains("setuptool"))
+        .unwrap_or_else(|| panic!("{printed}"));
+    assert!(
+        row.contains("(installer)") || row.contains("(installer, no "),
+        "{row}"
+    );
+
+    let plain = stdout(&vendor_with_registry(dir.path(), &["search", "fd"]));
+    assert!(!plain.contains("installer"), "{plain}");
 }
 
 #[test]
