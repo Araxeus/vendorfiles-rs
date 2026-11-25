@@ -201,17 +201,17 @@ pub fn install(
 /// Whether what an install recorded is still on the machine.
 ///
 /// An entry with nothing to look up counts as present, since there is no evidence otherwise.
+#[cfg(windows)]
 #[must_use]
 pub fn is_present(installed: &Installed) -> bool {
-    #[cfg(windows)]
-    {
-        windows::is_present(installed)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = installed;
-        true
-    }
+    windows::is_present(installed)
+}
+
+/// Off Windows there is nothing to look an install up in, so it counts as present.
+#[cfg(not(windows))]
+#[must_use]
+pub const fn is_present(_installed: &Installed) -> bool {
+    true
 }
 
 /// Runs the uninstaller for what an install recorded, and waits until it is gone. Blocking.
@@ -223,16 +223,19 @@ pub fn is_present(installed: &Installed) -> bool {
 /// Returns [`VendorError::UninstallFailed`] when the uninstaller fails or the program is still
 /// there afterwards, [`VendorError::InstallerDeclined`] when the UAC prompt was refused, or
 /// [`VendorError::InstallersUnsupported`] off Windows.
+#[cfg(windows)]
 pub fn uninstall(name: &str, installed: &Installed) -> Result<()> {
-    #[cfg(windows)]
-    {
-        windows::uninstall(name, installed)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (name, installed);
-        Err(VendorError::InstallersUnsupported)
-    }
+    windows::uninstall(name, installed)
+}
+
+/// Off Windows no installer ran, so there is no uninstaller to run either.
+///
+/// # Errors
+///
+/// Always returns [`VendorError::InstallersUnsupported`].
+#[cfg(not(windows))]
+pub const fn uninstall(_name: &str, _installed: &Installed) -> Result<()> {
+    Err(VendorError::InstallersUnsupported)
 }
 
 fn file_name(path: &Path) -> String {
