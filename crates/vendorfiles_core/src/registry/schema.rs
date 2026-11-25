@@ -17,8 +17,8 @@ use crate::template::browsable_url;
 
 /// The newest schema version this build understands.
 ///
-/// Version 2 added `description`. Version 3 added URL programs. Older files are still read,
-/// since each is a subset.
+/// Version 2 added `description`. Version 3 added URL programs and `installer`. Older files are
+/// still read, since each is a subset.
 pub const SUPPORTED_VERSION: u32 = 3;
 
 /// The whole file.
@@ -91,6 +91,9 @@ pub struct Program {
     /// What to fetch per host, keyed `{os}-{arch}`. Absent for a repository file.
     #[serde(default)]
     pub targets: IndexMap<String, Target>,
+    /// Run the one downloaded file as an installer rather than keep it.
+    #[serde(default)]
+    pub installer: Option<crate::installer::InstallerKey>,
 }
 
 impl Program {

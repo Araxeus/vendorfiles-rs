@@ -96,7 +96,8 @@
           "propertyNames": { "$ref": "#/$defs/hostKey" },
           "additionalProperties": { "$ref": "#/$defs/target" },
           "minProperties": 1
-        }
+        },
+        "installer": { "$ref": "#/$defs/installer" }
       },
       "oneOf": [
         {
@@ -240,6 +241,33 @@
           "minProperties": 1
         }
       ]
+    },
+    "installer": {
+      "description": "Run the one downloaded file as an installer instead of keeping it: `true` detects the type from the file, a type names it, and the object adds arguments and a scope. Windows only for now.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/installerType" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "$ref": "#/$defs/installerType" },
+            "args": {
+              "description": "Extra arguments, passed after the silent switches exactly as written.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "scope": {
+              "description": "Install for the current user only, or for every user of the machine (needs admin). Unset leaves it to the installer.",
+              "enum": ["user", "machine"]
+            }
+          }
+        }
+      ]
+    },
+    "installerType": {
+      "description": "The installer technology: Nullsoft (NSIS), Inno Setup, Windows Installer, an MSIX package, or another executable that runs with exactly the given args.",
+      "enum": ["nsis", "inno", "msi", "msix", "exe"]
     },
     "hostKey": {
       "description": "`{os}-{arch}` as `std::env::consts` reports them.",

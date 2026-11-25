@@ -391,6 +391,7 @@ async fn install_listed_url(
 
     // An entry already in the config keeps what it says. The registry fills the rest.
     let existing = existing.unwrap_or_default();
+    let installer = listed_installer(&listed);
     let files = existing
         .files
         .clone()
@@ -409,6 +410,7 @@ async fn install_listed_url(
             .clone()
             .or(listed.version_json_pointer),
         files: Some(files),
+        installer: existing.installer.clone().or(installer),
         ..existing
     };
     entry.apply_defaults(&session.workspace.defaults);
@@ -530,7 +532,19 @@ fn fill_from_source(
         if entry.hash_version_file.is_none() && listed.hash_version_file == Some(true) {
             entry.hash_version_file = Some(HashVersionFile::Flag(true));
         }
+        if entry.installer.is_none() {
+            entry.installer = listed_installer(listed);
+        }
     }
+}
+
+/// A registry entry's `installer`, as the config writes it.
+fn listed_installer(listed: &registry::Entry) -> Option<serde_json::Value> {
+    listed
+        .installer
+        .as_ref()
+        .and_then(vendorfiles_core::installer::InstallerKey::options)
+        .map(|options| options.as_key())
 }
 
 /// An entry under a different name that already vendors the same repository.
@@ -614,7 +628,11 @@ fn report_entry(
 
     ui::info(format!("{name} would be added as:"));
     vendorfiles_core::progress::print_out(&rendered);
-    ui::info(format!("files would be written to {}", folder.display()));
+    if matches!(entry.installer(name), Ok(Some(_))) {
+        ui::info("the installer would run silently, and nothing would be kept on disk");
+    } else {
+        ui::info(format!("files would be written to {}", folder.display()));
+    }
     ui::info("nothing was downloaded or written");
     Ok(())
 }

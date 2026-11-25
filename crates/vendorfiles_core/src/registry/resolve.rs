@@ -8,6 +8,7 @@ use indexmap::IndexMap;
 
 use super::schema::{Explicit, Member, Program, Target};
 use crate::error::{Result, VendorError};
+use crate::installer::InstallerKey;
 use crate::model::{FileEntry, FileTarget};
 use crate::template::is_http_url;
 
@@ -56,6 +57,8 @@ pub struct Entry {
     pub release_regex: Option<String>,
     /// Whether to track a repository file by commit.
     pub hash_version_file: Option<bool>,
+    /// How to run the download as an installer, for a program that ships one.
+    pub installer: Option<InstallerKey>,
 }
 
 /// Resolves `program` for the given host key.
@@ -149,6 +152,7 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
         )
         .collect::<Result<Vec<_>>>()?;
     no_file_written_twice(name, host, &files)?;
+    one_file_for_an_installer(name, host, program, &files)?;
     if program.url.is_some() {
         every_asset_is_a_url(name, &files)?;
     }
@@ -171,7 +175,34 @@ fn entry(name: &str, program: &Program, files: Vec<FileEntry>) -> Entry {
         files,
         release_regex: program.release_regex.clone(),
         hash_version_file: program.hash_version_file,
+        installer: program.installer.clone(),
     }
+}
+
+/// Refuses an installer program whose host downloads anything but the one file it runs.
+fn one_file_for_an_installer(
+    name: &str,
+    host: &str,
+    program: &Program,
+    files: &[FileEntry],
+) -> Result<()> {
+    if program
+        .installer
+        .as_ref()
+        .and_then(InstallerKey::options)
+        .is_none()
+    {
+        return Ok(());
+    }
+    let count =
+        crate::lockfile::flat_files(&crate::lockfile::config_files_to_lock_files(files, "")).len();
+    if count == 1 {
+        return Ok(());
+    }
+    Err(VendorError::RegistryInvalidEntry {
+        name: name.to_owned(),
+        reason: format!("'installer' runs one downloaded file, but target '{host}' names {count}"),
+    })
 }
 
 /// Refuses a program without exactly one of `repository` and `url`, and a `url` program that
