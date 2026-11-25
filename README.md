@@ -1368,7 +1368,8 @@ the search works. `--refresh` checks the registry for changes first.
 ### `vendor uninstall`
 
 `vendor uninstall` deletes a dependency's files and removes it from the config and the lockfile.
-For an [installer](#installers), it runs the program's uninstaller instead.
+For an [installer](#installers), it runs the program's uninstaller instead. `--keep` only removes
+it from the config and the lockfile, and leaves its files or program in place.
 
 ---
 

@@ -175,12 +175,12 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
             .await?;
         }
 
-        Command::Uninstall { names } => {
+        Command::Uninstall { names, keep } => {
             if names.is_empty() {
                 bail!(VendorError::NoPackageNames);
             }
             for name in names {
-                session.uninstall(&name).await?;
+                session.uninstall(&name, keep).await?;
             }
         }
 

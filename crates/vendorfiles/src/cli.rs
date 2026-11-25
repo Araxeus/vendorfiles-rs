@@ -125,7 +125,12 @@ pub enum Command {
         aliases = ["remove", "delete", "del", "rm"],
         disable_help_flag = true
     )]
-    Uninstall { names: Vec<String> },
+    Uninstall {
+        names: Vec<String>,
+        /// Only take them out of the config and lockfile, leaving files and programs in place.
+        #[arg(long)]
+        keep: bool,
+    },
 
     /// List the dependencies in the config file.
     #[command(alias = "ls", disable_help_flag = true)]

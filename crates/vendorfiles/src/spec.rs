@@ -243,7 +243,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "uninstall",
         aliases: &["remove", "delete", "del", "rm"],
         max_operands: None,
-        options: &[],
+        options: &[OptionSpec {
+            short: None,
+            long: "--keep",
+            arity: Arity::None,
+            display: "--keep",
+        }],
         help: include_str!("help/uninstall.txt"),
     },
     CommandSpec {

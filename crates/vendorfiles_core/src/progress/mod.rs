@@ -451,6 +451,20 @@ impl Dependency {
         });
     }
 
+    /// Ends because the dependency left the config, while its files or program stayed.
+    pub fn forgotten(&self) {
+        let name = self.name.clone();
+        self.finish(
+            Outcome::Changed,
+            "removed from the config only".into(),
+            || {
+                ui::success(format!(
+                    "Removed {name} from the config, and left everything it installed"
+                ));
+            },
+        );
+    }
+
     /// Ends because the dependency failed, saying briefly why.
     ///
     /// `reason` is a single line - [`VendorError::brief`](crate::VendorError::brief) produces

@@ -150,6 +150,14 @@ fn expected_help(name: &str) -> String {
             .replace(
                 "Uninstall all/selected dependencies",
                 "Uninstall the named dependencies",
+            )
+            .replace(
+                "Options:\n",
+                "Options:\n  --keep      Only remove them from the config, keeping files and programs\n",
+            )
+            .replace(
+                "    vendor remove React youtube-music\n",
+                "    vendor remove React youtube-music\n    vendor rm qbittorrent --keep\n",
             ),
         "install" => expected_install_help(&reference),
         _ => reference,
@@ -1924,6 +1932,36 @@ fn uninstall_removes_files_the_config_entry_and_the_lockfile() {
     );
     assert_eq!(code(&out), 0);
     assert!(!dir.path().join("vendor/Coloris").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("vendor.json")).unwrap(),
+        "{\n  \"vendorDependencies\": {}\n}\n"
+    );
+}
+
+#[test]
+fn uninstall_keep_drops_the_entries_and_leaves_the_files() {
+    let dir = up_to_date_project();
+    let before: Vec<_> = std::fs::read_dir(dir.path().join("vendor/Coloris"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != "vendor-lock.json")
+        .collect();
+    assert_ne!(before.len(), 0);
+
+    let out = vendor(dir.path(), &["uninstall", "Coloris", "--keep"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Removed Coloris from the config"),
+        "{}",
+        stdout(&out)
+    );
+    for name in before {
+        assert!(
+            dir.path().join("vendor/Coloris").join(&name).exists(),
+            "{name:?}"
+        );
+    }
+    assert!(!dir.path().join("vendor/Coloris/vendor-lock.json").exists());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("vendor.json")).unwrap(),
         "{\n  \"vendorDependencies\": {}\n}\n"

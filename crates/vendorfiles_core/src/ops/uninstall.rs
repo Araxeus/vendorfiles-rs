@@ -22,13 +22,16 @@ impl Session {
     /// Nothing has been removed from the config at that point, so closing the program and
     /// running the command again finishes the job.
     ///
+    /// `keep` leaves the files and any installed program alone, and only drops the config and
+    /// lockfile entries.
+    ///
     /// # Errors
     ///
     /// Returns [`VendorError::DependencyNotFound`] when the config has no such entry,
     /// [`VendorError::DeleteFailed`] for a file that could not be removed, or a write error if
     /// the lockfile or config cannot be updated.
-    pub async fn uninstall(&mut self, name: &str) -> Result<()> {
-        let outcome = self.remove(name).await;
+    pub async fn uninstall(&mut self, name: &str, keep: bool) -> Result<()> {
+        let outcome = self.remove(name, keep).await;
 
         // Closed before the error leaves, so earlier outcome rows print above it.
         if outcome.is_err() {
@@ -37,9 +40,13 @@ impl Session {
         outcome
     }
 
-    async fn remove(&mut self, name: &str) -> Result<()> {
+    async fn remove(&mut self, name: &str, keep: bool) -> Result<()> {
         let progress = self.progress.dependency(name);
-        progress.status("removing files");
+        progress.status(if keep {
+            "removing from the config"
+        } else {
+            "removing files"
+        });
         let dependency = self
             .workspace
             .dependencies
@@ -58,19 +65,21 @@ impl Session {
         let single = self.workspace.config.single_lockfile.is_some();
         let lockfile = read_lockfile(&lockfile_path).await.ok();
         let owned = Owned::find(name, &dependency, &folder, &lockfile_path, single).await;
-        if let Some(installed) = owned.installed.clone() {
-            progress.status("running uninstaller");
-            let program = name.to_owned();
-            tokio::task::spawn_blocking(move || installer::uninstall(&program, &installed))
+        if !keep {
+            if let Some(installed) = owned.installed.clone() {
+                progress.status("running uninstaller");
+                let program = name.to_owned();
+                tokio::task::spawn_blocking(move || installer::uninstall(&program, &installed))
+                    .await
+                    .map_err(|error| VendorError::Http(error.to_string()))
+                    .and_then(|outcome| outcome)
+                    .inspect_err(|error| progress.failed(&error.brief()))?;
+            }
+            owned
+                .delete()
                 .await
-                .map_err(|error| VendorError::Http(error.to_string()))
-                .and_then(|outcome| outcome)
                 .inspect_err(|error| progress.failed(&error.brief()))?;
         }
-        owned
-            .delete()
-            .await
-            .inspect_err(|error| progress.failed(&error.brief()))?;
 
         if single {
             retire_folder_entry(name, &folder, &lockfile_path).await;
@@ -83,7 +92,11 @@ impl Session {
         self.workspace.file.document.remove_dependency(name)?;
         self.workspace.file.write().await?;
 
-        progress.uninstalled();
+        if keep {
+            progress.forgotten();
+        } else {
+            progress.uninstalled();
+        }
         Ok(())
     }
 }
