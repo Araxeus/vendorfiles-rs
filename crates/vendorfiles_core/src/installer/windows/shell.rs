@@ -16,7 +16,9 @@ use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, FILETIME, GetLastError, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
 };
@@ -31,7 +33,7 @@ use windows_sys::Win32::System::RestartManager::{
     RmStartSession,
 };
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, GetProcessTimes, INFINITE, OpenProcess, PROCESS_NAME_WIN32,
+    GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
@@ -46,8 +48,14 @@ pub const ERROR_CANCELLED: i32 = 1223;
 /// Runs `program` with `params` and waits for it to exit, returning its exit code.
 ///
 /// `params` is handed over as one command line, exactly as written. `elevate` asks for admin
-/// rights outright; otherwise the program's own manifest decides.
-pub fn run(program: &OsStr, params: &str, elevate: bool) -> io::Result<u32> {
+/// rights outright; otherwise the program's own manifest decides. `waiting` is called about
+/// once a second while the program runs.
+pub fn run(
+    program: &OsStr,
+    params: &str,
+    elevate: bool,
+    mut waiting: impl FnMut(),
+) -> io::Result<u32> {
     let verb = wide(OsStr::new(if elevate { "runas" } else { "open" }));
     let file = wide(program);
     let params = wide(OsStr::new(params));
@@ -80,7 +88,9 @@ pub fn run(program: &OsStr, params: &str, elevate: bool) -> io::Result<u32> {
             return Err(io::Error::other("the shell started no process to wait on"));
         }
 
-        WaitForSingleObject(info.hProcess, INFINITE);
+        while WaitForSingleObject(info.hProcess, 1000) == WAIT_TIMEOUT {
+            waiting();
+        }
         let mut code = 0u32;
         let read = GetExitCodeProcess(info.hProcess, &raw mut code);
         let error = io::Error::last_os_error();

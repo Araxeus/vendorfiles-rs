@@ -123,7 +123,7 @@ fn run_install(
         .and_then(arp::Entry::program)
         .and_then(|program| shell::file_version(&program));
     let launch = installer_launch(path, kind, options);
-    let code = run(name, &launch)?;
+    let code = run(name, &launch, &mut Patience::new("installer", name))?;
     let reboot = check_exit(name, kind, code)?;
     let after = arp::snapshot();
     let entry = arp::pick(name, before, &after, previous_key);
@@ -333,9 +333,59 @@ fn installer_launch(path: &Path, kind: InstallerKind, options: &InstallerOptions
 /// How long to wait for an uninstaller's temporary copy, which may be asking the user something.
 const SECOND_PHASE_LIMIT: Duration = Duration::from_mins(30);
 
+/// How long an installer or uninstaller runs before vendor says it may be waiting for you.
+const PATIENCE: Duration = Duration::from_mins(3);
+
+/// Says once that a launch has run long, with a terminal bell, in case it opened a window the
+/// silent switches could not hide.
+struct Patience<'a> {
+    what: &'a str,
+    name: &'a str,
+    started: Instant,
+    said: bool,
+}
+
+impl<'a> Patience<'a> {
+    fn new(what: &'a str, name: &'a str) -> Self {
+        Self {
+            what,
+            name,
+            started: Instant::now(),
+            said: false,
+        }
+    }
+
+    fn check(&mut self) {
+        if self.said || self.started.elapsed() < PATIENCE {
+            return;
+        }
+        self.said = true;
+        crate::ui::warning(format!(
+            "The {} for {} has run for {} minutes. If it opened a window, it may be waiting for you",
+            self.what,
+            self.name,
+            PATIENCE.as_secs() / 60
+        ));
+        bell();
+    }
+}
+
+/// Rings the terminal bell, when stderr is a terminal.
+fn bell() {
+    use std::io::{IsTerminal, Write};
+    let mut stderr = std::io::stderr();
+    if stderr.is_terminal() {
+        let _ = stderr.write_all(b"\x07");
+        let _ = stderr.flush();
+    }
+}
+
 /// Starts a launch and waits for it, turning a declined UAC prompt into its own error.
-fn run(name: &str, launch: &Launch) -> Result<u32> {
-    shell::run(&launch.program, &launch.params, launch.elevate).map_err(|error| {
+fn run(name: &str, launch: &Launch, patience: &mut Patience) -> Result<u32> {
+    shell::run(&launch.program, &launch.params, launch.elevate, || {
+        patience.check();
+    })
+    .map_err(|error| {
         if error.raw_os_error() == Some(shell::ERROR_CANCELLED) {
             VendorError::InstallerDeclined {
                 name: name.to_owned(),
@@ -363,12 +413,14 @@ fn run(name: &str, launch: &Launch) -> Result<u32> {
 /// as the app itself, is not.
 fn run_through(name: &str, launch: &Launch) -> Result<u32> {
     let before: HashSet<u32> = shell::processes().into_iter().map(|(pid, _)| pid).collect();
-    let code = run(name, launch)?;
+    let mut patience = Patience::new("uninstaller", name);
+    let code = run(name, launch, &mut patience)?;
     // Canonical, because `TEMP` often holds an 8.3 name like `ORBENM~1` and image paths never do.
     let temp = std::env::temp_dir();
     let temp = std::fs::canonicalize(&temp).unwrap_or(temp);
     let started = Instant::now();
     while started.elapsed() < SECOND_PHASE_LIMIT && started_from(&temp, &before) {
+        patience.check();
         std::thread::sleep(Duration::from_millis(300));
     }
     Ok(code)
@@ -676,6 +728,27 @@ mod tests {
         assert!(elevate);
         assert!(!launch(InstallerKind::Msi, &user).2);
         assert_eq!(launch(InstallerKind::Exe, &plain).1, "");
+    }
+
+    #[test]
+    fn a_long_launch_is_checked_on_while_it_runs_and_reported_once() {
+        let mut ticks = 0;
+        let code = super::shell::run(
+            std::ffi::OsStr::new("cmd.exe"),
+            "/c ping -n 3 127.0.0.1 >nul",
+            false,
+            || ticks += 1,
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        assert!(ticks >= 1, "{ticks}");
+
+        let mut patience = super::Patience::new("installer", "test");
+        patience.check();
+        assert!(!patience.said);
+        patience.started -= super::PATIENCE;
+        patience.check();
+        assert!(patience.said);
     }
 
     #[test]

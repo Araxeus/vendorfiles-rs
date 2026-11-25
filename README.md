@@ -1168,7 +1168,9 @@ vendor detects the installer's type from the file:
 | `relaunch` | Whether to close the program if it is running and start it again after. Unset follows `vendorConfig.relaunchPrograms` |
 
 An installer that needs admin rights raises the usual UAC prompt, and vendor waits for it.
-Installers run one at a time, in config order, while the other downloads carry on.
+Installers run one at a time, in config order, while the other downloads carry on. An installer
+or uninstaller that runs for 3 minutes may be stuck on a window the silent switches couldn't
+hide, so vendor says so and rings the terminal bell.
 
 An installer can't replace the files of a program that is running, and many report success
 anyway. So vendor won't install over a running program, and asks you to close it first. Set
