@@ -1,4 +1,4 @@
-//! Starting a program through the shell, and waiting for its exit code.
+//! Starting programs through the shell, and reading their file versions.
 //!
 //! `ShellExecuteExW` is the one launcher that honours an executable's manifest. An installer that
 //! requires admin gets the UAC prompt, where `CreateProcess` fails with error 740. It is also the
@@ -11,9 +11,12 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
+};
 use windows_sys::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
 };
@@ -38,7 +41,6 @@ pub const ERROR_CANCELLED: i32 = 1223;
 /// `params` is handed over as one command line, exactly as written. `elevate` asks for admin
 /// rights outright; otherwise the program's own manifest decides.
 pub fn run(program: &OsStr, params: &str, elevate: bool) -> io::Result<u32> {
-    let wide = |text: &OsStr| text.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let verb = wide(OsStr::new(if elevate { "runas" } else { "open" }));
     let file = wide(program);
     let params = wide(OsStr::new(params));
@@ -81,6 +83,54 @@ pub fn run(program: &OsStr, params: &str, elevate: bool) -> io::Result<u32> {
         }
         Ok(code)
     }
+}
+
+/// The product version in an executable's version resource, as its four numbers.
+#[must_use]
+pub fn file_version(path: &Path) -> Option<[u16; 4]> {
+    let file = wide(path.as_os_str());
+    let root = wide(OsStr::new("\\"));
+
+    // SAFETY: the version block is sized by the call that reports its size, and the fixed info
+    // pointer is checked for null and length before it is read. The block is a byte buffer, so
+    // the read makes no assumption about alignment.
+    unsafe {
+        let size = GetFileVersionInfoSizeW(file.as_ptr(), std::ptr::null_mut());
+        if size == 0 {
+            return None;
+        }
+        let mut block = vec![0u8; usize::try_from(size).ok()?];
+        if GetFileVersionInfoW(file.as_ptr(), 0, size, block.as_mut_ptr().cast()) == 0 {
+            return None;
+        }
+        let mut info = std::ptr::null_mut();
+        let mut length = 0u32;
+        let found = VerQueryValueW(
+            block.as_ptr().cast(),
+            root.as_ptr(),
+            &raw mut info,
+            &raw mut length,
+        );
+        if found == 0
+            || info.is_null()
+            || usize::try_from(length).ok()? < size_of::<VS_FIXEDFILEINFO>()
+        {
+            return None;
+        }
+        let fixed = std::ptr::read_unaligned(info.cast::<VS_FIXEDFILEINFO>());
+        let high = |word: u32| u16::try_from(word >> 16).unwrap_or(u16::MAX);
+        let low = |word: u32| u16::try_from(word & 0xFFFF).unwrap_or(u16::MAX);
+        Some([
+            high(fixed.dwProductVersionMS),
+            low(fixed.dwProductVersionMS),
+            high(fixed.dwProductVersionLS),
+            low(fixed.dwProductVersionLS),
+        ])
+    }
+}
+
+fn wide(text: &OsStr) -> Vec<u16> {
+    text.encode_wide().chain(Some(0)).collect()
 }
 
 /// Every running process, as `(id, parent id)`.

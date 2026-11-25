@@ -167,17 +167,21 @@ pub struct Outcome {
 /// Runs the installer at `path` silently and works out what it installed. Blocking.
 ///
 /// `name` is the dependency's name, used to recognise the program among the Apps & Features
-/// entries. `previous` is what the last install recorded, which an upgrade usually reuses.
+/// entries. `version` is the release being installed. `previous` is what the last install
+/// recorded, which an upgrade usually reuses.
 ///
 /// # Errors
 ///
 /// Returns [`VendorError::NotAnInstaller`] when the type cannot be detected,
+/// [`VendorError::InstallerBlocked`] when the program is running,
 /// [`VendorError::InstallerFailed`] for a failing exit code,
+/// [`VendorError::InstallerError`] when the program is left at its old version,
 /// [`VendorError::InstallerDeclined`] when the UAC prompt was refused, or
 /// [`VendorError::InstallersUnsupported`] off Windows.
 pub fn install(
     name: &str,
     path: &Path,
+    version: &str,
     options: &InstallerOptions,
     previous: Option<&Installed>,
 ) -> Result<Outcome> {
@@ -189,13 +193,44 @@ pub fn install(
     };
     #[cfg(windows)]
     {
-        windows::install(name, path, kind, options, previous)
+        windows::install(name, path, version, kind, options, previous)
     }
     #[cfg(not(windows))]
     {
-        let _ = (name, kind, previous);
+        let _ = (name, version, kind, previous);
         Err(VendorError::InstallersUnsupported)
     }
+}
+
+/// Whether a version a program reports is the release's version.
+///
+/// Compares the numbers only, so `v5.3.1` and `5.3.1.0` both match the release `release-5.3.1`.
+/// `None` when the release has no numbers to compare.
+#[must_use]
+pub fn is_release_version(found: &str, release: &str) -> Option<bool> {
+    let release = numbers(crate::template::version_token(release));
+    if release.is_empty() {
+        return None;
+    }
+    let found = numbers(found);
+    let width = release.len().max(found.len());
+    let part = |list: &[u64], index: usize| list.get(index).copied().unwrap_or(0);
+    Some((0..width).all(|index| part(&release, index) == part(&found, index)))
+}
+
+/// The first dotted run of numbers in `text`, like `[5, 3, 1]` in `v5.3.1-beta`.
+fn numbers(text: &str) -> Vec<u64> {
+    let start = text
+        .find(|c: char| c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let run = &text[start..];
+    let end = run
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(run.len());
+    run[..end]
+        .split('.')
+        .map_while(|part| part.parse().ok())
+        .collect()
 }
 
 /// Whether what an install recorded is still on the machine.
@@ -267,6 +302,16 @@ mod tests {
         assert_eq!(full.kind, Some(InstallerKind::Msi));
         assert_eq!(full.args, ["A=1"]);
         assert_eq!(full.scope, Some(Scope::User));
+    }
+
+    #[test]
+    fn a_reported_version_matches_the_release_on_its_numbers() {
+        use super::is_release_version;
+        assert_eq!(is_release_version("5.3.1.0", "release-5.3.1"), Some(true));
+        assert_eq!(is_release_version("v5.3.1", "release-5.3.1"), Some(true));
+        assert_eq!(is_release_version("5.3.0.0", "release-5.3.1"), Some(false));
+        assert_eq!(is_release_version("5.3.1.2", "v5.3.1"), Some(false));
+        assert_eq!(is_release_version("1.0", "nightly"), None);
     }
 
     #[test]

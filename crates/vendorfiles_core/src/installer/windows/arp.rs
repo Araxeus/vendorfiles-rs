@@ -5,6 +5,7 @@
 //! named its key, and it holds for upgrades too, which rewrite the entry's version.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use windows_registry::{CURRENT_USER, Key, LOCAL_MACHINE};
 
@@ -28,6 +29,8 @@ pub struct Entry {
     pub version: Option<String>,
     pub uninstall: Option<String>,
     pub quiet_uninstall: Option<String>,
+    pub install_location: Option<String>,
+    pub display_icon: Option<String>,
     /// Hidden from Apps & Features: a component of something else.
     pub system: bool,
 }
@@ -45,9 +48,55 @@ impl Entry {
         self.key.starts_with("HKLM\\")
     }
 
+    /// The program's own executable, when the entry's icon points at one.
+    #[must_use]
+    pub fn program(&self) -> Option<PathBuf> {
+        let icon = self.display_icon.as_deref()?;
+        let icon = icon.split_once(',').map_or(icon, |(path, _)| path);
+        let path = PathBuf::from(icon.trim().trim_matches('"'));
+        let is_exe = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+        (is_exe && path.is_absolute()).then_some(path)
+    }
+
+    /// The folder the program is installed in.
+    ///
+    /// Read from `InstallLocation`, or else from where its icon or uninstaller lives. A folder
+    /// that holds other programs too, like `Program Files` or `System32`, never counts.
+    #[must_use]
+    pub fn folder(&self) -> Option<PathBuf> {
+        let uninstaller = self
+            .uninstall
+            .as_deref()
+            .map(|command| PathBuf::from(super::split_command(command).0));
+        let folder = self
+            .install_location
+            .as_deref()
+            .map(|location| PathBuf::from(location.trim_matches('"')))
+            .or_else(|| self.program()?.parent().map(Path::to_path_buf))
+            .or_else(|| uninstaller?.parent().map(Path::to_path_buf))?;
+        own_folder(&folder).then_some(folder)
+    }
+
     const fn visible(&self) -> bool {
         !self.system && self.name.is_some()
     }
+}
+
+/// Whether a folder plausibly belongs to one program: two levels deep at least, and outside the
+/// Windows folder.
+fn own_folder(folder: &Path) -> bool {
+    use std::path::Component;
+    let depth = folder
+        .components()
+        .filter(|part| matches!(part, Component::Normal(_)))
+        .count();
+    let lower = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+    let windows = std::env::var_os("SystemRoot").map(|root| lower(Path::new(&root)));
+    folder.is_absolute()
+        && depth >= 2
+        && !windows.is_some_and(|root| lower(folder).starts_with(root))
 }
 
 fn hive(name: &str) -> Option<&'static Key> {
@@ -70,6 +119,8 @@ fn read_entry(key: &Key, full: String) -> Entry {
         version: text("DisplayVersion"),
         uninstall: text("UninstallString"),
         quiet_uninstall: text("QuietUninstallString"),
+        install_location: text("InstallLocation"),
+        display_icon: text("DisplayIcon"),
         system: key.get_u32("SystemComponent").is_ok_and(|flag| flag == 1),
         key: full,
     }
@@ -103,6 +154,22 @@ pub fn read(full: &str) -> Option<Entry> {
     let (hive_name, path) = full.split_once('\\')?;
     let key = hive(hive_name)?.open(path).ok()?;
     Some(read_entry(&key, full.to_owned()))
+}
+
+/// The entry a program sits under before an install runs: the one recorded last time, or else
+/// the one whose name matches the dependency.
+#[must_use]
+pub fn existing(
+    name: &str,
+    entries: &HashMap<String, Entry>,
+    previous: Option<&str>,
+) -> Option<Entry> {
+    if let Some(entry) = previous.and_then(|key| entries.get(key)) {
+        return Some(entry.clone());
+    }
+    let mut every: Vec<&Entry> = entries.values().filter(|entry| entry.visible()).collect();
+    every.sort_by(|a, b| a.key.cmp(&b.key));
+    best_match(name, every.into_iter()).cloned()
 }
 
 /// The entry an install created or rewrote.
@@ -182,12 +249,40 @@ mod tests {
             version: Some(version.to_owned()),
             uninstall: Some("u.exe".to_owned()),
             quiet_uninstall: None,
+            install_location: None,
+            display_icon: None,
             system: false,
         }
     }
 
     fn map(entries: &[Entry]) -> HashMap<String, Entry> {
         entries.iter().map(|e| (e.key.clone(), e.clone())).collect()
+    }
+
+    #[test]
+    fn the_folder_comes_from_the_location_or_else_the_icon() {
+        let mut qbittorrent = entry(r"HKLM\x\qBittorrent", "qBittorrent", "5.3.0");
+        qbittorrent.display_icon =
+            Some(r#""C:\Program Files\qBittorrent\qbittorrent.exe",0"#.to_owned());
+        assert_eq!(
+            qbittorrent.program(),
+            Some(r"C:\Program Files\qBittorrent\qbittorrent.exe".into())
+        );
+        assert_eq!(
+            qbittorrent.folder(),
+            Some(r"C:\Program Files\qBittorrent".into())
+        );
+        qbittorrent.install_location = Some(r"D:\Apps\qBittorrent".to_owned());
+        assert_eq!(qbittorrent.folder(), Some(r"D:\Apps\qBittorrent".into()));
+    }
+
+    #[test]
+    fn a_shared_folder_is_never_the_install_folder() {
+        let mut shared = entry(r"HKLM\x\{1}", "Tool", "1");
+        shared.display_icon = Some(r"C:\Windows\System32\msiexec.exe,0".to_owned());
+        assert_eq!(shared.folder(), None);
+        shared.install_location = Some(r"C:\Program Files\".to_owned());
+        assert_eq!(shared.folder(), None);
     }
 
     #[test]

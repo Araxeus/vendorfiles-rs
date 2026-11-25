@@ -656,6 +656,12 @@ code and the complete resulting file tree (including binary payloads). Covered:
    uninstall command is read from that key when needed, since upgrades rewrite it. An MSIX
    package is tracked by its identity name. `needs_update` treats a program removed through
    Settings as stale, so `sync` reinstalls it.
+   An installer cannot replace a running program's files and often exits 0 regardless, leaving
+   the old program under an updated Apps & Features entry. So before it runs, vendor looks for
+   processes started from the existing install's folder, and refuses while one runs. After it
+   runs, a program whose file version is unchanged and is not the release
+   fails the install. That file version only counts when it agreed with the entry's
+   `DisplayVersion` beforehand, since some programs never bump it.
    Installers launch through `ShellExecuteExW`, the one launcher that honours an executable's
    manifest and raises UAC for an installer that needs admin. That needs `unsafe`, so the crate
    moved from `forbid(unsafe_code)` to `deny`, with one module allowed. Inno and NSIS uninstallers

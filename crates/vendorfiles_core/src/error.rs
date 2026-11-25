@@ -193,6 +193,9 @@ pub enum VendorError {
     #[error("Could not install {name}: {message}")]
     InstallerError { name: String, message: String },
 
+    #[error("{program} is running, so {name} was not installed. Close it and try again")]
+    InstallerBlocked { name: String, program: String },
+
     #[error("The admin prompt for {name} was declined, so nothing changed")]
     InstallerDeclined { name: String },
 

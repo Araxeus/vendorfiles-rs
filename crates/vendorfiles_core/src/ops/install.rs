@@ -576,9 +576,10 @@ async fn run_installer(
         })?;
     let path = anchor(staging, file.as_str());
     let name = dependency.name.clone();
+    let release = version.to_owned();
     let previous = previous.and_then(|lock| lock.installed.clone());
     let outcome = tokio::task::spawn_blocking(move || {
-        installer::install(&name, &path, &options, previous.as_ref())
+        installer::install(&name, &path, &release, &options, previous.as_ref())
     })
     .await
     .map_err(|error| VendorError::Http(error.to_string()))??;

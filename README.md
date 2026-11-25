@@ -1165,6 +1165,11 @@ vendor detects the installer's type from the file:
 An installer that needs admin rights raises the usual UAC prompt, and vendor waits for it.
 Installers run one at a time, in config order, while the other downloads carry on.
 
+An installer can't replace the files of a program that is running, and many report success
+anyway. So vendor won't install over a running program, and asks you to close it first. If the
+program's version hasn't changed after the installer exits, the install fails
+instead of being recorded.
+
 Running an installer runs code from the internet, so vendor only runs installers from your own
 config, which is the one `-c` names or the one `DEFAULT_VENDOR_CONFIG` points at. A config vendor
 finds by searching, like one in a project you cloned, needs `--allow-installers` on `sync`,

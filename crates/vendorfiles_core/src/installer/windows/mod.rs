@@ -3,9 +3,9 @@
 mod arp;
 mod shell;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -30,6 +30,7 @@ struct Launch {
 pub fn install(
     name: &str,
     path: &Path,
+    version: &str,
     kind: InstallerKind,
     options: &InstallerOptions,
     previous: Option<&Installed>,
@@ -37,17 +38,83 @@ pub fn install(
     if kind == InstallerKind::Msix {
         return install_msix(name, path);
     }
+    let previous_key = previous.and_then(|p| p.uninstall_key.as_deref());
     let before = arp::snapshot();
+    let existing = arp::existing(name, &before, previous_key);
+
+    // An installer cannot replace files a running program holds open, and often reports success
+    // anyway.
+    let running = existing
+        .as_ref()
+        .and_then(arp::Entry::folder)
+        .is_some_and(|folder| runs_from(&folder));
+    if running {
+        return Err(VendorError::InstallerBlocked {
+            name: name.to_owned(),
+            program: existing
+                .as_ref()
+                .and_then(|entry| entry.name.clone())
+                .unwrap_or_else(|| name.to_owned()),
+        });
+    }
+
+    run_install(
+        name,
+        path,
+        version,
+        kind,
+        options,
+        &before,
+        existing.as_ref(),
+        previous_key,
+    )
+}
+
+/// Runs the installer, then checks that the program it replaced really changed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the pieces of one install, each read once"
+)]
+fn run_install(
+    name: &str,
+    path: &Path,
+    version: &str,
+    kind: InstallerKind,
+    options: &InstallerOptions,
+    before: &HashMap<String, arp::Entry>,
+    existing: Option<&arp::Entry>,
+    previous_key: Option<&str>,
+) -> Result<Outcome> {
+    let program_before = existing
+        .and_then(arp::Entry::program)
+        .and_then(|program| shell::file_version(&program));
     let launch = installer_launch(path, kind, options);
     let code = run(name, &launch)?;
     let reboot = check_exit(name, kind, code)?;
     let after = arp::snapshot();
-    let entry = arp::pick(
-        name,
-        &before,
-        &after,
-        previous.and_then(|p| p.uninstall_key.as_deref()),
-    );
+    let entry = arp::pick(name, before, &after, previous_key);
+
+    if let Some(entry) = &entry {
+        let program_after = entry
+            .program()
+            .and_then(|program| shell::file_version(&program));
+        let unchanged = before.get(&entry.key) == Some(entry);
+        if let Some(stale) = left_behind(
+            program_before.map(dotted),
+            program_after.map(dotted),
+            existing.and_then(|existing| existing.version.as_deref()),
+            unchanged.then_some(entry.version.as_deref()).flatten(),
+            version,
+        ) {
+            return Err(VendorError::InstallerError {
+                name: name.to_owned(),
+                message: format!(
+                    "the installer reported success, but {} is still version {stale}",
+                    entry.name.as_deref().unwrap_or(name)
+                ),
+            });
+        }
+    }
     Ok(Outcome {
         installed: Installed {
             kind,
@@ -57,6 +124,49 @@ pub fn install(
         },
         reboot,
     })
+}
+
+/// The old version an install left in place, if it left one.
+///
+/// The program's own file version decides when it agreed with the Apps & Features entry before
+/// the install: unchanged and not the release means nothing was replaced. Otherwise an entry that
+/// did not change and names another version means the same.
+fn left_behind(
+    program_before: Option<String>,
+    program_after: Option<String>,
+    listed_before: Option<&str>,
+    unchanged_entry: Option<&str>,
+    release: &str,
+) -> Option<String> {
+    let is_old = |found: &str| super::is_release_version(found, release) == Some(false);
+    let tracked = program_before.filter(|program| {
+        listed_before.is_some_and(|listed| super::is_release_version(program, listed) == Some(true))
+    });
+    if let (Some(before), Some(after)) = (tracked, program_after) {
+        return (before == after && is_old(&after)).then_some(after);
+    }
+    unchanged_entry
+        .filter(|version| is_old(version))
+        .map(str::to_owned)
+}
+
+fn dotted(version: [u16; 4]) -> String {
+    version.map(|part| part.to_string()).join(".")
+}
+
+/// Whether a process other than this one runs from inside `folder`.
+fn runs_from(folder: &Path) -> bool {
+    let lower = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+    let folder = lower(&std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_owned()));
+    let own = std::process::id();
+    shell::processes()
+        .into_iter()
+        .filter(|&(pid, _)| pid != own)
+        .filter_map(|(pid, _)| shell::image_path(pid))
+        .any(|image| {
+            let resolved = std::fs::canonicalize(&image).unwrap_or(image);
+            lower(&resolved).starts_with(&folder)
+        })
 }
 
 /// The command that runs an installer of `kind` silently.
@@ -173,6 +283,7 @@ fn check_exit(name: &str, kind: InstallerKind, code: u32) -> Result<bool> {
         (InstallerKind::Inno, 2 | 5) | (InstallerKind::Nsis, 1) | (_, 1602) => {
             "the install was cancelled"
         }
+        (InstallerKind::Nsis, 2) => "the installer stopped itself",
         (InstallerKind::Inno, 8) => "a restart is needed before it can install",
         (_, 1618) => "another installation is in progress - wait for it and try again",
         (_, 1603) => "Windows Installer reported a fatal error",
@@ -443,6 +554,46 @@ mod tests {
         assert!(elevate);
         assert!(!launch(InstallerKind::Msi, &user).2);
         assert_eq!(launch(InstallerKind::Exe, &plain).1, "");
+    }
+
+    #[test]
+    fn an_install_that_left_the_old_program_is_caught() {
+        use super::left_behind;
+        let some = |text: &str| Some(text.to_owned());
+        let release = "release-5.3.1";
+
+        // qBittorrent was open, so its files stayed at 5.3.0 while its entry said 5.3.1.
+        let listed = Some("5.3.0");
+        assert_eq!(
+            left_behind(some("5.3.0.0"), some("5.3.0.0"), listed, None, release),
+            some("5.3.0.0")
+        );
+        assert_eq!(
+            left_behind(some("5.3.0.0"), some("5.3.1.0"), listed, None, release),
+            None
+        );
+        // A reinstall of the same version changes nothing and is fine.
+        assert_eq!(
+            left_behind(
+                some("5.3.1.0"),
+                some("5.3.1.0"),
+                Some("5.3.1"),
+                None,
+                release
+            ),
+            None
+        );
+        // A file version that never tracked the program's version proves nothing.
+        assert_eq!(
+            left_behind(some("1.0.0.0"), some("1.0.0.0"), listed, None, release),
+            None
+        );
+        assert_eq!(
+            left_behind(None, None, None, Some("5.3.0"), release),
+            some("5.3.0")
+        );
+        assert_eq!(left_behind(None, None, None, Some("5.3.1"), release), None);
+        assert_eq!(left_behind(None, None, None, None, release), None);
     }
 
     #[test]
