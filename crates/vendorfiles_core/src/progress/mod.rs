@@ -350,7 +350,7 @@ impl Dependency {
     /// Counts bytes that just arrived, against this dependency and the run.
     fn advance(&self, amount: u64) {
         if let Ok(mut state) = self.state.lock() {
-            state.bytes += amount;
+            state.add_bytes(amount);
             if let Some(Stage::Active { bytes, .. }) = state.stage_mut(self.id) {
                 bytes.done += amount;
             }
