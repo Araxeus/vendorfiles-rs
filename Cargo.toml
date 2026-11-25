@@ -71,6 +71,19 @@ sevenz-rust2 = { version = "0.25.0", default-features = false, features = [
     "ppmd",
     "zstd",
 ] }
+# Installers on Windows: the Apps & Features (uninstall) keys are read through the safe registry
+# API, and `windows-sys` provides `ShellExecuteExW`, which raises the UAC prompt for an installer
+# that needs admin and hands back a process handle to wait on. Both are already in the tree.
+windows-registry = "0.6.1"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.
 windows-native-keyring-store = { version = "1.1.0", default-features = false }

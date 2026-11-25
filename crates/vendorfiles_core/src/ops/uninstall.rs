@@ -2,6 +2,7 @@
 
 use crate::error::{Result, VendorError};
 use crate::fsx::delete_file_and_empty_folders;
+use crate::installer::{self, Installed};
 use crate::lockfile::{
     Lockfile, config_files_to_lock_files, flat_files, previous_entry, read_lockfile,
     retire_folder_entry, saved_folder, to_json, write_string,
@@ -57,6 +58,15 @@ impl Session {
         let single = self.workspace.config.single_lockfile.is_some();
         let lockfile = read_lockfile(&lockfile_path).await.ok();
         let owned = Owned::find(name, &dependency, &folder, &lockfile_path, single).await;
+        if let Some(installed) = owned.installed.clone() {
+            progress.status("running uninstaller");
+            let program = name.to_owned();
+            tokio::task::spawn_blocking(move || installer::uninstall(&program, &installed))
+                .await
+                .map_err(|error| VendorError::Http(error.to_string()))
+                .and_then(|outcome| outcome)
+                .inspect_err(|error| progress.failed(&error.brief()))?;
+        }
         owned
             .delete()
             .await
@@ -86,6 +96,8 @@ struct Owned {
     /// Where the config puts the dependency today.
     folder: PathBuf,
     declared_files: Vec<String>,
+    /// What an installer put on the machine, which its uninstaller takes off again.
+    installed: Option<Installed>,
 }
 
 impl Owned {
@@ -110,15 +122,22 @@ impl Owned {
             .map(|entry| flat_files(&entry.files))
             .unwrap_or_default();
 
-        let declared = config_files_to_lock_files(
-            dependency.files.as_deref().unwrap_or_default(),
-            dependency.version.as_deref().unwrap_or_default(),
-        );
+        // An installer's download never lands in the folder, so a file there under its name is
+        // someone else's.
+        let declared = if matches!(dependency.installer(name), Ok(Some(_))) {
+            Vec::new()
+        } else {
+            flat_files(&config_files_to_lock_files(
+                dependency.files.as_deref().unwrap_or_default(),
+                dependency.version.as_deref().unwrap_or_default(),
+            ))
+        };
         Self {
             locked_folder,
             locked_files,
             folder: folder.to_path_buf(),
-            declared_files: flat_files(&declared),
+            declared_files: declared,
+            installed: locked.and_then(|entry| entry.installed),
         }
     }
 

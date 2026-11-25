@@ -14,7 +14,9 @@
 //! # }
 //! ```
 
-#![forbid(unsafe_code)]
+// `deny` rather than `forbid`: `installer::windows::shell` is the one module allowed `unsafe`, to
+// call `ShellExecuteExW`. Every other module stays free of it.
+#![deny(unsafe_code)]
 // `octocrab` and `reqwest` legitimately pull in overlapping minor versions of shared crates;
 // nothing in this workspace can resolve that. Kept as `allow`, not `expect`: a dependency bump
 // that happens to unify them should not fail the build.
@@ -25,6 +27,7 @@ pub mod config;
 pub mod error;
 pub mod fsx;
 pub mod github;
+pub mod installer;
 pub mod lockfile;
 pub mod model;
 pub mod ops;

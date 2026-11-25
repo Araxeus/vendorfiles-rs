@@ -155,6 +155,50 @@ pub enum VendorError {
     #[error("'{version}' looks like a version, not a source. Did you mean '{suggestion}'?")]
     VersionAsSource { version: String, suggestion: String },
 
+    // ---- installers ----------------------------------------------------------------
+    #[error(
+        "config key 'vendorDependencies.{name}.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or {{ type, args, scope }}"
+    )]
+    InvalidInstallerKey { name: String },
+
+    #[error(
+        "vendorDependencies.{name} sets 'installer', so its files must name exactly one file to run (they name {count})"
+    )]
+    InstallerNeedsOneFile { name: String, count: usize },
+
+    #[error(
+        "{name} runs an installer, and {path} is not your global config, so vendor will not run it. Pass --allow-installers to run it anyway"
+    )]
+    InstallersNotAllowed { name: String, path: String },
+
+    #[error("Running installers is only supported on Windows for now")]
+    InstallersUnsupported,
+
+    #[error(
+        "{file} is not an installer vendor recognises (NSIS, Inno Setup, MSI or MSIX). Set 'installer.type' to say what it is"
+    )]
+    NotAnInstaller { file: String },
+
+    #[error(
+        "The {kind} installer for {name} failed with exit code {code}{}",
+        reason_suffix(reason)
+    )]
+    InstallerFailed {
+        name: String,
+        kind: crate::installer::InstallerKind,
+        code: u32,
+        reason: String,
+    },
+
+    #[error("Could not install {name}: {message}")]
+    InstallerError { name: String, message: String },
+
+    #[error("The admin prompt for {name} was declined, so nothing changed")]
+    InstallerDeclined { name: String },
+
+    #[error("Could not uninstall {name}: {message}")]
+    UninstallFailed { name: String, message: String },
+
     // ---- version resolution --------------------------------------------------------
     #[error("files[0] is invalid for hashVersionFile, must be a string or an object - got {0}")]
     InvalidHashVersionFileTarget(&'static str),
@@ -503,6 +547,15 @@ impl VendorError {
             .trim_end_matches(':')
             .trim_end()
             .to_owned()
+    }
+}
+
+/// `: reason` after an installer's exit code, or nothing when the code has no known meaning.
+fn reason_suffix(reason: &str) -> String {
+    if reason.is_empty() {
+        String::new()
+    } else {
+        format!(": {reason}")
     }
 }
 

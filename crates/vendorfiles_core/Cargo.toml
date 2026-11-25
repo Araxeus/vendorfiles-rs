@@ -47,6 +47,8 @@ zip.workspace = true
 # resolution falls back to `GITHUB_TOKEN`.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store.workspace = true
+windows-registry.workspace = true
+windows-sys.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store.workspace = true

@@ -251,6 +251,7 @@ impl Reporter {
             state: Arc::clone(&self.state),
             pending: Mutex::new(Vec::new()),
             results: Arc::clone(&self.results),
+            staged: AtomicBool::new(false),
         }
     }
 }
@@ -274,6 +275,8 @@ pub struct Dependency {
     pending: Mutex<Vec<String>>,
     /// The run's outcome lines, printed together when the region comes down.
     results: Arc<Mutex<Vec<String>>>,
+    /// Downloads land in a temporary folder to be run, so they are not "saved" anywhere.
+    staged: AtomicBool,
 }
 
 impl Dependency {
@@ -366,18 +369,38 @@ impl Dependency {
         }
     }
 
+    /// Marks this dependency's downloads as installers to run rather than files to keep.
+    pub fn stage_downloads(&self) {
+        self.staged.store(true, Ordering::Relaxed);
+    }
+
     /// Records that a file reached its destination.
     pub fn saved(&self, path: &Path) {
+        // Just the file name: the row is narrow, every file of a dependency lands in the same
+        // folder anyway, and a staged installer's folder is about to be deleted.
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let staged = self.staged.load(Ordering::Relaxed);
         if self.animated {
-            // Just the file name: the row is narrow, and every file of a dependency lands in the
-            // same folder anyway.
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            self.status(format!("saved {name}"));
+            let verb = if staged { "downloaded" } else { "saved" };
+            self.status(format!("{verb} {name}"));
         } else if let Ok(mut pending) = self.pending.lock() {
-            pending.push(format!("Saved {}", path.display()));
+            pending.push(if staged {
+                format!("Downloaded {name}")
+            } else {
+                format!("Saved {}", path.display())
+            });
+        }
+    }
+
+    /// Adds an `INFO:` line to print when this dependency finishes, if nothing is animating.
+    pub fn note(&self, line: String) {
+        if !self.animated
+            && let Ok(mut pending) = self.pending.lock()
+        {
+            pending.push(line);
         }
     }
 

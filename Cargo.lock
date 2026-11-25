@@ -4479,6 +4479,8 @@ dependencies = [
  "tokio",
  "toml_edit",
  "windows-native-keyring-store",
+ "windows-registry",
+ "windows-sys 0.61.2",
  "yaml-edit",
  "zbus-secret-service-keyring-store",
  "zip",

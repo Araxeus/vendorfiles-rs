@@ -17,8 +17,9 @@ use crate::archive;
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
+use crate::installer::{self, Installed};
 use crate::lockfile::{
-    VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
+    LockFiles, VendorLock, config_files_to_lock_files, flat_files, mark_pending, previous_entry,
     retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
 use crate::model::{
@@ -61,6 +62,11 @@ pub struct Prepared {
     /// This dependency's line in the display. Shared because the download stage runs on its
     /// own task while `commit` waits to settle the same line.
     pub progress: Arc<progress::Dependency>,
+    /// For an installer that may not run, the config that asked for it.
+    pub refused_installer: Option<String>,
+    /// Where an installer is downloaded, outside the dependency folder. Set by [`download`] and
+    /// deleted once `commit` has run it.
+    pub staging: Option<tempfile::TempDir>,
 }
 
 impl Prepared {
@@ -172,6 +178,8 @@ impl Session {
             self.workspace.config.single_lockfile.is_some(),
         )
         .await;
+        let refused_installer = (dependency.installer.is_some() && !self.allow_installers)
+            .then(|| self.workspace.file.display_path());
 
         Prepared {
             dependency,
@@ -182,6 +190,8 @@ impl Session {
             needs_update,
             previous,
             progress,
+            refused_installer,
+            staging: None,
         }
     }
 
@@ -202,7 +212,9 @@ impl Session {
             needs_update,
             progress,
             folder,
-            previous: _,
+            previous,
+            refused_installer: _,
+            staging,
         } = prepared;
 
         if options.show_outdated_only {
@@ -219,6 +231,28 @@ impl Session {
             progress.up_to_date();
             return Ok(None);
         }
+
+        // Installers run here, one at a time in config order, while later downloads go on.
+        // Two installers at once fight over the Windows Installer lock, and a UAC prompt is
+        // easier to answer when it is the only one.
+        let installed = match &staging {
+            Some(staging) => {
+                progress.committing("running installer");
+                Some(
+                    run_installer(
+                        &dependency,
+                        &version,
+                        staging.path(),
+                        previous.as_ref(),
+                        &progress,
+                    )
+                    .await
+                    .map_err(|error| blame(&progress, error))?,
+                )
+            }
+            None => None,
+        };
+        drop(staging);
 
         // The lock entry is written last because it marks the install complete.
         let old_version = dependency.version.clone();
@@ -246,7 +280,12 @@ impl Session {
                 repository: (!dependency.is_url()).then(|| dependency.repository.clone()),
                 url: dependency.is_url().then(|| dependency.repository.clone()),
                 version: version.clone(),
-                files: config_files_to_lock_files(&dependency.files, &version),
+                files: if installed.is_some() {
+                    LockFiles::new()
+                } else {
+                    config_files_to_lock_files(&dependency.files, &version)
+                },
+                installed,
                 save_path,
                 pending: false,
             },
@@ -381,6 +420,10 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
         vendor_folder: dependency.vendor_folder.clone(),
         release_regex: dependency.release_regex.clone(),
         locked: dependency.locked.then_some(true),
+        installer: dependency
+            .installer
+            .as_ref()
+            .map(installer::InstallerOptions::as_key),
         ..RawDependency::default()
     };
     match &dependency.source {
@@ -420,9 +463,28 @@ fn outdated_line(dependency: &Dependency, new_version: &str) -> String {
 ///
 /// Returns whatever the downloads, the archive extraction or the pruning of the previous
 /// install produced.
-pub async fn download(github: Arc<GitHubClient>, prepared: Prepared) -> Result<Prepared> {
+pub async fn download(github: Arc<GitHubClient>, mut prepared: Prepared) -> Result<Prepared> {
     if !prepared.has_work() {
         return Ok(prepared);
+    }
+    if let Some(path) = &prepared.refused_installer {
+        let error = VendorError::InstallersNotAllowed {
+            name: prepared.dependency.name.clone(),
+            path: path.clone(),
+        };
+        return Err(blame(&prepared.progress, error));
+    }
+    if prepared.dependency.installer.is_some() {
+        match tempfile::Builder::new()
+            .prefix("vendorfiles-installer-")
+            .tempdir()
+        {
+            Ok(staging) => {
+                prepared.progress.stage_downloads();
+                prepared.staging = Some(staging);
+            }
+            Err(error) => return Err(blame(&prepared.progress, error.into())),
+        }
     }
     if let Err(error) = fetch_all(&github, &prepared).await {
         return Err(blame(&prepared.progress, error));
@@ -451,7 +513,12 @@ pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
         return Ok(());
     }
     prepared.progress.status("clearing previous install");
-    let incoming = config_files_to_lock_files(&prepared.dependency.files, &prepared.version);
+    // An installer's download never lands in the dependency folder, so it adds nothing to clear.
+    let incoming = if prepared.dependency.installer.is_some() {
+        LockFiles::new()
+    } else {
+        config_files_to_lock_files(&prepared.dependency.files, &prepared.version)
+    };
     let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
     let cleared = match marked {
         Ok(()) => {
@@ -472,16 +539,69 @@ pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
 /// Split out of [`download`] only so that a failure of any part of it is reported once, in one
 /// place, against the right dependency.
 async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
-    tokio::fs::create_dir_all(&prepared.folder).await?;
+    let folder = prepared
+        .staging
+        .as_ref()
+        .map_or(prepared.folder.as_path(), tempfile::TempDir::path);
+    tokio::fs::create_dir_all(folder).await?;
 
     download_all(
         github,
         &prepared.dependency,
-        &prepared.folder,
+        folder,
         &prepared.version,
         &prepared.progress,
     )
     .await
+}
+
+/// Runs a dependency's downloaded installer from `staging` and reports what it installed.
+async fn run_installer(
+    dependency: &Dependency,
+    version: &str,
+    staging: &Path,
+    previous: Option<&VendorLock>,
+    progress: &progress::Dependency,
+) -> Result<Installed> {
+    let Some(options) = dependency.installer.clone() else {
+        unreachable!("only an installer dependency is staged");
+    };
+    // Validation guarantees exactly one file.
+    let file = flat_files(&config_files_to_lock_files(&dependency.files, version))
+        .into_iter()
+        .next()
+        .ok_or_else(|| VendorError::InstallerNeedsOneFile {
+            name: dependency.name.clone(),
+            count: 0,
+        })?;
+    let path = anchor(staging, file.as_str());
+    let name = dependency.name.clone();
+    let previous = previous.and_then(|lock| lock.installed.clone());
+    let outcome = tokio::task::spawn_blocking(move || {
+        installer::install(&name, &path, &options, previous.as_ref())
+    })
+    .await
+    .map_err(|error| VendorError::Http(error.to_string()))??;
+    let installed = &outcome.installed;
+    progress.note(match (&installed.display_name, &installed.package) {
+        (Some(display), _) => format!("Ran the {} installer for {display}", installed.kind),
+        (None, Some(package)) => format!("Installed the {package} package"),
+        (None, None) => format!("Ran the {} installer", installed.kind),
+    });
+    if outcome.reboot {
+        ui::warning(format!(
+            "Restart Windows to finish installing {}",
+            dependency.name
+        ));
+    }
+    if outcome.installed.uninstall_key.is_none() && outcome.installed.package.is_none() {
+        ui::warning(format!(
+            "{} installed, but vendor could not find it in Apps & Features, so `vendor uninstall` \
+             cannot remove it",
+            dependency.name
+        ));
+    }
+    Ok(outcome.installed)
 }
 
 /// Marks a dependency's row failed and hands the error straight back.

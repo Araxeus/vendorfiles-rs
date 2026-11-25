@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::error::{Result, VendorError};
 use crate::fsx::anchor;
+use crate::installer;
 use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
 use crate::model::{Dependency, Repository, Source};
 use crate::ops::Session;
@@ -150,6 +151,12 @@ impl Session {
             if saved_folder(lock_dir, locked).as_deref() != Some(folder) {
                 return true;
             }
+        }
+        // An installer keeps no files. It is in place while the program it installed is, so one
+        // removed through Settings is installed again.
+        if dependency.installer.is_some() {
+            return !locked.files.is_empty()
+                || !locked.installed.as_ref().is_some_and(installer::is_present);
         }
         let expected = config_files_to_lock_files(&dependency.files, new_version);
         expected != locked.files

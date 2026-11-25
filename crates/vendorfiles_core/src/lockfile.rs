@@ -33,6 +33,10 @@ pub struct VendorLock {
     pub url: Option<String>,
     pub version: String,
     pub files: LockFiles,
+    /// What an installer put on the machine, for an `installer` dependency. Its `files` are then
+    /// empty, since nothing is kept in the dependency folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed: Option<crate::installer::Installed>,
     /// Where the dependency was installed, recorded only with `singleLockfile` (otherwise the
     /// lockfile's own folder is the dependency folder). Relative to the lockfile's folder when
     /// close to it or inside the project, absolute otherwise.
@@ -350,6 +354,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            installed: None,
             save_path: None,
             pending: false,
         };
@@ -372,6 +377,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            installed: None,
             save_path: None,
             pending: false,
         };
@@ -396,6 +402,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files, "1"),
+                installed: None,
                 save_path: None,
                 pending: false,
             },
@@ -421,6 +428,7 @@ mod tests {
             url: None,
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
+            installed: None,
             save_path: None,
             pending: false,
         };
@@ -459,6 +467,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
             },
@@ -509,6 +518,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
             },
@@ -578,6 +588,7 @@ mod tests {
                 url: None,
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
+                installed: None,
                 save_path: None,
                 pending: false,
             },

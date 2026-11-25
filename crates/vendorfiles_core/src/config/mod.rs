@@ -32,6 +32,9 @@ pub struct ConfigFileSettings {
     pub format: ConfigFormat,
     pub path: PathBuf,
     pub final_newline: String,
+    /// The user's own config: the one `-c` named or `DEFAULT_VENDOR_CONFIG` points at. Only this
+    /// one runs installers without `--allow-installers`, so a cloned project cannot.
+    pub personal: bool,
 }
 
 /// The config file: how to write it, and its editable contents.
@@ -94,7 +97,7 @@ impl Workspace {
     /// [`VendorError::ParseConfig`] when the file is malformed, or one of the `Invalid*Key`
     /// variants when a modelled key has the wrong type.
     pub async fn load(config_location: Option<&str>) -> Result<Self> {
-        let (path, text) = discover(config_location).await?;
+        let (path, text, personal) = discover(config_location).await?;
 
         let format = ConfigFormat::from_path(&path);
         let canonical = format.parse(&text, &path)?;
@@ -118,6 +121,7 @@ impl Workspace {
                     format,
                     path,
                     final_newline: format::final_newline(&text),
+                    personal,
                 },
                 document,
             },
@@ -135,7 +139,7 @@ impl Workspace {
     /// [`VendorError::ReadFile`] when the start path (or a set `DEFAULT_VENDOR_CONFIG`) does not
     /// exist.
     pub async fn locate(config_location: Option<&str>) -> Result<PathBuf> {
-        discover(config_location).await.map(|(path, _)| path)
+        discover(config_location).await.map(|(path, _, _)| path)
     }
 
     /// The folder a dependency's files are written to.
@@ -167,21 +171,40 @@ impl Workspace {
     }
 }
 
-/// Runs the config search, returning the file that wins it and the text it holds.
+/// Runs the config search, returning the file that wins it, the text it holds, and whether it is
+/// the user's own config (see [`ConfigFileSettings::personal`]).
 ///
 /// The one place the search order lives: the start path, then the search itself, then
 /// `DEFAULT_VENDOR_CONFIG` as a last resort.
-async fn discover(config_location: Option<&str>) -> Result<(PathBuf, String)> {
+async fn discover(config_location: Option<&str>) -> Result<(PathBuf, String, bool)> {
     let explicit = config_location.is_some_and(|location| !location.is_empty());
     let start = resolve_start_path(config_location);
     let folder = real_path(&start)?;
-    let found = match find_config_file(&folder).await {
-        found @ Some(_) => found,
+    let (path, text) = match find_config_file(&folder).await {
+        Some(found) => found,
         // An explicit `-c` names one config; silently using another would defeat it.
-        None if explicit => None,
-        None => default_config_file().await?,
+        None if explicit => return Err(VendorError::NoConfigFile),
+        None => {
+            let (path, text) = default_config_file()
+                .await?
+                .ok_or(VendorError::NoConfigFile)?;
+            return Ok((path, text, true));
+        }
     };
-    found.ok_or(VendorError::NoConfigFile)
+    // Running from the home folder finds the global config by searching, and it is still yours.
+    let personal = explicit
+        || matches!(
+            default_config_file().await,
+            Ok(Some((default, _))) if same_file(&default, &path)
+        );
+    Ok((path, text, personal))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 /// Resolves the folder (or file) the config search starts from.

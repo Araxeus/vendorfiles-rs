@@ -13,6 +13,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{Result, VendorError};
+use crate::installer::{InstallerKey, InstallerOptions};
+use crate::lockfile::{config_files_to_lock_files, flat_files};
 use crate::template::{
     basename, browsable_url, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url,
     uses_version,
@@ -309,9 +311,46 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub locked: Option<bool>,
+    /// Runs the one downloaded file as an installer instead of keeping it. Kept as written and
+    /// checked by [`RawDependency::installer`], so a mistyped key fails rather than vanishing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installer: Option<serde_json::Value>,
 }
 
 impl RawDependency {
+    /// What the `installer` key asks for, or `None` when it is absent or `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::InvalidInstallerKey`] when the key holds anything else.
+    pub fn installer(&self, name: &str) -> Result<Option<InstallerOptions>> {
+        let Some(value) = &self.installer else {
+            return Ok(None);
+        };
+        serde_json::from_value::<InstallerKey>(value.clone())
+            .map(|key| key.options())
+            .map_err(|_| VendorError::InvalidInstallerKey {
+                name: name.to_owned(),
+            })
+    }
+
+    /// Checks that an installer entry downloads exactly one file, the one that runs.
+    fn validate_installer(&self, name: &str) -> Result<()> {
+        if self.installer(name)?.is_none() {
+            return Ok(());
+        }
+        let files = config_files_to_lock_files(self.files.as_deref().unwrap_or_default(), "");
+        let count = flat_files(&files).len();
+        if count == 1 {
+            Ok(())
+        } else {
+            Err(VendorError::InstallerNeedsOneFile {
+                name: name.to_owned(),
+                count,
+            })
+        }
+    }
+
     /// Fills unset fields from the config's `default` block, matching the reference's `??=`.
     ///
     /// Keys that belong to one kind of dependency fill only that kind, so a default
@@ -417,7 +456,7 @@ impl RawDependency {
                 needs: "url",
             });
         }
-        Ok(())
+        self.validate_installer(name)
     }
 
     /// The checks for a `url` dependency, whose files are URLs rather than repository paths.
@@ -508,7 +547,7 @@ impl RawDependency {
         if mentions_version && !versioned {
             return Err(VendorError::UrlNeedsVersion { name: name() });
         }
-        Ok(())
+        self.validate_installer(&name())
     }
 
     /// Whether this is a `url` dependency rather than a GitHub one.
@@ -558,6 +597,7 @@ impl RawDependency {
             fallback_name.to_owned()
         };
 
+        let installer = self.installer(&name)?;
         Ok(Dependency {
             name,
             source,
@@ -568,6 +608,7 @@ impl RawDependency {
             vendor_folder: self.vendor_folder.clone(),
             release_regex: self.release_regex.clone().filter(|r| !r.is_empty()),
             locked: self.locked.unwrap_or(false),
+            installer,
         })
     }
 }
@@ -594,6 +635,8 @@ pub struct Dependency {
     pub vendor_folder: Option<String>,
     pub release_regex: Option<String>,
     pub locked: bool,
+    /// Run the downloaded file as an installer, with these options.
+    pub installer: Option<InstallerOptions>,
 }
 
 impl Dependency {
@@ -948,6 +991,34 @@ mod tests {
             err(r#"{"url":"https://x.io/v{version}","files":[{"{url}":"a"}]}"#),
             "vendorDependencies.Foo uses {version} or {tag} but sets neither 'version' nor 'versionUrl'"
         );
+    }
+
+    #[test]
+    fn an_installer_runs_exactly_one_file_and_its_key_is_checked() {
+        let base = r#""repository":"https://github.com/a/b","installer":true"#;
+        dep(&format!(r#"{{{base},"files":"{{release}}/setup.exe"}}"#))
+            .validate("Foo")
+            .unwrap();
+        // One member out of an archive is one file too.
+        dep(&format!(
+            r#"{{{base},"files":{{"{{release}}/a.zip":["setup.exe"]}}}}"#
+        ))
+        .validate("Foo")
+        .unwrap();
+        assert_eq!(
+            err(&format!(r#"{{{base},"files":["a.exe","b.exe"]}}"#)),
+            "vendorDependencies.Foo sets 'installer', so its files must name exactly one file to run (they name 2)"
+        );
+        assert_eq!(
+            err(
+                r#"{"repository":"https://github.com/a/b","files":"a","installer":{"silent":true}}"#
+            ),
+            "config key 'vendorDependencies.Foo.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or { type, args, scope }"
+        );
+        // `false` turns it off, so several files are fine again.
+        dep(r#"{"repository":"https://github.com/a/b","files":["a","b"],"installer":false}"#)
+            .validate("Foo")
+            .unwrap();
     }
 
     #[test]
