@@ -62,6 +62,11 @@
 # explains each key. A `url` program needs `version: 3` below, so older builds say to update rather
 # than fail on a key they don't know.
 #
+# `installer` runs the one asset silently on Windows instead of keeping it. `true` detects the
+# type, a name sets it (nsis, inno, msi, msix, exe), and `{ type, args, scope }` adds arguments. Each host must
+# download exactly one file. List only programs that do not update themselves, since vendor tracks
+# the version it installed. Needs `version: 3`.
+#
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
 
@@ -998,3 +1003,63 @@ programs:
     targets:
       windows-x86_64: win64
       windows-aarch64: win64a
+
+  # Installers. `installer: true` runs the one asset silently instead of keeping it, and vendor
+  # tracks the program through its Apps & Features entry. Windows only, and only programs that
+  # do not update themselves, so the version vendor records stays true.
+  audio-bartender:
+    description: "Tray volume control with per-app volume, level meters and media keys"
+    repository: https://github.com/Araxeus/Audio-Bartender
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/AudioBartender-setup.exe"
+
+  winkey-startmenu-disabler:
+    description: "Stop the Windows key opening Start while keeping Win key shortcuts"
+    repository: https://github.com/Araxeus/winkey-startmenu-disabler
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/winkey-startmenu-disabler-setup.exe"
+
+  qbittorrent:
+    description: "BitTorrent client with a built-in search engine and no ads"
+    repository: https://github.com/qbittorrent/qBittorrent
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/qbittorrent_{version}_x64_setup.exe"
+
+  # Tags carry four parts (10.0.6.906) and {version} keeps only three, so the asset uses {tag}.
+  imageglass:
+    description: "Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC"
+    repository: https://github.com/d2phap/ImageGlass
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ImageGlass_{tag}_win-x64.msix"
+      windows-aarch64:
+        asset: "{release}/ImageGlass_{tag}_win-arm64.msix"
+
+  # The per-user setup installs without admin.
+  winmerge:
+    description: "Visual diff and merge tool that compares files and folders"
+    repository: https://github.com/WinMerge/winmerge
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/WinMerge-{version}-x64-PerUser-Setup.exe"
+
+  # Not on GitHub. The download page links the setup as wiztree_4_34_setup.exe, so the version
+  # is that underscored pair.
+  wiztree:
+    description: "Disk space analyzer that finds what fills a drive, fast"
+    url: https://diskanalyzer.com/files/wiztree_{version}_setup.exe
+    versionUrl: https://diskanalyzer.com/download
+    versionRegex: 'wiztree_(\d+_\d+)_setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: wiztree_setup.exe

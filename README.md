@@ -1816,13 +1816,14 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (57)</summary>
+<summary>Programs you can add by name (63)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
 | [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
 | [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
+| [audio-bartender](https://github.com/Araxeus/Audio-Bartender) |  | Tray volume control with per-app volume, level meters and media keys | Windows x64 |
 | [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
 | [biome](https://github.com/biomejs/biome) |  | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI | All |
@@ -1849,6 +1850,7 @@ list is out of date.
 | [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
+| [imageglass](https://github.com/d2phap/ImageGlass) |  | Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC | Windows |
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
 | [kubectl](https://dl.k8s.io/) | `k8s` | Kubernetes CLI for deploying apps and managing clusters, pods and logs | All |
@@ -1860,6 +1862,7 @@ list is out of date.
 | [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
 | [pinact](https://github.com/suzuki-shunsuke/pinact) |  | Pin GitHub Actions and workflows to commit SHAs and update versions | All |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
+| [qbittorrent](https://github.com/qbittorrent/qBittorrent) |  | BitTorrent client with a built-in search engine and no ads | Windows x64 |
 | [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
 | [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
@@ -1872,6 +1875,9 @@ list is out of date.
 | [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
 | [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
 | [vault](https://releases.hashicorp.com/) |  | HashiCorp secrets manager CLI and server for keys, tokens and passwords | Windows x64, macOS, Linux |
+| [winkey-startmenu-disabler](https://github.com/Araxeus/winkey-startmenu-disabler) |  | Stop the Windows key opening Start while keeping Win key shortcuts | Windows x64 |
+| [winmerge](https://github.com/WinMerge/winmerge) |  | Visual diff and merge tool that compares files and folders | Windows x64 |
+| [wiztree](https://diskanalyzer.com/) |  | Disk space analyzer that finds what fills a drive, fast | Windows x64 |
 | [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
 | [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |
 | [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
