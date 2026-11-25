@@ -39,6 +39,10 @@ vendorfiles-rs/
 │   │       ├── archive.rs    # magic-byte sniffing + zip/tar/tar.gz/gz/crx extraction,
 │   │       │                 # selective by member with a full-extraction fallback
 │   │       ├── remote_zip.rs # HTTP-range reader: named members out of a remote ZIP
+│   │       ├── installer/    # `installer` dependencies: type detection, running, tracking
+│   │       │   ├── detect.rs # NSIS / Inno / MSI / MSIX by their bytes
+│   │       │   └── windows/  # silent switches, Apps & Features snapshots, the uninstallers
+│   │       │       └── shell.rs # ShellExecuteExW and process listing, the crate's only `unsafe`
 │   │       ├── url_source/   # URL dependencies: version lookup (page or git tags), credential-free fetch
 │   │       ├── github/
 │   │       │   ├── mod.rs    # GitHubClient: releases (cached), commits, search, downloads
@@ -642,3 +646,23 @@ code and the complete resulting file tree (including binary payloads). Covered:
    the entry's own repository and installs that one instead. A locked entry is refused, as
    `update` refuses it. The lockfile is written only alongside a config that describes the same
    install.
+25. **Installers.** A dependency with `installer` downloads its one file into a temporary folder,
+   runs it silently in `commit`, and deletes it. Running in `commit` is deliberate: commits are
+   already ordered and sequential, so installers run one at a time while later downloads carry
+   on, and two never fight over the Windows Installer lock or raise UAC prompts at once. The lock
+   entry keeps `files` empty and records an `installed` block instead. It holds the type and the
+   Apps & Features key the install created, found by diffing every `Uninstall` key before and
+   after. The
+   uninstall command is read from that key when needed, since upgrades rewrite it. An MSIX
+   package is tracked by its identity name. `needs_update` treats a program removed through
+   Settings as stale, so `sync` reinstalls it.
+   Installers launch through `ShellExecuteExW`, the one launcher that honours an executable's
+   manifest and raises UAC for an installer that needs admin. That needs `unsafe`, so the crate
+   moved from `forbid(unsafe_code)` to `deny`, with one module allowed. Inno and NSIS uninstallers
+   copy themselves to the temporary folder and exit, so an uninstall waits for any process that
+   started during it and runs from there. A dialog the silent switches cannot suppress then shows
+   as an uninstall still running, not a finished one.
+   Running an installer runs downloaded code, so only the user's own config runs one by default.
+   That is the config `-c` names or `DEFAULT_VENDOR_CONFIG` points at
+   (`ConfigFileSettings::personal`). A config found by
+   searching needs `--allow-installers`, so `git clone && vendor sync` cannot run anything.
