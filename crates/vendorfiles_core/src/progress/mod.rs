@@ -48,6 +48,17 @@ static ACTIVE: Mutex<Option<Sender<Command>>> = Mutex::new(None);
 /// Whether stderr is a terminal, worked out once.
 static STDERR_IS_TTY: OnceLock<bool> = OnceLock::new();
 
+/// The reasons failed rows have shown, so the command's own error line can skip a repeat.
+static SHOWN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Whether a failed row already showed this whole message.
+#[must_use]
+pub fn already_shown(message: &str) -> bool {
+    SHOWN
+        .lock()
+        .is_ok_and(|shown| shown.iter().any(|reason| reason == message))
+}
+
 /// Hands a command to the render thread, if one is running.
 fn dispatch(command: Command) -> bool {
     let Ok(active) = ACTIVE.lock() else {
@@ -443,8 +454,8 @@ impl Dependency {
     /// Ends because the dependency failed, saying briefly why.
     ///
     /// `reason` is a single line - [`VendorError::brief`](crate::VendorError::brief) produces
-    /// one. The full error still reaches the user as the command's `ERROR:` line; this is the
-    /// row, which used to read only "failed".
+    /// one. The command's `ERROR:` line carries the full error, unless it is exactly this line
+    /// (see [`already_shown`]).
     ///
     /// The plain line names the dependency, because nothing else in a piped run does. A `sync`
     /// stops at the first failure, so the log used to end with the successes and then a bare
@@ -452,6 +463,9 @@ impl Dependency {
     /// token, whose message mentions no repository, there was no way to tell from the text
     /// either.
     pub fn failed(&self, reason: &str) {
+        if let Ok(mut shown) = SHOWN.lock() {
+            shown.push(reason.to_owned());
+        }
         let name = self.linked(&self.name);
         self.finish(Outcome::Failed, reason.to_owned().into(), || {
             ui::error(format!("{name}: {reason}"));
@@ -795,6 +809,19 @@ mod tests {
         let dependency = reporter.dependency("micro");
         dependency.saved(Path::new("vendor/micro/LICENSE"));
         dependency.failed("GitHub rejected the credentials (401 Bad credentials).");
+    }
+
+    #[test]
+    fn only_a_message_a_row_showed_whole_counts_as_shown() {
+        let reporter = Reporter::new(false);
+        let dependency = reporter.dependency("qbittorrent");
+        let reason = "qBittorrent is running, so qbittorrent was not installed";
+        assert!(!super::already_shown(reason));
+        dependency.failed(reason);
+        assert!(super::already_shown(reason));
+        assert!(!super::already_shown(&format!(
+            "{reason}\nand a second line"
+        )));
     }
 
     #[test]
