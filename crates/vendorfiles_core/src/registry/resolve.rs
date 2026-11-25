@@ -519,6 +519,37 @@ targets:
 "#;
 
     #[test]
+    fn an_installer_program_downloads_exactly_one_file() {
+        let program = one_program(
+            r#"
+repository: https://github.com/a/b
+installer: { type: inno, scope: user }
+targets:
+  windows-x86_64: { asset: "{release}/setup-{version}.exe" }
+  windows-aarch64:
+    - { asset: "{release}/setup-arm64.exe" }
+    - { asset: "{release}/LICENSE" }
+"#,
+        );
+        let entry = for_host("app", &program, "windows-x86_64").unwrap();
+        let options = entry
+            .installer
+            .as_ref()
+            .and_then(crate::installer::InstallerKey::options)
+            .unwrap();
+        assert_eq!(options.kind, Some(crate::installer::InstallerKind::Inno));
+        assert_eq!(options.scope, Some(crate::installer::Scope::User));
+
+        let error = for_host("app", &program, "windows-aarch64").unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "'installer' runs one downloaded file, but target 'windows-aarch64' names 2"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn a_url_program_resolves_to_a_url_entry() {
         let entry = for_host("tool", &one_program(URL_PROGRAM), "linux-x86_64").unwrap();
         assert_eq!(entry.repository, None);
