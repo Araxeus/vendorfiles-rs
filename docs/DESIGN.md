@@ -658,8 +658,10 @@ code and the complete resulting file tree (including binary payloads). Covered:
    Settings as stale, so `sync` reinstalls it.
    An installer cannot replace a running program's files and often exits 0 regardless, leaving
    the old program under an updated Apps & Features entry. So before it runs, vendor looks for
-   processes started from the existing install's folder, and refuses while one runs. After it
-   runs, a program whose file version is unchanged and is not the release
+   processes started from the existing install's folder. It refuses while one runs, unless
+   `vendorConfig.relaunchPrograms` or the entry's `installer.relaunch` says to relaunch. Then it
+   closes them through the Restart Manager and starts them again afterwards, even when the
+   install fails. After it runs, a program whose file version is unchanged and is not the release
    fails the install. That file version only counts when it agreed with the entry's
    `DisplayVersion` beforehand, since some programs never bump it.
    Installers launch through `ShellExecuteExW`, the one launcher that honours an executable's

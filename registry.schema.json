@@ -260,6 +260,10 @@
             "scope": {
               "description": "Install for the current user only, or for every user of the machine (needs admin). Unset leaves it to the installer.",
               "enum": ["user", "machine"]
+            },
+            "relaunch": {
+              "description": "Close the program if it is running, and start it again once the install ends. Unset follows vendorConfig.relaunchPrograms.",
+              "type": "boolean"
             }
           }
         }

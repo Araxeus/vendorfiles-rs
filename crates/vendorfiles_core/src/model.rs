@@ -43,6 +43,9 @@ pub struct VendorConfig {
     /// Folder holding the one `vendor-lock.json` shared by every dependency (`true` is `"."`).
     #[serde(rename = "singleLockfile", default)]
     pub single_lockfile: Option<String>,
+    /// Close a running program before its installer runs, and start it again after.
+    #[serde(rename = "relaunchPrograms", default)]
+    pub relaunch_programs: bool,
 }
 
 impl Default for VendorConfig {
@@ -50,6 +53,7 @@ impl Default for VendorConfig {
         Self {
             vendor_folder: "./vendor".to_owned(),
             single_lockfile: None,
+            relaunch_programs: false,
         }
     }
 }
@@ -1013,7 +1017,7 @@ mod tests {
             err(
                 r#"{"repository":"https://github.com/a/b","files":"a","installer":{"silent":true}}"#
             ),
-            "config key 'vendorDependencies.Foo.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or { type, args, scope }"
+            "config key 'vendorDependencies.Foo.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or { type, args, scope, relaunch }"
         );
         // `false` turns it off, so several files are fine again.
         dep(r#"{"repository":"https://github.com/a/b","files":["a","b"],"installer":false}"#)

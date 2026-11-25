@@ -157,7 +157,7 @@ pub enum VendorError {
 
     // ---- installers ----------------------------------------------------------------
     #[error(
-        "config key 'vendorDependencies.{name}.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or {{ type, args, scope }}"
+        "config key 'vendorDependencies.{name}.installer' must be true, an installer type (nsis, inno, msi, msix, exe), or {{ type, args, scope, relaunch }}"
     )]
     InvalidInstallerKey { name: String },
 
@@ -193,7 +193,9 @@ pub enum VendorError {
     #[error("Could not install {name}: {message}")]
     InstallerError { name: String, message: String },
 
-    #[error("{program} is running, so {name} was not installed. Close it and try again")]
+    #[error(
+        "{program} is running, so {name} was not installed. Close it and try again, or set 'vendorConfig.relaunchPrograms' to true so vendor closes and reopens it"
+    )]
     InstallerBlocked { name: String, program: String },
 
     #[error("The admin prompt for {name} was declined, so nothing changed")]

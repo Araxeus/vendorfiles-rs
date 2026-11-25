@@ -1161,14 +1161,22 @@ vendor detects the installer's type from the file:
 | `type` | One of the types above, when detection should not decide |
 | `args` | Extra arguments, passed after the silent switches exactly as written |
 | `scope` | `user` to install for you alone, `machine` for every user. Unset leaves it to the installer |
+| `relaunch` | Whether to close the program if it is running and start it again after. Unset follows `vendorConfig.relaunchPrograms` |
 
 An installer that needs admin rights raises the usual UAC prompt, and vendor waits for it.
 Installers run one at a time, in config order, while the other downloads carry on.
 
 An installer can't replace the files of a program that is running, and many report success
-anyway. So vendor won't install over a running program, and asks you to close it first. If the
-program's version hasn't changed after the installer exits, the install fails
-instead of being recorded.
+anyway. So vendor won't install over a running program, and asks you to close it first. Set
+`vendorConfig.relaunchPrograms: true` to have vendor do that for every installer. It asks the
+program to quit the way Windows does at shutdown, installs, and starts it again. An installer's
+own `relaunch` overrides the setting either way. If the program's version hasn't changed after
+the installer exits, the install fails instead of being recorded.
+
+```yml
+vendorConfig:
+  relaunchPrograms: true
+```
 
 Running an installer runs code from the internet, so vendor only runs installers from your own
 config, which is the one `-c` names or the one `DEFAULT_VENDOR_CONFIG` points at. A config vendor

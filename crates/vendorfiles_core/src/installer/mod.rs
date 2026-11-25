@@ -74,7 +74,7 @@ pub enum InstallerKey {
     Flag(bool),
     /// `installer: inno` names the type outright.
     Kind(InstallerKind),
-    /// `installer: { type, args, scope }`.
+    /// `installer: { type, args, scope, relaunch }`.
     Options(InstallerOptions),
 }
 
@@ -107,6 +107,10 @@ pub struct InstallerOptions {
     /// Who the install is for. Unset leaves it to the installer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
+    /// Close the program if it is running, and start it again once the install ends. Unset
+    /// follows `vendorConfig.relaunchPrograms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relaunch: Option<bool>,
 }
 
 impl InstallerOptions {
@@ -118,11 +122,13 @@ impl InstallerOptions {
                 kind: None,
                 args,
                 scope: None,
+                relaunch: None,
             } if args.is_empty() => serde_json::Value::Bool(true),
             Self {
                 kind: Some(kind),
                 args,
                 scope: None,
+                relaunch: None,
             } if args.is_empty() => serde_json::Value::String(kind.name().to_owned()),
             full => serde_json::to_value(full).unwrap_or(serde_json::Value::Bool(true)),
         }
@@ -173,7 +179,7 @@ pub struct Outcome {
 /// # Errors
 ///
 /// Returns [`VendorError::NotAnInstaller`] when the type cannot be detected,
-/// [`VendorError::InstallerBlocked`] when the program is running,
+/// [`VendorError::InstallerBlocked`] when the program is running and `relaunch` is off,
 /// [`VendorError::InstallerFailed`] for a failing exit code,
 /// [`VendorError::InstallerError`] when the program is left at its old version,
 /// [`VendorError::InstallerDeclined`] when the UAC prompt was refused, or
@@ -302,6 +308,17 @@ mod tests {
         assert_eq!(full.kind, Some(InstallerKind::Msi));
         assert_eq!(full.args, ["A=1"]);
         assert_eq!(full.scope, Some(Scope::User));
+    }
+
+    #[test]
+    fn relaunch_needs_the_full_form_and_round_trips() {
+        let options = key(r#"{"relaunch":true}"#).options().unwrap();
+        assert_eq!(options.relaunch, Some(true));
+        assert_eq!(options.as_key(), serde_json::json!({ "relaunch": true }));
+        assert_eq!(
+            InstallerOptions::default().as_key(),
+            serde_json::json!(true)
+        );
     }
 
     #[test]

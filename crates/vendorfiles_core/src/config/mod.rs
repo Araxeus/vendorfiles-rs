@@ -283,6 +283,12 @@ fn read_vendor_config(canonical: &serde_json::Value, path: &str) -> Result<Vendo
                 }
                 Some(_) => return Err(invalid()),
             }
+            match map.get("relaunchPrograms") {
+                None => {}
+                Some(serde_json::Value::Bool(relaunch)) => config.relaunch_programs = *relaunch,
+                Some(v) if is_falsy(v) => {}
+                Some(_) => return Err(invalid()),
+            }
             Ok(config)
         }
         Some(_) => Err(invalid()),
@@ -492,6 +498,24 @@ mod tests {
     }
 
     #[test]
+    fn relaunch_programs_is_off_unless_set() {
+        let read = |json: &str| {
+            read_vendor_config(&value(json), "p")
+                .unwrap()
+                .relaunch_programs
+        };
+        assert!(!read(r#"{"vendorConfig": {}}"#));
+        assert!(read(r#"{"vendorConfig": {"relaunchPrograms": true}}"#));
+        assert!(
+            read_vendor_config(
+                &value(r#"{"vendorConfig": {"relaunchPrograms": "yes"}}"#),
+                "p"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn single_lockfile_accepts_true_or_a_path() {
         let read = |json: &str| {
             read_vendor_config(&value(json), "p")
@@ -582,6 +606,7 @@ mod tests {
         let config = VendorConfig {
             vendor_folder: "./vendor".to_owned(),
             single_lockfile: None,
+            relaunch_programs: false,
         };
         let config_path = Path::new("/proj/vendor.json");
         assert_eq!(
@@ -604,6 +629,7 @@ mod tests {
         let config = VendorConfig {
             vendor_folder: "/root/.local/bin".to_owned(),
             single_lockfile: None,
+            relaunch_programs: false,
         };
         let config_path = Path::new("/root/vendor.yml");
         let expected = Path::new("/root").join(".local").join("bin");
@@ -640,6 +666,7 @@ mod tests {
         let config = VendorConfig {
             vendor_folder: "/opt/./tools/../bin".to_owned(),
             single_lockfile: None,
+            relaunch_programs: false,
         };
         assert_eq!(
             dependency_folder(
@@ -658,6 +685,7 @@ mod tests {
         let config = VendorConfig {
             vendor_folder: "./vendor".to_owned(),
             single_lockfile: None,
+            relaunch_programs: false,
         };
         for folder in ["./vendor", "vendor", "../shared", "sub/dir"] {
             let resolved = dependency_folder(

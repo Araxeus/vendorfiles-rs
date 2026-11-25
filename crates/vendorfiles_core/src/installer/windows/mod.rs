@@ -47,18 +47,23 @@ pub fn install(
     let running = existing
         .as_ref()
         .and_then(arp::Entry::folder)
-        .is_some_and(|folder| runs_from(&folder));
-    if running {
-        return Err(VendorError::InstallerBlocked {
-            name: name.to_owned(),
-            program: existing
-                .as_ref()
-                .and_then(|entry| entry.name.clone())
-                .unwrap_or_else(|| name.to_owned()),
-        });
+        .map(|folder| running_from(&folder))
+        .unwrap_or_default();
+    if !running.is_empty() {
+        let program = existing
+            .as_ref()
+            .and_then(|entry| entry.name.clone())
+            .unwrap_or_else(|| name.to_owned());
+        if options.relaunch != Some(true) {
+            return Err(VendorError::InstallerBlocked {
+                name: name.to_owned(),
+                program,
+            });
+        }
+        close(name, &program, &running)?;
     }
 
-    run_install(
+    let outcome = run_install(
         name,
         path,
         version,
@@ -67,7 +72,9 @@ pub fn install(
         &before,
         existing.as_ref(),
         previous_key,
-    )
+    );
+    reopen(&running);
+    outcome
 }
 
 /// Runs the installer, then checks that the program it replaced really changed.
@@ -154,19 +161,70 @@ fn dotted(version: [u16; 4]) -> String {
     version.map(|part| part.to_string()).join(".")
 }
 
-/// Whether a process other than this one runs from inside `folder`.
-fn runs_from(folder: &Path) -> bool {
+/// A process running from a program's install folder.
+struct Running {
+    pid: u32,
+    parent: u32,
+    image: PathBuf,
+}
+
+/// Every process, other than this one, that runs from inside `folder`.
+fn running_from(folder: &Path) -> Vec<Running> {
     let lower = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
     let folder = lower(&std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_owned()));
     let own = std::process::id();
     shell::processes()
         .into_iter()
         .filter(|&(pid, _)| pid != own)
-        .filter_map(|(pid, _)| shell::image_path(pid))
-        .any(|image| {
-            let resolved = std::fs::canonicalize(&image).unwrap_or(image);
-            lower(&resolved).starts_with(&folder)
+        .filter_map(|(pid, parent)| {
+            let image = shell::image_path(pid)?;
+            let resolved = std::fs::canonicalize(&image).unwrap_or_else(|_| image.clone());
+            lower(&resolved)
+                .starts_with(&folder)
+                .then_some(Running { pid, parent, image })
         })
+        .collect()
+}
+
+/// How long a program gets to quit before the install gives up on it.
+const CLOSE_LIMIT: Duration = Duration::from_secs(30);
+
+/// Closes the running processes and waits until every one has exited.
+fn close(name: &str, program: &str, running: &[Running]) -> Result<()> {
+    let failed = |reason: String| VendorError::InstallerError {
+        name: name.to_owned(),
+        message: format!("could not close {program}: {reason}"),
+    };
+    let pids: Vec<u32> = running.iter().map(|process| process.pid).collect();
+    shell::close(&pids).map_err(|error| failed(error.to_string()))?;
+    let started = Instant::now();
+    while shell::processes().iter().any(|(pid, _)| pids.contains(pid)) {
+        if started.elapsed() > CLOSE_LIMIT {
+            return Err(failed("it is still running".to_owned()));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    Ok(())
+}
+
+/// Starts again the programs [`close`] closed. Child processes are left for their parent to start.
+fn reopen(running: &[Running]) {
+    let pids: HashSet<u32> = running.iter().map(|process| process.pid).collect();
+    let mut started = HashSet::new();
+    for process in running
+        .iter()
+        .filter(|process| !pids.contains(&process.parent))
+    {
+        if !started.insert(process.image.clone()) {
+            continue;
+        }
+        if let Err(error) = shell::start(&process.image) {
+            crate::ui::warning(format!(
+                "Could not start {} again: {error}",
+                process.image.display()
+            ));
+        }
+    }
 }
 
 /// The command that runs an installer of `kind` silently.

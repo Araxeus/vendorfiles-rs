@@ -1,8 +1,11 @@
-//! Starting programs through the shell, and reading their file versions.
+//! Starting programs through the shell, closing running ones, and reading file versions.
 //!
 //! `ShellExecuteExW` is the one launcher that honours an executable's manifest. An installer that
 //! requires admin gets the UAC prompt, where `CreateProcess` fails with error 740. It is also the
 //! only way to ask for elevation outright, which `msiexec` needs for a per-machine install.
+//!
+//! Running programs close through the Restart Manager, which asks them to quit the way Windows
+//! does at shutdown. Apps that hide in the tray on an ordinary close still quit for that.
 //!
 //! This is the only module in the crate allowed `unsafe`.
 
@@ -13,7 +16,7 @@ use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, GetLastError, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
 };
@@ -23,8 +26,12 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
+use windows_sys::Win32::System::RestartManager::{
+    CCH_RM_SESSION_KEY, RM_UNIQUE_PROCESS, RmEndSession, RmRegisterResources, RmShutdown,
+    RmStartSession,
+};
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, INFINITE, OpenProcess, PROCESS_NAME_WIN32,
+    GetExitCodeProcess, GetProcessTimes, INFINITE, OpenProcess, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
@@ -82,6 +89,103 @@ pub fn run(program: &OsStr, params: &str, elevate: bool) -> io::Result<u32> {
             return Err(error);
         }
         Ok(code)
+    }
+}
+
+/// Starts `program` from its own folder and returns without waiting for it.
+pub fn start(program: &Path) -> io::Result<()> {
+    let file = wide(program.as_os_str());
+    let folder = wide(program.parent().unwrap_or(program).as_os_str());
+    let verb = wide(OsStr::new("open"));
+
+    // SAFETY: every pointer handed to the shell points into a NUL-terminated buffer that lives
+    // until this block ends. No process handle is asked for, so there is none to close.
+    unsafe {
+        let _ = CoInitializeEx(
+            std::ptr::null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).cast_unsigned(),
+        );
+        let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
+        info.cbSize = u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX);
+        info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpDirectory = folder.as_ptr();
+        info.nShow = SW_SHOWNORMAL;
+        if ShellExecuteExW(&raw mut info) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+/// Asks the processes to quit, as Windows does at shutdown, and waits until they have.
+///
+/// A process that refuses, for example to ask about unsaved work, makes this fail.
+pub fn close(pids: &[u32]) -> io::Result<()> {
+    let processes: Vec<RM_UNIQUE_PROCESS> = pids
+        .iter()
+        .filter_map(|&pid| {
+            start_time(pid).map(|time| RM_UNIQUE_PROCESS {
+                dwProcessId: pid,
+                ProcessStartTime: time,
+            })
+        })
+        .collect();
+    if processes.is_empty() {
+        return Ok(());
+    }
+    let count = u32::try_from(processes.len()).unwrap_or(u32::MAX);
+    let check = |code: u32| match code {
+        0 => Ok(()),
+        code => Err(io::Error::from_raw_os_error(
+            i32::try_from(code).unwrap_or(i32::MAX),
+        )),
+    };
+
+    // SAFETY: the session key buffer has the documented length plus the terminator, the process
+    // list outlives the calls that read it, and the session is ended exactly once.
+    unsafe {
+        let mut session = 0u32;
+        let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+        check(RmStartSession(&raw mut session, 0, key.as_mut_ptr()))?;
+        let result = check(RmRegisterResources(
+            session,
+            0,
+            std::ptr::null(),
+            count,
+            processes.as_ptr(),
+            0,
+            std::ptr::null(),
+        ))
+        .and_then(|()| check(RmShutdown(session, 0, None)));
+        RmEndSession(session);
+        result
+    }
+}
+
+/// When a process started, which tells it apart from a later one given the same id.
+fn start_time(pid: u32) -> Option<FILETIME> {
+    // SAFETY: the process handle is checked before use and closed once. The four times are
+    // plain out-parameters.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut created = FILETIME::default();
+        let mut exited = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        let read = GetProcessTimes(
+            process,
+            &raw mut created,
+            &raw mut exited,
+            &raw mut kernel,
+            &raw mut user,
+        );
+        CloseHandle(process);
+        (read != 0).then_some(created)
     }
 }
 

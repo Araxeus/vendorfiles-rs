@@ -242,6 +242,7 @@ impl Session {
                     run_installer(
                         &dependency,
                         &version,
+                        self.workspace.config.relaunch_programs,
                         staging.path(),
                         previous.as_ref(),
                         &progress,
@@ -556,16 +557,21 @@ async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
 }
 
 /// Runs a dependency's downloaded installer from `staging` and reports what it installed.
+///
+/// `relaunch` is `vendorConfig.relaunchPrograms`, which the entry's own `installer.relaunch`
+/// overrides.
 async fn run_installer(
     dependency: &Dependency,
     version: &str,
+    relaunch: bool,
     staging: &Path,
     previous: Option<&VendorLock>,
     progress: &progress::Dependency,
 ) -> Result<Installed> {
-    let Some(options) = dependency.installer.clone() else {
+    let Some(mut options) = dependency.installer.clone() else {
         unreachable!("only an installer dependency is staged");
     };
+    options.relaunch = Some(options.relaunch.unwrap_or(relaunch));
     // Validation guarantees exactly one file.
     let file = flat_files(&config_files_to_lock_files(&dependency.files, version))
         .into_iter()
