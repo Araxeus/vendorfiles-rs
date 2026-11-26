@@ -78,10 +78,13 @@ fn table(registry: &Registry) -> Vec<String> {
             .as_deref()
             .unwrap_or_default()
             .replace('|', "\\|");
+        let mut platforms = platforms(program);
+        if program.is_installer() {
+            platforms.push_str(" (installer)");
+        }
         lines.push(format!(
-            "| [{name}]({}) | {aliases} | {description} | {} |",
+            "| [{name}]({}) | {aliases} | {description} | {platforms} |",
             program.link(),
-            platforms(program)
         ));
     }
     lines.push(String::new());
@@ -185,6 +188,25 @@ programs:
                 "| [delta](https://github.com/dandavison/delta) | `git-delta` | \
                  Pager for git \\| diff output | Windows x64, macOS arm64, Linux, linux-riscv64 |"
             ),
+            "{out}"
+        );
+        assert!(out.contains("| Smarter cd | All |"), "{out}");
+    }
+
+    #[test]
+    fn an_installer_says_so_beside_its_platforms() {
+        let registry = format!(
+            "{REGISTRY}  qbittorrent:
+    description: \"BitTorrent client\"
+    repository: https://github.com/qbittorrent/qBittorrent
+    installer: true
+    targets:
+      windows-x86_64: {{ asset: \"{{release}}/q.exe\" }}
+"
+        );
+        let out = regenerate(README, &registry).unwrap();
+        assert!(
+            out.contains("| BitTorrent client | Windows x64 (installer) |"),
             "{out}"
         );
         assert!(out.contains("| Smarter cd | All |"), "{out}");

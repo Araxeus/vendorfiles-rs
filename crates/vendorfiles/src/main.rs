@@ -96,7 +96,10 @@ async fn main() -> ExitCode {
     match run::dispatch(parsed).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            vendorfiles_core::ui::error(format!("{error}"));
+            let message = error.to_string();
+            if !vendorfiles_core::progress::already_shown(&message) {
+                vendorfiles_core::ui::error(message);
+            }
             ExitCode::from(FAILURE)
         }
     }

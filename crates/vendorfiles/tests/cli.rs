@@ -110,13 +110,33 @@ fn repad_columns(text: &str, column: usize) -> String {
 /// short form; `install` takes any number of sources, with the version moved out of its second
 /// operand into `source@version`; and `list`, `config` and `logout` are commands the reference
 /// never had, so the root help gains lines with nothing to compare against. Usage lines also
-/// list every alias, which widens the root help's first column.
+/// list every alias, which widens the root help's first column. `sync`, `update` and `install`
+/// take `--allow-installers`, which the reference never had either.
 fn expected_help(name: &str) -> String {
     let reference = fixture(name);
     match name {
         "root" => expected_root_help(&reference),
+        "sync" => reference.replace(
+            "  -f, --force  Force sync
+  -h, --help   display help for command",
+            &format!(
+                "{:<23}Force sync
+{:<23}{ALLOW_INSTALLERS}
+{:<23}display help for command",
+                "  -f, --force", "  --allow-installers", "  -h, --help"
+            ),
+        ),
         "update" => reference
-            .replace("  -p|--pr     ", &format!("{:<14}", "  --pr"))
+            .replace(
+                "  -p|--pr     Output pull request text for gh action (default: false)
+  -h, --help  display help for command",
+                &format!(
+                    "{:<23}Output pull request text for gh action (default: false)
+{:<23}{ALLOW_INSTALLERS}
+{:<23}display help for command",
+                    "  --pr", "  --allow-installers", "  -h, --help"
+                ),
+            )
             .replace(
                 "Usage: vendor update|upgrade ",
                 "Usage: vendor update|upgrade|bump|up|u ",
@@ -130,11 +150,22 @@ fn expected_help(name: &str) -> String {
             .replace(
                 "Uninstall all/selected dependencies",
                 "Uninstall the named dependencies",
+            )
+            .replace(
+                "Options:\n",
+                "Options:\n  --keep      Only remove them from the config, keeping files and programs\n",
+            )
+            .replace(
+                "    vendor remove React youtube-music\n",
+                "    vendor remove React youtube-music\n    vendor rm qbittorrent --keep\n",
             ),
         "install" => expected_install_help(&reference),
         _ => reference,
     }
 }
+
+/// What `--allow-installers` says in every help screen that lists it.
+const ALLOW_INSTALLERS: &str = "Run installers from a config that is not your own";
 
 /// The root help's deltas from the reference.
 ///
@@ -232,13 +263,16 @@ or name of repo to search for, and may pin a version as source@version.",
                 "{:<24}{}
 {:<24}{}
 {:<24}{}
+{:<24}{}
   -h, --help              display help for command",
                 "  --refresh",
                 "Re-check the program registry",
                 "  --dry-run",
                 "Print the entry, change nothing",
                 "  --list",
-                "List programs installable by name"
+                "List programs installable by name",
+                "  --allow-installers",
+                ALLOW_INSTALLERS
             ),
         )
         .replace(
@@ -361,7 +395,7 @@ fn the_script_covers_the_help_and_version_surface() {
         "vendor,help)",
         r#"opts="-c -p --config --plain sync update outdated install search uninstall list config login logout completions"#,
         // Each real subcommand takes `-h` too; `help` itself must not, `vendor help -h` fails.
-        r#"opts="-f -h -c -p --force --help --config --plain"#,
+        r#"opts="-f -h -c -p --force --allow-installers --help --config --plain"#,
     ] {
         assert!(
             script.contains(expected),
@@ -864,6 +898,23 @@ bare           -        -
         assert_eq!(stderr(&out), "", "stderr for `vendor {args:?}`");
         assert_eq!(code(&out), 0, "exit code for `vendor {args:?}`");
     }
+}
+
+#[test]
+fn list_adds_a_type_column_only_when_a_dependency_runs_an_installer() {
+    let dir = project(
+        r#"{ "vendorDependencies": {
+            "fd": { "version": "v10.0.0", "repository": "https://github.com/sharkdp/fd", "files": ["fd"] },
+            "qbittorrent": { "version": "release-5.3.1", "repository": "https://github.com/qbittorrent/qBittorrent",
+                "files": ["{release}/qbittorrent_{version}_x64_setup.exe"], "installer": true }
+        } }"#,
+    );
+    let expected = "\u{1b}[36mNAME         VERSION        TYPE       SOURCE\u{1b}[0m
+fd           v10.0.0        -          https://github.com/sharkdp/fd
+qbittorrent  release-5.3.1  installer  https://github.com/qbittorrent/qBittorrent
+";
+    let out = vendor(dir.path(), &["list"]);
+    assert_eq!(stdout(&out), expected, "{}", stderr(&out));
 }
 
 #[test]
@@ -1449,6 +1500,12 @@ programs:
       macos-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-aarch64: { asset: "{url}/urltool", as: urltool }
+  setuptool:
+    description: "A desktop program that ships a setup"
+    repository: https://github.com/example/setuptool
+    installer: true
+    targets:
+      windows-x86_64: { asset: "{release}/setuptool-setup.exe" }
 "#,
     )
     .expect("writing the registry");
@@ -1555,6 +1612,23 @@ fn search_marks_a_program_this_machine_cannot_install() {
 
     let available = stdout(&vendor_with_registry(dir.path(), &["search", "fd"]));
     assert!(!available.contains("(no "), "{available}");
+}
+
+#[test]
+fn search_marks_a_program_that_runs_an_installer() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let printed = stdout(&vendor_with_registry(dir.path(), &["search", "setup"]));
+    let row = printed
+        .lines()
+        .find(|line| line.contains("setuptool"))
+        .unwrap_or_else(|| panic!("{printed}"));
+    assert!(
+        row.contains("(installer)") || row.contains("(installer, no "),
+        "{row}"
+    );
+
+    let plain = stdout(&vendor_with_registry(dir.path(), &["search", "fd"]));
+    assert!(!plain.contains("installer"), "{plain}");
 }
 
 #[test]
@@ -1865,6 +1939,36 @@ fn uninstall_removes_files_the_config_entry_and_the_lockfile() {
 }
 
 #[test]
+fn uninstall_keep_drops_the_entries_and_leaves_the_files() {
+    let dir = up_to_date_project();
+    let before: Vec<_> = std::fs::read_dir(dir.path().join("vendor/Coloris"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != "vendor-lock.json")
+        .collect();
+    assert_ne!(before.len(), 0);
+
+    let out = vendor(dir.path(), &["uninstall", "Coloris", "--keep"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Removed Coloris from the config"),
+        "{}",
+        stdout(&out)
+    );
+    for name in before {
+        assert!(
+            dir.path().join("vendor/Coloris").join(&name).exists(),
+            "{name:?}"
+        );
+    }
+    assert!(!dir.path().join("vendor/Coloris/vendor-lock.json").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("vendor.json")).unwrap(),
+        "{\n  \"vendorDependencies\": {}\n}\n"
+    );
+}
+
+#[test]
 fn uninstall_rewrites_a_shared_lockfile_without_a_trailing_newline() {
     let dir = project(
         r#"{
@@ -2057,4 +2161,58 @@ fn outdated_leaves_stale_lock_entries_alone() {
         std::fs::read_to_string(folder.join("vendor-lock.json")).unwrap(),
         lock
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Installers
+// ---------------------------------------------------------------------------------------
+
+/// A config whose one dependency runs an installer from an address nothing listens on, so a run
+/// that gets past the gate fails at the download and nothing is ever executed.
+const INSTALLER_CONFIG: &str = r#"{"vendorDependencies":{"tool":{
+    "url":"http://127.0.0.1:9/setup.exe","version":"1",
+    "files":{"{url}":"setup.exe"},"installer":true
+}}}"#;
+
+const REFUSED: &str = "is not your global config, so vendor will not run it";
+
+#[test]
+fn a_project_config_found_by_searching_may_not_run_installers() {
+    let dir = project(INSTALLER_CONFIG);
+    let out = vendor(dir.path(), &["sync"]);
+    assert!(stderr(&out).contains(REFUSED), "{}", stderr(&out));
+    assert!(stderr(&out).contains("--allow-installers"));
+    assert_eq!(code(&out), 1);
+    assert!(!dir.path().join("vendor").exists());
+}
+
+#[test]
+fn allow_installers_or_the_users_own_config_passes_the_gate() {
+    let dir = project(INSTALLER_CONFIG);
+    let allowed = vendor(dir.path(), &["sync", "--allow-installers"]);
+    let named = vendor(dir.path(), &["-c", ".", "sync"]);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let fallback = vendor_with_default_config(elsewhere.path(), dir.path(), &["sync"]);
+    for out in [allowed, named, fallback] {
+        // Past the gate, the download to a closed port is what fails.
+        assert!(!stderr(&out).contains(REFUSED), "{}", stderr(&out));
+        assert_eq!(code(&out), 1);
+    }
+}
+
+#[test]
+fn an_installer_entry_must_name_exactly_one_file() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{
+            "url":"http://127.0.0.1:9","version":"1",
+            "files":{"{url}/a.exe":"a.exe","{url}/b.exe":"b.exe"},"installer":true
+        }}}"#,
+    );
+    let out = vendor(dir.path(), &["sync"]);
+    assert!(
+        stderr(&out).contains("must name exactly one file to run (they name 2)"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(code(&out), 1);
 }

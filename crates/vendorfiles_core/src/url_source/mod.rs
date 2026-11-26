@@ -28,8 +28,9 @@ const LS_TAGS_RESULT: &str = "application/x-git-upload-pack-result";
 const ADVERTISEMENT: &str = "application/x-git-upload-pack-advertisement";
 
 /// How long a whole version lookup may take, every request included. A host that hangs would
-/// otherwise stall the whole run.
-const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
+/// otherwise stall the whole run. It is generous because some sites are slow but do answer, and
+/// `diskanalyzer.com` often takes 30 to 45 seconds.
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// How much of a version page is read. A version sits near the top of anything sane.
 const MAX_VERSION_BODY: usize = 1 << 20;

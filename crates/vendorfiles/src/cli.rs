@@ -54,6 +54,9 @@ pub enum Command {
     Sync {
         #[arg(short = 'f', long = "force")]
         force: bool,
+        /// Run installers even though the config is not your own.
+        #[arg(long = "allow-installers")]
+        allow_installers: bool,
     },
 
     /// Update all/selected dependencies to their latest version.
@@ -65,6 +68,9 @@ pub enum Command {
         names: Vec<String>,
         #[arg(long = "pr")]
         pr: bool,
+        /// Run installers even though the config is not your own.
+        #[arg(long = "allow-installers")]
+        allow_installers: bool,
     },
 
     /// List outdated dependencies.
@@ -98,6 +104,9 @@ pub enum Command {
         /// given become the search terms.
         #[arg(long = "list")]
         list: bool,
+        /// Run installers even though the config is not your own.
+        #[arg(long = "allow-installers")]
+        allow_installers: bool,
     },
 
     /// Search the programs `install` knows by name.
@@ -116,7 +125,12 @@ pub enum Command {
         aliases = ["remove", "delete", "del", "rm"],
         disable_help_flag = true
     )]
-    Uninstall { names: Vec<String> },
+    Uninstall {
+        names: Vec<String>,
+        /// Only take them out of the config and lockfile, leaving files and programs in place.
+        #[arg(long)]
+        keep: bool,
+    },
 
     /// List the dependencies in the config file.
     #[command(alias = "ls", disable_help_flag = true)]
@@ -147,6 +161,26 @@ pub enum Command {
         #[arg(value_name = "shell")]
         shell: String,
     },
+}
+
+impl Command {
+    /// Whether the command line said to run installers from a config that is not the user's own.
+    #[must_use]
+    pub const fn allows_installers(&self) -> bool {
+        matches!(
+            self,
+            Self::Sync {
+                allow_installers: true,
+                ..
+            } | Self::Update {
+                allow_installers: true,
+                ..
+            } | Self::Install {
+                allow_installers: true,
+                ..
+            }
+        )
+    }
 }
 
 /// What `vendor config` was asked to do beyond naming the file.

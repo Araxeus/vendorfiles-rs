@@ -44,6 +44,7 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
   - [Versions and releases](#versions-and-releases)
   - [Downloading from other sites](#downloading-from-other-sites)
   - [Locking a dependency](#locking-a-dependency)
+  - [Installers](#installers)
   - [Default options](#default-options)
 - [Commands](#commands)
   - [Options for every command](#options-for-every-command)
@@ -333,6 +334,7 @@ files = ['cooltipz.min.css', 'LICENSE']
 | `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
 | `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
 | `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
+| `installer` | Run the downloaded file as an installer instead of keeping it ([details](#installers)) |
 | `url` | Where a dependency that isn't on GitHub downloads from ([details](#downloading-from-other-sites)) |
 | `versionUrl` | `url` dependencies only. Where the latest version comes from |
 | `versionRegex` | `url` dependencies only. Picks the version out of what `versionUrl` returns |
@@ -1088,6 +1090,108 @@ locked = true
 `vendor update` skips a locked dependency, and `vendor outdated` leaves it out. `vendor sync` still
 downloads its files if they're missing.
 
+### Installers
+
+On Windows, vendor can run an installer instead of keeping the file. Set `installer: true` on a
+dependency whose `files` names exactly one download, the setup program:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "winmerge": {
+            "repository": "https://github.com/WinMerge/winmerge",
+            "files": "{release}/WinMerge-{version}-x64-PerUser-Setup.exe",
+            "installer": true
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  winmerge:
+    repository: https://github.com/WinMerge/winmerge
+    files: '{release}/WinMerge-{version}-x64-PerUser-Setup.exe'
+    installer: true
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.winmerge]
+repository = 'https://github.com/WinMerge/winmerge'
+files = '{release}/WinMerge-{version}-x64-PerUser-Setup.exe'
+installer = true
+```
+
+</details>
+<!-- /formats -->
+
+`vendor sync` downloads the setup to a temporary folder, runs it silently, and deletes it. The
+lockfile records the program's Apps & Features entry instead of any files, and `vendor uninstall`
+runs its uninstaller silently. If you remove the program from Settings, the next `vendor sync`
+installs it again. `vendor update` installs a newer release over the old one.
+
+If the program is already installed at the release's version, vendor records that install and
+skips the installer, so adding a program you installed by hand raises no UAC prompt.
+`vendor sync --force` runs the installer anyway.
+
+vendor detects the installer's type from the file:
+
+| Type | Installers | Silent switches vendor adds |
+| --- | --- | --- |
+| `nsis` | Nullsoft (NSIS) | `/S` |
+| `inno` | Inno Setup | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` |
+| `msi` | Windows Installer | `msiexec /i … /qn /norestart` |
+| `msix` | MSIX and AppX packages | none, installed with `Add-AppxPackage` |
+| `exe` | anything else | none, so give the switches in `args` |
+
+`installer` also takes a type name, like `installer: inno`, or an object:
+
+| Key | What it holds |
+| --- | --- |
+| `type` | One of the types above, when detection should not decide |
+| `args` | Extra arguments, passed after the silent switches exactly as written |
+| `scope` | `user` to install for you alone, `machine` for every user. Unset leaves it to the installer |
+| `relaunch` | Whether to close the program if it is running and start it again after. Unset follows `vendorConfig.relaunchPrograms` |
+
+An installer that needs admin rights raises the usual UAC prompt, and vendor waits for it.
+Installers run one at a time, in config order, while the other downloads carry on. An installer
+or uninstaller that runs for 3 minutes may be stuck on a window the silent switches couldn't
+hide, so vendor says so and rings the terminal bell.
+
+An installer can't replace the files of a program that is running, and many report success
+anyway. So vendor won't install over a running program, and asks you to close it first. Set
+`vendorConfig.relaunchPrograms: true` to have vendor do that for every installer. It asks the
+program to quit the way Windows does at shutdown, installs, and starts it again. An installer's
+own `relaunch` overrides the setting either way. If the program's version hasn't changed after
+the installer exits, the install fails instead of being recorded.
+
+```yml
+vendorConfig:
+  relaunchPrograms: true
+```
+
+Running an installer runs code from the internet, so vendor only runs installers from your own
+config, which is the one `-c` names or the one `DEFAULT_VENDOR_CONFIG` points at. A config vendor
+finds by searching, like one in a project you cloned, needs `--allow-installers` on `sync`,
+`update` or `install`.
+
+Pick programs that do not update themselves. vendor records the version it installed, and a
+program that updates itself leaves that record behind.
+
 ### Default options
 
 A `default` object sets values for every dependency that doesn't set them itself.
@@ -1270,12 +1374,15 @@ the search works. `--refresh` checks the registry for changes first.
 ### `vendor uninstall`
 
 `vendor uninstall` deletes a dependency's files and removes it from the config and the lockfile.
+For an [installer](#installers), it runs the program's uninstaller instead. `--keep` only removes
+it from the config and the lockfile, and leaves its files or program in place.
 
 ---
 
 ### `vendor list`
 
-`vendor list` prints the dependencies in the config. `vendor config list` does the same.
+`vendor list` prints the dependencies in the config. `vendor config list` does the same. When the
+config has an [installer](#installers), a `TYPE` column marks which dependencies run one.
 
 ---
 
@@ -1393,7 +1500,8 @@ keeps working afterwards.
 
 `vendor search` lists every program the registry knows, and `vendor add --list` does the same. Add
 words to narrow the list. Each word has to match a program's name, an alias, a word in its
-description, or its repository. Name matches come first.
+description, or its repository. Name matches come first. A program that runs an
+[installer](#installers) is marked `(installer)`.
 
 ```bash
 vendor search          # everything

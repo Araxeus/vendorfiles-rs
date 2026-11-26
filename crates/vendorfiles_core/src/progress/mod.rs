@@ -48,6 +48,17 @@ static ACTIVE: Mutex<Option<Sender<Command>>> = Mutex::new(None);
 /// Whether stderr is a terminal, worked out once.
 static STDERR_IS_TTY: OnceLock<bool> = OnceLock::new();
 
+/// The reasons failed rows have shown, so the command's own error line can skip a repeat.
+static SHOWN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Whether a failed row already showed this whole message.
+#[must_use]
+pub fn already_shown(message: &str) -> bool {
+    SHOWN
+        .lock()
+        .is_ok_and(|shown| shown.iter().any(|reason| reason == message))
+}
+
 /// Hands a command to the render thread, if one is running.
 fn dispatch(command: Command) -> bool {
     let Ok(active) = ACTIVE.lock() else {
@@ -251,6 +262,7 @@ impl Reporter {
             state: Arc::clone(&self.state),
             pending: Mutex::new(Vec::new()),
             results: Arc::clone(&self.results),
+            staged: AtomicBool::new(false),
         }
     }
 }
@@ -274,6 +286,8 @@ pub struct Dependency {
     pending: Mutex<Vec<String>>,
     /// The run's outcome lines, printed together when the region comes down.
     results: Arc<Mutex<Vec<String>>>,
+    /// Downloads land in a temporary folder to be run, so they are not "saved" anywhere.
+    staged: AtomicBool,
 }
 
 impl Dependency {
@@ -347,7 +361,7 @@ impl Dependency {
     /// Counts bytes that just arrived, against this dependency and the run.
     fn advance(&self, amount: u64) {
         if let Ok(mut state) = self.state.lock() {
-            state.bytes += amount;
+            state.add_bytes(amount);
             if let Some(Stage::Active { bytes, .. }) = state.stage_mut(self.id) {
                 bytes.done += amount;
             }
@@ -366,18 +380,38 @@ impl Dependency {
         }
     }
 
+    /// Marks this dependency's downloads as installers to run rather than files to keep.
+    pub fn stage_downloads(&self) {
+        self.staged.store(true, Ordering::Relaxed);
+    }
+
     /// Records that a file reached its destination.
     pub fn saved(&self, path: &Path) {
+        // Just the file name: the row is narrow, every file of a dependency lands in the same
+        // folder anyway, and a staged installer's folder is about to be deleted.
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let staged = self.staged.load(Ordering::Relaxed);
         if self.animated {
-            // Just the file name: the row is narrow, and every file of a dependency lands in the
-            // same folder anyway.
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            self.status(format!("saved {name}"));
+            let verb = if staged { "downloaded" } else { "saved" };
+            self.status(format!("{verb} {name}"));
         } else if let Ok(mut pending) = self.pending.lock() {
-            pending.push(format!("Saved {}", path.display()));
+            pending.push(if staged {
+                format!("Downloaded {name}")
+            } else {
+                format!("Saved {}", path.display())
+            });
+        }
+    }
+
+    /// Adds an `INFO:` line to print when this dependency finishes, if nothing is animating.
+    pub fn note(&self, line: String) {
+        if !self.animated
+            && let Ok(mut pending) = self.pending.lock()
+        {
+            pending.push(line);
         }
     }
 
@@ -417,11 +451,25 @@ impl Dependency {
         });
     }
 
+    /// Ends because the dependency left the config, while its files or program stayed.
+    pub fn forgotten(&self) {
+        let name = self.name.clone();
+        self.finish(
+            Outcome::Changed,
+            "removed from the config only".into(),
+            || {
+                ui::success(format!(
+                    "Removed {name} from the config, and left everything it installed"
+                ));
+            },
+        );
+    }
+
     /// Ends because the dependency failed, saying briefly why.
     ///
     /// `reason` is a single line - [`VendorError::brief`](crate::VendorError::brief) produces
-    /// one. The full error still reaches the user as the command's `ERROR:` line; this is the
-    /// row, which used to read only "failed".
+    /// one. The command's `ERROR:` line carries the full error, unless it is exactly this line
+    /// (see [`already_shown`]).
     ///
     /// The plain line names the dependency, because nothing else in a piped run does. A `sync`
     /// stops at the first failure, so the log used to end with the successes and then a bare
@@ -429,6 +477,9 @@ impl Dependency {
     /// token, whose message mentions no repository, there was no way to tell from the text
     /// either.
     pub fn failed(&self, reason: &str) {
+        if let Ok(mut shown) = SHOWN.lock() {
+            shown.push(reason.to_owned());
+        }
         let name = self.linked(&self.name);
         self.finish(Outcome::Failed, reason.to_owned().into(), || {
             ui::error(format!("{name}: {reason}"));
@@ -772,6 +823,19 @@ mod tests {
         let dependency = reporter.dependency("micro");
         dependency.saved(Path::new("vendor/micro/LICENSE"));
         dependency.failed("GitHub rejected the credentials (401 Bad credentials).");
+    }
+
+    #[test]
+    fn only_a_message_a_row_showed_whole_counts_as_shown() {
+        let reporter = Reporter::new(false);
+        let dependency = reporter.dependency("qbittorrent");
+        let reason = "qBittorrent is running, so qbittorrent was not installed";
+        assert!(!super::already_shown(reason));
+        dependency.failed(reason);
+        assert!(super::already_shown(reason));
+        assert!(!super::already_shown(&format!(
+            "{reason}\nand a second line"
+        )));
     }
 
     #[test]

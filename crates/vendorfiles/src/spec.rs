@@ -138,25 +138,41 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "sync",
         aliases: &["s"],
         max_operands: Some(0),
-        options: &[OptionSpec {
-            short: Some('f'),
-            long: "--force",
-            arity: Arity::None,
-            display: "-f, --force",
-        }],
+        options: &[
+            OptionSpec {
+                short: Some('f'),
+                long: "--force",
+                arity: Arity::None,
+                display: "-f, --force",
+            },
+            OptionSpec {
+                short: None,
+                long: "--allow-installers",
+                arity: Arity::None,
+                display: "--allow-installers",
+            },
+        ],
         help: include_str!("help/sync.txt"),
     },
     CommandSpec {
         name: "update",
         aliases: &["upgrade", "bump", "up", "u"],
         max_operands: None,
-        options: &[OptionSpec {
-            // No short: `-p` means `--plain` everywhere.
-            short: None,
-            long: "--pr",
-            arity: Arity::None,
-            display: "--pr",
-        }],
+        options: &[
+            OptionSpec {
+                // No short: `-p` means `--plain` everywhere.
+                short: None,
+                long: "--pr",
+                arity: Arity::None,
+                display: "--pr",
+            },
+            OptionSpec {
+                short: None,
+                long: "--allow-installers",
+                arity: Arity::None,
+                display: "--allow-installers",
+            },
+        ],
         help: include_str!("help/update.txt"),
     },
     CommandSpec {
@@ -202,6 +218,12 @@ pub const COMMANDS: &[CommandSpec] = &[
                 arity: Arity::None,
                 display: "--list",
             },
+            OptionSpec {
+                short: None,
+                long: "--allow-installers",
+                arity: Arity::None,
+                display: "--allow-installers",
+            },
         ],
         help: include_str!("help/install.txt"),
     },
@@ -221,7 +243,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "uninstall",
         aliases: &["remove", "delete", "del", "rm"],
         max_operands: None,
-        options: &[],
+        options: &[OptionSpec {
+            short: None,
+            long: "--keep",
+            arity: Arity::None,
+            display: "--keep",
+        }],
         help: include_str!("help/uninstall.txt"),
     },
     CommandSpec {

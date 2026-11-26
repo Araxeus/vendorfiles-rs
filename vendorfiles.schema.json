@@ -34,6 +34,10 @@
           "oneOf": [{ "type": "boolean" }, { "type": "string" }],
           "description": "Write every dependency to one vendor-lock.json instead of one per dependency folder. true places it next to the config file; a string names the folder (relative to the config file, or absolute). {vendorFolder} expands to the base vendor folder",
           "examples": [true, "./locks"]
+        },
+        "relaunchPrograms": {
+          "type": "boolean",
+          "description": "Close a running program before its installer runs, and start it again after. Without it, a running program stops the install. An installer's own relaunch overrides this"
         }
       },
       "additionalProperties": false
@@ -138,7 +142,8 @@
           "type": "boolean",
           "description": "When true, prevents this dependency from being updated by 'vendor update'. Useful for pinning specific versions",
           "default": false
-        }
+        },
+        "installer": { "$ref": "#/definitions/installer" }
       },
       "additionalProperties": false
     },
@@ -185,6 +190,37 @@
     "defaultOptions": {
       "description": "Default options that apply to all dependencies. Individual dependencies can override these values",
       "$ref": "#/definitions/vendorDependencyBase"
+    },
+    "installer": {
+      "description": "Run the one downloaded file as an installer instead of keeping it: `true` detects the type from the file, a type names it, and the object adds arguments and a scope. Windows only for now.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/definitions/installerType" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "$ref": "#/definitions/installerType" },
+            "args": {
+              "description": "Extra arguments, passed after the silent switches exactly as written.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "scope": {
+              "description": "Install for the current user only, or for every user of the machine (needs admin). Unset leaves it to the installer.",
+              "enum": ["user", "machine"]
+            },
+            "relaunch": {
+              "description": "Close the program if it is running, and start it again once the install ends. Unset follows vendorConfig.relaunchPrograms.",
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "installerType": {
+      "description": "The installer technology: Nullsoft (NSIS), Inno Setup, Windows Installer, an MSIX package, or another executable that runs with exactly the given args.",
+      "enum": ["nsis", "inno", "msi", "msix", "exe"]
     },
     "filesArray": {
       "type": "array",

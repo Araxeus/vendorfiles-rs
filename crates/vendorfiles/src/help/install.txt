@@ -15,6 +15,7 @@ Options:
   --refresh             Re-check the program registry
   --dry-run             Print the entry, change nothing
   --list                List programs installable by name
+  --allow-installers    Run installers from a config that is not your own
   -h, --help              display help for command
 
 Examples:

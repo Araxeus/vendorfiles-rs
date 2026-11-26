@@ -5,7 +5,11 @@
 //! testable - a frame is a function of a state, and both halves can be checked on their own.
 
 use std::borrow::Cow;
-use std::time::Instant;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+/// How far back the download speed looks.
+const RATE_WINDOW: Duration = Duration::from_secs(3);
 
 /// A dependency's position in the config file, which is also its identity here.
 pub type DepId = usize;
@@ -186,7 +190,9 @@ pub struct RunState {
     pub slots: Vec<Option<DepId>>,
     /// Bytes received across every dependency, for the footer.
     pub bytes: u64,
-    /// When the run started, for elapsed time and rate.
+    /// Bytes as they arrived over the last [`RATE_WINDOW`].
+    pub(super) samples: VecDeque<(Instant, u64)>,
+    /// When the run started, for elapsed time.
     pub started: Instant,
 }
 
@@ -200,6 +206,7 @@ impl Default for RunState {
             rows: 0,
             slots: Vec::new(),
             bytes: 0,
+            samples: VecDeque::new(),
             started: Instant::now(),
         }
     }
@@ -335,18 +342,54 @@ impl RunState {
         counts
     }
 
-    /// Bytes per second so far, or `None` before there is enough to divide by.
+    /// Counts bytes that just arrived.
+    pub fn add_bytes(&mut self, amount: u64) {
+        self.add_bytes_at(amount, Instant::now());
+    }
+
+    fn add_bytes_at(&mut self, amount: u64, now: Instant) {
+        self.bytes += amount;
+        self.samples.push_back((now, amount));
+        while self
+            .samples
+            .front()
+            .is_some_and(|&(at, _)| now.saturating_duration_since(at) > RATE_WINDOW)
+        {
+            self.samples.pop_front();
+        }
+    }
+
+    /// The download speed over the last few seconds, or `None` while nothing is downloading.
     #[must_use]
     pub fn rate(&self) -> Option<f64> {
-        let elapsed = self.started.elapsed().as_secs_f64();
-        if elapsed <= 0.05 || self.bytes == 0 {
+        self.rate_at(Instant::now())
+    }
+
+    fn rate_at(&self, now: Instant) -> Option<f64> {
+        let transferring = self
+            .deps
+            .iter()
+            .any(|dep| matches!(&dep.stage, Stage::Active { bytes, .. } if bytes.transferring()));
+        if !transferring {
             return None;
         }
+        let recent = self
+            .samples
+            .iter()
+            .filter(|&&(at, _)| now.saturating_duration_since(at) <= RATE_WINDOW);
+        let first = recent.clone().next()?.0;
+        let bytes: u64 = recent.map(|&(_, amount)| amount).sum();
+
+        // A download that started inside the window is measured from its start.
+        let span = now
+            .saturating_duration_since(first)
+            .max(Duration::from_millis(250));
+        let span = span.min(RATE_WINDOW).as_secs_f64();
         #[expect(
             clippy::cast_precision_loss,
             reason = "a throughput figure shown to one decimal place"
         )]
-        Some(self.bytes as f64 / elapsed)
+        Some(bytes as f64 / span)
     }
 
     /// How far through the run, for the summary bar.
@@ -612,6 +655,28 @@ mod tests {
         let counts = state.counts();
         assert_eq!(counts.waiting, 2);
         assert_eq!(counts.queued, 1);
+    }
+
+    #[test]
+    fn the_speed_covers_recent_bytes_and_only_while_downloading() {
+        let transfer = Bytes {
+            active: 1,
+            ..Bytes::default()
+        };
+        let mut state = state(vec![downloading(transfer)]);
+        let start = std::time::Instant::now();
+        let at = |secs: u64| start + std::time::Duration::from_secs(secs);
+        state.add_bytes_at(50_000, at(0));
+        for second in 9..=12 {
+            state.add_bytes_at(3000, at(second));
+        }
+        let rate = state.rate_at(at(12)).unwrap();
+        assert!((rate - 4000.0).abs() < 1.0, "{rate}");
+
+        *state.stage_mut(0).unwrap() = Stage::Committing {
+            label: Cow::Borrowed("running installer"),
+        };
+        assert_eq!(state.rate_at(at(13)), None);
     }
 
     #[test]

@@ -6,9 +6,11 @@ Arguments:
   names       Package names to uninstall
 
 Options:
+  --keep      Only remove them from the config, keeping files and programs
   -h, --help  display help for command
 
 Examples:
     vendor uninstall React
     vendor remove React youtube-music
+    vendor rm qbittorrent --keep
 

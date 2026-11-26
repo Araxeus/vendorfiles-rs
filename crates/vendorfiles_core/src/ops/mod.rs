@@ -29,6 +29,8 @@ pub struct Session {
     /// The live display. Animates only when stderr is a terminal, so piped runs still emit
     /// plain, ordered lines.
     pub progress: Arc<Reporter>,
+    /// Whether `installer` dependencies may run. On by default only for the user's own config.
+    pub allow_installers: bool,
 }
 
 impl Session {
@@ -43,6 +45,7 @@ impl Session {
     pub fn with_reporter(github: GitHubClient, workspace: Workspace, progress: Reporter) -> Self {
         Self {
             github: Arc::new(github),
+            allow_installers: workspace.file.settings.personal,
             workspace,
             progress: Arc::new(progress),
         }

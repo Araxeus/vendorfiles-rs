@@ -3,8 +3,9 @@ Usage: vendor sync|s [options]
 Sync all dependencies in the config file
 
 Options:
-  -f, --force  Force sync
-  -h, --help   display help for command
+  -f, --force          Force sync
+  --allow-installers   Run installers from a config that is not your own
+  -h, --help           display help for command
 
 Examples:
     vendor sync

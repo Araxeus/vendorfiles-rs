@@ -106,6 +106,12 @@ pub const PAGES: &[PageSpec] = &[
         "Keep a dependency at its current version so vendor update leaves it alone.",
     ),
     page(
+        "configuration/installers",
+        Some("Installers"),
+        Start::Heading("Installers"),
+        "Run a program's Windows installer silently, and uninstall it again, instead of keeping the file.",
+    ),
+    page(
         "configuration/defaults",
         Some("Defaults"),
         Start::Heading("Default options"),
@@ -193,6 +199,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/versions",
             "configuration/other-sites",
             "configuration/locking",
+            "configuration/installers",
             "configuration/defaults",
         ],
     ),
