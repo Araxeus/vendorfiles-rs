@@ -1659,7 +1659,10 @@ fn add_refuses_a_name_that_is_another_entrys_alias() {
             "--dry-run",
         ],
     ));
-    assert!(err.contains("'other' is already an alias of 'tool'"), "{err}");
+    assert!(
+        err.contains("'other' is already an alias of 'tool'"),
+        "{err}"
+    );
     assert!(!err.contains("Pass -n"), "{err}");
 }
 
