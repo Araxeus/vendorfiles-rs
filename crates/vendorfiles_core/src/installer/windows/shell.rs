@@ -40,7 +40,17 @@ use windows_sys::Win32::UI::Shell::{
     SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     ShellExecuteExW,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SHOW_WINDOW_CMD, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL,
+};
+
+/// How a launched program's window opens. Tests open it minimized and unfocused, so a test run
+/// never takes focus from the desktop.
+const SHOW: SHOW_WINDOW_CMD = if cfg!(test) {
+    SW_SHOWMINNOACTIVE
+} else {
+    SW_SHOWNORMAL
+};
 
 /// The Win32 error `ShellExecuteExW` reports when the UAC prompt is declined.
 pub const ERROR_CANCELLED: i32 = 1223;
@@ -77,7 +87,7 @@ pub fn run(
         info.lpVerb = verb.as_ptr();
         info.lpFile = file.as_ptr();
         info.lpParameters = params.as_ptr();
-        info.nShow = SW_SHOWNORMAL;
+        info.nShow = SHOW;
 
         if ShellExecuteExW(&raw mut info) == 0 {
             return Err(io::Error::from_raw_os_error(
@@ -121,7 +131,7 @@ pub fn start(program: &Path) -> io::Result<()> {
         info.lpVerb = verb.as_ptr();
         info.lpFile = file.as_ptr();
         info.lpDirectory = folder.as_ptr();
-        info.nShow = SW_SHOWNORMAL;
+        info.nShow = SHOW;
         if ShellExecuteExW(&raw mut info) == 0 {
             return Err(io::Error::last_os_error());
         }
