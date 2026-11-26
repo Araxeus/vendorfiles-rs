@@ -143,7 +143,19 @@
           "description": "When true, prevents this dependency from being updated by 'vendor update'. Useful for pinning specific versions",
           "default": false
         },
-        "installer": { "$ref": "#/definitions/installer" }
+        "installer": { "$ref": "#/definitions/installer" },
+        "alias": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "minItems": 1
+            }
+          ],
+          "description": "Other names for this dependency, usable wherever a command takes its name",
+          "examples": ["rg", ["rg", "ripgrep-cli"]]
+        }
       },
       "additionalProperties": false
     },
@@ -189,7 +201,8 @@
     },
     "defaultOptions": {
       "description": "Default options that apply to all dependencies. Individual dependencies can override these values",
-      "$ref": "#/definitions/vendorDependencyBase"
+      "allOf": [{ "$ref": "#/definitions/vendorDependencyBase" }],
+      "not": { "required": ["alias"] }
     },
     "installer": {
       "description": "Run the one downloaded file as an installer instead of keeping it: `true` detects the type from the file, a type names it, and the object adds arguments and a scope. Windows only for now.",

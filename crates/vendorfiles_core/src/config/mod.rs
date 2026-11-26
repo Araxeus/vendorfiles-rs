@@ -442,6 +442,30 @@ mod tests {
     }
 
     #[test]
+    fn the_config_schema_takes_an_alias_on_a_dependency_only() {
+        let validator = config_schema();
+        let dependency = |alias: serde_json::Value| {
+            serde_json::json!({ "vendorDependencies": { "tool": {
+                "repository": "https://github.com/a/b", "files": ["a"], "alias": alias,
+            } } })
+        };
+
+        assert!(validator.is_valid(&dependency(serde_json::json!("t"))));
+        assert!(validator.is_valid(&dependency(serde_json::json!(["t", "u"]))));
+        for invalid in [
+            serde_json::json!(7),
+            serde_json::json!(""),
+            serde_json::json!([]),
+        ] {
+            assert!(
+                !validator.is_valid(&dependency(invalid.clone())),
+                "{invalid}"
+            );
+        }
+        assert!(!validator.is_valid(&serde_json::json!({ "default": { "alias": "t" } })));
+    }
+
+    #[test]
     fn a_url_key_that_is_not_a_string_is_refused_by_name() {
         let message = |json: &str| {
             super::check_url_keys(&value(json))

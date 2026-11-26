@@ -431,6 +431,8 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
             .installer
             .as_ref()
             .map(installer::InstallerOptions::as_key),
+        alias: (!dependency.aliases.is_empty())
+            .then(|| crate::model::Aliases(dependency.aliases.clone())),
         ..RawDependency::default()
     };
     match &dependency.source {

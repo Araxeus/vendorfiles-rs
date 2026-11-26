@@ -385,6 +385,45 @@ pub struct RawDependency {
     /// checked by [`RawDependency::installer`], so a mistyped key fails rather than vanishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installer: Option<serde_json::Value>,
+    /// Other names a command accepts for this dependency.
+    #[serde(
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub alias: Option<Aliases>,
+}
+
+/// A dependency's other names, written as one string or a list of them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Aliases(pub Vec<String>);
+
+impl Serialize for Aliases {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        match self.0.as_slice() {
+            [one] => one.serialize(serializer),
+            many => many.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Aliases {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum OneOrMany {
+            One(String),
+            Many(Vec<String>),
+        }
+
+        Ok(match OneOrMany::deserialize(deserializer)? {
+            OneOrMany::One(one) => Self(vec![one]),
+            OneOrMany::Many(many) => Self(many),
+        })
+    }
 }
 
 impl RawDependency {
@@ -728,6 +767,7 @@ impl RawDependency {
             release_regex: self.release_regex.clone().filter(|r| !r.is_empty()),
             locked: self.locked.unwrap_or(false),
             installer,
+            aliases: self.alias.clone().unwrap_or_default().0,
         })
     }
 }
@@ -756,6 +796,8 @@ pub struct Dependency {
     pub locked: bool,
     /// Run the downloaded file as an installer, with these options.
     pub installer: Option<InstallerOptions>,
+    /// Other names a command accepts for this dependency.
+    pub aliases: Vec<String>,
 }
 
 impl Dependency {
@@ -801,10 +843,49 @@ impl Dependency {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileEntry, FileTarget, HashVersionFile, RawDependency, flatten_files};
+    use super::{Aliases, FileEntry, FileTarget, HashVersionFile, RawDependency, flatten_files};
 
     fn dep(json: &str) -> RawDependency {
         serde_json::from_str(json).expect("valid dependency")
+    }
+
+    #[test]
+    fn alias_reads_a_string_or_a_list() {
+        assert_eq!(
+            dep(r#"{"alias": "rg"}"#).alias,
+            Some(Aliases(vec!["rg".into()]))
+        );
+        assert_eq!(
+            dep(r#"{"alias": ["rg", "grep2"]}"#).alias,
+            Some(Aliases(vec!["rg".into(), "grep2".into()]))
+        );
+    }
+
+    #[test]
+    fn alias_writes_one_name_as_a_string_and_several_as_a_list() {
+        let one = RawDependency {
+            alias: Some(Aliases(vec!["rg".into()])),
+            ..RawDependency::default()
+        };
+        assert_eq!(
+            one.config_value().unwrap()["alias"],
+            serde_json::json!("rg")
+        );
+        let many = RawDependency {
+            alias: Some(Aliases(vec!["a".into(), "b".into()])),
+            ..RawDependency::default()
+        };
+        assert_eq!(
+            many.config_value().unwrap()["alias"],
+            serde_json::json!(["a", "b"])
+        );
+    }
+
+    #[test]
+    fn resolve_carries_the_aliases() {
+        let entry =
+            dep(r#"{"repository": "https://github.com/a/b", "files": ["x"], "alias": "bee"}"#);
+        assert_eq!(entry.resolve("b").unwrap().aliases, ["bee"]);
     }
 
     #[test]
