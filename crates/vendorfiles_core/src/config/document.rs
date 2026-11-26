@@ -167,7 +167,7 @@ impl ConfigDocument {
     /// Returns [`VendorError::SerializeConfig`] if the entry cannot be encoded, or if the
     /// document's root is not a table.
     pub fn upsert_dependency(&mut self, name: &str, dependency: &RawDependency) -> Result<()> {
-        let serialized = serde_json::to_value(dependency).map_err(|e| unwritable(name, e))?;
+        let serialized = dependency.config_value().map_err(|e| unwritable(name, e))?;
         match self {
             Self::Json(text) => edit_json(text, name, |root| {
                 let deps = root
@@ -185,7 +185,7 @@ impl ConfigDocument {
             }),
             Self::Yaml(text) => upsert_yaml(text, name, &serialized),
             Self::Toml(doc) => {
-                let table = toml_edit::ser::to_document(dependency)
+                let table = toml_edit::ser::to_document(&serialized)
                     .map_err(|e| unwritable(name, e))?
                     .as_table()
                     .clone();

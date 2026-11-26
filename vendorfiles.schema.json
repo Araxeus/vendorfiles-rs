@@ -238,16 +238,17 @@
       "oneOf": [
         {
           "type": "string",
-          "description": "Simple file path to download. Use {release}/ prefix for release assets, {version} for semver substitution and {tag} for the whole version",
+          "description": "Simple file path to download. Use {release}/ prefix for release assets, {version} for semver substitution and {tag} for the whole version. For a url dependency, a name that is not a URL is where its url download is saved",
           "examples": [
             "dist/coloris.min.js",
             "LICENSE",
-            "{release}/fzf-{version}-linux_amd64.tar.gz"
+            "{release}/fzf-{version}-linux_amd64.tar.gz",
+            "FPilot.exe"
           ]
         },
         {
           "type": "object",
-          "description": "File mapping object for renaming, moving, or extracting from archives. A url dependency maps each URL, often {url}, to its output name",
+          "description": "File mapping object for renaming, moving, or extracting from archives. A url dependency maps each URL, often {url}, to its output name. With no URL key, it maps members of the url download to names",
           "additionalProperties": {
             "$ref": "#/definitions/fileMapping"
           },

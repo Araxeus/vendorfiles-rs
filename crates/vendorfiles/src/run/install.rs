@@ -613,10 +613,12 @@ fn report_entry(
     let mut wrapper = serde_json::Map::new();
     wrapper.insert(
         name.to_owned(),
-        serde_json::to_value(entry).map_err(|source| VendorError::SerializeConfig {
-            path: name.to_owned(),
-            message: source.to_string(),
-        })?,
+        entry
+            .config_value()
+            .map_err(|source| VendorError::SerializeConfig {
+                path: name.to_owned(),
+                message: source.to_string(),
+            })?,
     );
     let rendered =
         serde_json::to_string_pretty(&serde_json::Value::Object(wrapper)).map_err(|source| {

@@ -127,6 +127,72 @@ pub fn flatten_files(files: &[FileEntry]) -> Vec<FileSpec> {
     out
 }
 
+/// The `files` key a `url` dependency's own download goes under.
+const URL_KEY: &str = "{url}";
+
+/// Whether a `url` dependency's file input names a URL, once `{url}` is expanded.
+fn is_url_input(input: &str, url: &str) -> bool {
+    is_http_url(&expand_url(input, url))
+}
+
+/// Expands a `url` dependency's short `files` into the full form, keyed by `{url}`.
+///
+/// The short form names no URL and describes the `{url}` download alone. A string is the name it
+/// saves under, and a map takes archive members to names. Returns `None` for any other `files`.
+#[must_use]
+pub fn expand_url_files(files: &[FileEntry], url: &str) -> Option<Vec<FileEntry>> {
+    // A `{release}/` key is a mistaken release asset, so it gets the "not a URL" error.
+    let short_key = |key: &str| !is_url_input(key, url) && !key.starts_with("{release}");
+    let target = match files {
+        [FileEntry::Simple(output)] if short_key(output) => FileTarget::Rename(output.clone()),
+        [FileEntry::Mapped(map)] if !map.is_empty() && map.keys().all(|key| short_key(key)) => {
+            let members = map
+                .iter()
+                .map(|(member, target)| match target {
+                    FileTarget::Rename(output) => Some((member.clone(), output.clone())),
+                    FileTarget::ExtractList(_) | FileTarget::ExtractMap(_) => None,
+                })
+                .collect::<Option<IndexMap<_, _>>>()?;
+            FileTarget::ExtractMap(members)
+        }
+        _ => return None,
+    };
+    Some(vec![FileEntry::Mapped(IndexMap::from([(
+        URL_KEY.to_owned(),
+        target,
+    )]))])
+}
+
+/// `files` as a config entry writes it.
+///
+/// A `url` dependency that downloads only `{url}` gets the short form, when it reads back the same.
+#[must_use]
+pub fn files_config_value(files: &[FileEntry], url: Option<&str>) -> serde_json::Value {
+    let full = || serde_json::to_value(files).unwrap_or_default();
+    let Some(url) = url else {
+        return full();
+    };
+    let [FileEntry::Mapped(map)] = files else {
+        return full();
+    };
+    let short = match (map.len(), map.get(URL_KEY)) {
+        (1, Some(FileTarget::Rename(output))) => FileEntry::Simple(output.clone()),
+        (1, Some(FileTarget::ExtractMap(members))) => FileEntry::Mapped(
+            members
+                .iter()
+                .map(|(member, output)| (member.clone(), FileTarget::Rename(output.clone())))
+                .collect(),
+        ),
+        _ => return full(),
+    };
+    let short = [short];
+    if expand_url_files(&short, url).as_deref() == Some(files) {
+        serde_json::to_value(&short[0]).unwrap_or_default()
+    } else {
+        full()
+    }
+}
+
 /// Whether an output name or archive member holds `{version}` or `{tag}`.
 fn target_uses_version(target: &FileTarget) -> bool {
     match target {
@@ -339,11 +405,11 @@ impl RawDependency {
     }
 
     /// Checks that an installer entry downloads exactly one file, the one that runs.
-    fn validate_installer(&self, name: &str) -> Result<()> {
+    fn validate_installer(&self, name: &str, files: &[FileEntry]) -> Result<()> {
         if self.installer(name)?.is_none() {
             return Ok(());
         }
-        let files = config_files_to_lock_files(self.files.as_deref().unwrap_or_default(), "");
+        let files = config_files_to_lock_files(files, "");
         let count = flat_files(&files).len();
         if count == 1 {
             Ok(())
@@ -382,6 +448,28 @@ impl RawDependency {
             );
         }
         fill!(files, version, vendor_folder, locked, name);
+        self.files = self.files.take().map(|files| self.url_files(files));
+    }
+
+    /// The entry as a config file writes it, with `files` in the short form where it fits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the serializer's error when the entry cannot be represented as JSON.
+    pub fn config_value(&self) -> serde_json::Result<serde_json::Value> {
+        let mut value = serde_json::to_value(self)?;
+        if let (Some(files), Some(slot)) = (&self.files, value.get_mut("files")) {
+            *slot = files_config_value(files, self.url.as_deref());
+        }
+        Ok(value)
+    }
+
+    /// `files` in the full form, expanding a `url` dependency's short form.
+    fn url_files(&self, files: Vec<FileEntry>) -> Vec<FileEntry> {
+        self.url
+            .as_deref()
+            .and_then(|url| expand_url_files(&files, url))
+            .unwrap_or(files)
     }
 
     /// Clears every field whose value the `default` block already supplies.
@@ -460,7 +548,7 @@ impl RawDependency {
                 needs: "url",
             });
         }
-        self.validate_installer(name)
+        self.validate_installer(name, self.files.as_deref().unwrap_or_default())
     }
 
     /// The checks for a `url` dependency, whose files are URLs rather than repository paths.
@@ -469,9 +557,7 @@ impl RawDependency {
         if !is_http_url(url) {
             return Err(VendorError::InvalidUrlKey { name: name() });
         }
-        let Some(files) = self.files.as_ref().filter(|f| !f.is_empty()) else {
-            return Err(VendorError::InvalidFilesKey { name: name() });
-        };
+        let (files, mentions_version) = self.checked_url_files(&name(), url)?;
         let hashes = match &self.hash_version_file {
             None | Some(HashVersionFile::Flag(false)) => false,
             Some(HashVersionFile::Path(path)) => !path.is_empty(),
@@ -523,11 +609,45 @@ impl RawDependency {
             return Err(VendorError::KeyNeedsPage { name: name(), key });
         }
 
+        let versioned =
+            self.version.as_deref().is_some_and(|v| !v.is_empty()) || self.version_url.is_some();
+        if mentions_version && !versioned {
+            return Err(VendorError::UrlNeedsVersion { name: name() });
+        }
+        self.validate_installer(&name(), &files)
+    }
+
+    /// `files` of a `url` dependency in the full form, and whether they use the version.
+    fn checked_url_files(&self, name: &str, url: &str) -> Result<(Vec<FileEntry>, bool)> {
+        let name = || name.to_owned();
+        let Some(files) = self.files.clone().filter(|f| !f.is_empty()) else {
+            return Err(VendorError::InvalidFilesKey { name: name() });
+        };
+        let inputs = || {
+            files.iter().flat_map(|entry| match entry {
+                FileEntry::Simple(input) => vec![input],
+                FileEntry::Mapped(map) => map.keys().collect(),
+            })
+        };
+        let files = match expand_url_files(&files, url) {
+            Some(full) => full,
+            // Names no URL, so it was meant as the short form.
+            None if !inputs().any(|i| is_url_input(i, url) || i.starts_with("{release}")) => {
+                return Err(VendorError::UrlFilesShortForm { name: name() });
+            }
+            None => files,
+        };
         // The lockfile names every file before anything is downloaded, so each input needs an
         // explicit output name. A URL's last segment is often a version or a bare `download`.
         let mut mentions_version = uses_version(url);
-        for entry in files {
+        for entry in &files {
             let map = match entry {
+                FileEntry::Simple(input) if !is_url_input(input, url) => {
+                    return Err(VendorError::UrlFileNotUrl {
+                        name: name(),
+                        input: input.clone(),
+                    });
+                }
                 FileEntry::Simple(input) => {
                     return Err(VendorError::UrlFileNeedsName {
                         name: name(),
@@ -546,12 +666,7 @@ impl RawDependency {
                 mentions_version |= uses_version(input) || target_uses_version(target);
             }
         }
-        let versioned =
-            self.version.as_deref().is_some_and(|v| !v.is_empty()) || self.version_url.is_some();
-        if mentions_version && !versioned {
-            return Err(VendorError::UrlNeedsVersion { name: name() });
-        }
-        self.validate_installer(&name())
+        Ok((files, mentions_version))
     }
 
     /// Whether this is a `url` dependency rather than a GitHub one.
@@ -606,7 +721,7 @@ impl RawDependency {
             name,
             source,
             repository,
-            files: self.files.clone().unwrap_or_default(),
+            files: self.url_files(self.files.clone().unwrap_or_default()),
             version: self.version.clone().filter(|v| !v.is_empty()),
             hash_version_file: self.hash_version_file.clone(),
             vendor_folder: self.vendor_folder.clone(),
@@ -1059,6 +1174,71 @@ mod tests {
         ] {
             dep(ok).validate("Foo").unwrap();
         }
+    }
+
+    #[test]
+    fn short_url_files_mean_the_url_download() {
+        for (short, full) in [
+            (r#""tool.exe""#, r#"[{"{url}":"tool.exe"}]"#),
+            (r#"["tool.exe"]"#, r#"[{"{url}":"tool.exe"}]"#),
+            (
+                r#"{"bin/a.dll":"a.dll"}"#,
+                r#"[{"{url}":{"bin/a.dll":"a.dll"}}]"#,
+            ),
+        ] {
+            let url = r#""url":"https://x.io/v{version}","version":"1.0.0""#;
+            let short = dep(&format!(r#"{{{url},"files":{short}}}"#));
+            let full = dep(&format!(r#"{{{url},"files":{full}}}"#));
+            short.validate("Foo").unwrap();
+            assert_eq!(
+                short.resolve("Foo").unwrap().files,
+                full.resolve("Foo").unwrap().files
+            );
+
+            let mut loaded = short.clone();
+            loaded.apply_defaults(&super::DefaultOptions::default());
+            assert_eq!(loaded.files, full.files, "{short:?}");
+        }
+    }
+
+    #[test]
+    fn short_url_files_refuse_what_they_cannot_mean() {
+        let err = |files: &str| {
+            dep(&format!(r#"{{"url":"https://x.io","files":{files}}}"#))
+                .validate("Foo")
+                .unwrap_err()
+                .to_string()
+        };
+        let short = "vendorDependencies.Foo.files names no URL";
+        assert!(err(r#"["a","b"]"#).starts_with(short));
+        assert!(err(r#"{"a.zip":["a"]}"#).starts_with(short));
+        assert_eq!(
+            err(r#"["a",{"{url}":"b"}]"#),
+            "'a' in vendorDependencies.Foo.files is not a URL"
+        );
+    }
+
+    #[test]
+    fn url_files_are_written_short_when_they_read_back_the_same() {
+        let written = |files: &str, url: Option<&str>| {
+            let files: Vec<FileEntry> = serde_json::from_str(files).unwrap();
+            super::files_config_value(&files, url).to_string()
+        };
+        let url = Some("https://x.io");
+        assert_eq!(written(r#"[{"{url}":"a"}]"#, url), r#""a""#);
+        assert_eq!(written(r#"[{"{url}":{"m":"a"}}]"#, url), r#"{"m":"a"}"#);
+        for full in [
+            r#"[{"{url}":["m"]}]"#,
+            r#"[{"{url}/a.js":"a"}]"#,
+            r#"[{"{url}":"a","https://cdn.x.io/b":"b"}]"#,
+            r#"[{"{url}":{"https://y.io/m":"a"}}]"#,
+        ] {
+            assert_eq!(written(full, url), full);
+        }
+        assert_eq!(written(r#"[{"{url}":"a"}]"#, None), r#"[{"{url}":"a"}]"#);
+
+        let entry = dep(r#"{"url":"https://x.io","files":[{"{url}":"a"}]}"#);
+        assert_eq!(entry.config_value().unwrap()["files"], "a");
     }
 
     #[test]
