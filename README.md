@@ -803,8 +803,8 @@ files = ['dist/coloris.min.js']
 
 ### Downloading from other sites
 
-A dependency that isn't on GitHub sets `url` instead of `repository`. Its files are URLs, and
-`{url}` in a file expands to the `url` value:
+A dependency that isn't on GitHub sets `url` instead of `repository`. When it downloads just that
+URL, `files` is the name to save it under:
 
 <!-- formats -->
 <details open>
@@ -817,7 +817,7 @@ A dependency that isn't on GitHub sets `url` instead of `repository`. Its files 
             "url": "https://filepilot.tech/download/v{version}",
             "versionUrl": "https://filepilot.tech/download/latest",
             "versionRegex": "v(\\d+\\.\\d+\\.\\d+)",
-            "files": { "{url}": "FPilot.exe" }
+            "files": "FPilot.exe"
         }
     }
 }
@@ -834,8 +834,7 @@ vendorDependencies:
     url: https://filepilot.tech/download/v{version}
     versionUrl: https://filepilot.tech/download/latest
     versionRegex: v(\d+\.\d+\.\d+)
-    files:
-      '{url}': FPilot.exe
+    files: FPilot.exe
 ```
 
 </details>
@@ -848,17 +847,20 @@ vendorDependencies:
 url = 'https://filepilot.tech/download/v{version}'
 versionUrl = 'https://filepilot.tech/download/latest'
 versionRegex = 'v(\d+\.\d+\.\d+)'
-
-[vendorDependencies.FilePilot.files]
-'{url}' = 'FPilot.exe'
+files = 'FPilot.exe'
 ```
 
 </details>
 <!-- /formats -->
 
-- Every file maps a URL to the name it's saved under, like `"files": { "{url}": "FPilot.exe" }`.
-- A file can also be a full URL, like `https://cdn.example.com/tool.js`.
-- Map a URL to a list or a map to [extract files from the archive](#extracting-files-from-archives).
+- `files` that names no URL describes the `url` download. A string is the name it's saved under,
+  and a map [extracts files from the archive](#extracting-files-from-archives), taking each member
+  to its name.
+- To download several URLs, map each one to its name, like
+  `"files": { "{url}/a.exe": "a.exe", "https://cdn.example.com/b.js": "b.js" }`. `{url}` in a
+  file expands to the `url` value.
+- Map a URL to a list to extract members under their own paths, like
+  `"files": { "{url}": ["bin/tool.exe"] }`.
 - `{version}` is the version's `x.y.z`, as for releases. `{tag}` is the version exactly as found,
   like `v1.2.3`.
 - `vendor` never sends your GitHub token to these sites.
@@ -984,7 +986,7 @@ NuGet lists every version of a package:
             "url": "https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}",
             "versionUrl": "https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json",
             "versionJsonPointer": "versions",
-            "files": { "{url}": { "runtimes/win-x64/native/libclang.dll": "libclang.dll" } }
+            "files": { "runtimes/win-x64/native/libclang.dll": "libclang.dll" }
         }
     }
 }
@@ -1002,8 +1004,7 @@ vendorDependencies:
     versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
     versionJsonPointer: versions
     files:
-      '{url}':
-        runtimes/win-x64/native/libclang.dll: libclang.dll
+      runtimes/win-x64/native/libclang.dll: libclang.dll
 ```
 
 </details>
@@ -1017,7 +1018,7 @@ url = 'https://www.nuget.org/api/v2/package/libclang.runtime.win-x64/{tag}'
 versionUrl = 'https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json'
 versionJsonPointer = 'versions'
 
-[vendorDependencies.libclang.files.'{url}']
+[vendorDependencies.libclang.files]
 'runtimes/win-x64/native/libclang.dll' = 'libclang.dll'
 ```
 
