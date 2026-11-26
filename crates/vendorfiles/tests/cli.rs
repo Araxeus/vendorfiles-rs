@@ -1379,6 +1379,24 @@ fn a_known_name_does_not_move_the_entry_already_under_it() {
 
     assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
     assert!(!stdout(&out).contains("vendorFolder"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("alias"), "{}", stdout(&out));
+}
+
+#[test]
+fn add_vendor_writes_its_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor(dir.path(), &["add", "vendor", "--dry-run"]);
+    let printed = stdout(&out);
+    assert!(
+        printed.contains("vendorfiles-rs would be added as"),
+        "{printed}{}",
+        stderr(&out)
+    );
+    assert!(printed.contains(r#""alias": ["#), "{printed}");
+    assert!(
+        printed.contains(r#""vendorfiles""#) && printed.contains(r#""vendor""#),
+        "{printed}"
+    );
 }
 
 #[test]
@@ -1522,6 +1540,7 @@ programs:
       plan9-x86_64:
         asset: "{release}/plan9-tool"
   urltool:
+    aliases: [ut]
     description: "A program served from its own website"
     url: https://x.io/dl/v{version}
     versionUrl: https://x.io/latest
@@ -1641,6 +1660,38 @@ fn add_refuses_a_name_that_is_another_entrys_alias() {
         ],
     ));
     assert!(err.contains("'other' is an alias of 'tool'"), "{err}");
+}
+
+#[test]
+fn add_writes_the_registry_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "rg", "--dry-run"]);
+    assert!(
+        stdout(&out).contains(r#""alias": "rg""#),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+}
+
+#[test]
+fn add_leaves_out_a_registry_alias_the_config_already_uses() {
+    let dir = project(r#"{"vendorDependencies":{"fdfind":{"url":"https://x.io/t","files":"t"}}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fd", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(!stdout(&out).contains("alias"), "{}", stdout(&out));
+}
+
+#[test]
+fn add_writes_a_url_program_s_registry_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "urltool", "--dry-run"]);
+    assert!(
+        stdout(&out).contains(r#""alias": "ut""#),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 use vendorfiles_core::error::VendorError;
-use vendorfiles_core::model::{DefaultOptions, HashVersionFile, RawDependency};
+use vendorfiles_core::model::{Aliases, DefaultOptions, HashVersionFile, RawDependency};
 use vendorfiles_core::template::{
     is_github_url, is_owner_repo_shorthand, owner_and_name_from_repo_url,
 };
@@ -240,19 +240,7 @@ async fn install(
     files: Option<Vec<String>>,
     preview: Preview,
 ) -> Result<()> {
-    // A bare alias means the entry it names, so the rest of `add` sees the real name.
-    let source = match session.workspace.dependency_name(source) {
-        Some(real)
-            if files.is_none()
-                && real != source
-                && !is_github_url(source)
-                && !is_owner_repo_shorthand(source) =>
-        {
-            real.to_owned()
-        }
-        _ => source.to_owned(),
-    };
-    let source = source.as_str();
+    let source = &real_source(&session.workspace, source, files.is_some());
     let Source {
         repository,
         known,
@@ -344,7 +332,13 @@ async fn install(
 
     let mut entry = merge_install_entry(existing, &session.workspace.defaults, repository, files);
     if !session.workspace.dependencies.contains_key(&name) {
-        fill_from_source(&mut entry, known.as_ref(), listed.as_ref());
+        fill_from_source(
+            &mut entry,
+            &session.workspace,
+            &name,
+            known.as_ref(),
+            listed.as_ref(),
+        );
     }
     let dependency = entry.resolve(&name)?;
 
@@ -371,7 +365,7 @@ async fn install(
 /// `owner/repo` to match a neighbour by.
 async fn install_listed_url(
     session: &mut Session,
-    listed: registry::Entry,
+    mut listed: registry::Entry,
     version: Option<String>,
     name: Option<String>,
     preview: Preview,
@@ -382,6 +376,7 @@ async fn install_listed_url(
         .unwrap_or_else(|| listed.name.clone());
     refuse_an_alias(&session.workspace, &name)?;
     let existing = session.workspace.dependencies.get(&name).cloned();
+    let new = existing.is_none();
 
     // `add` never repoints an entry, so a name holding a repository, or another `url`, is a
     // clash.
@@ -407,6 +402,7 @@ async fn install_listed_url(
     // An entry already in the config keeps what it says. The registry fills the rest.
     let existing = existing.unwrap_or_default();
     let installer = listed_installer(&listed);
+    let aliases = std::mem::take(&mut listed.aliases);
     let files = existing
         .files
         .clone()
@@ -428,6 +424,9 @@ async fn install_listed_url(
         installer: existing.installer.clone().or(installer),
         ..existing
     };
+    if new {
+        entry.alias = new_aliases(&session.workspace, &name, aliases);
+    }
     entry.apply_defaults(&session.workspace.defaults);
     entry.validate(&name)?;
     let dependency = entry.resolve(&name)?;
@@ -446,6 +445,22 @@ async fn install_listed_url(
         )
         .await?;
     Ok(())
+}
+
+/// The source `add` works from. A bare alias means the entry it names, so the rest of `add` sees
+/// the real name.
+fn real_source(workspace: &Workspace, source: &str, files_given: bool) -> String {
+    match workspace.dependency_name(source) {
+        Some(real)
+            if !files_given
+                && real != source
+                && !is_github_url(source)
+                && !is_owner_repo_shorthand(source) =>
+        {
+            real.to_owned()
+        }
+        _ => source.to_owned(),
+    }
 }
 
 /// Refuses `name` when it is another entry's alias, since an entry under it would clash.
@@ -542,9 +557,23 @@ fn chosen_files(
 /// Fills in what a known name or registry entry says about a new entry.
 fn fill_from_source(
     entry: &mut RawDependency,
+    workspace: &Workspace,
+    name: &str,
     known: Option<&known::Known>,
     listed: Option<&registry::Entry>,
 ) {
+    let offered = known
+        .map(|known| {
+            known
+                .aliases
+                .iter()
+                .map(|&alias| alias.to_owned())
+                .collect()
+        })
+        .or_else(|| listed.map(|listed| listed.aliases.clone()))
+        .unwrap_or_default();
+    entry.alias = new_aliases(workspace, name, offered);
+
     // Where a known dependency belongs, unless the config already says.
     if entry.vendor_folder.is_none()
         && let Some(known) = known
@@ -562,6 +591,15 @@ fn fill_from_source(
             entry.installer = listed_installer(listed);
         }
     }
+}
+
+/// The aliases a new entry under `name` takes from `offered`, leaving out any already in use.
+fn new_aliases(workspace: &Workspace, name: &str, offered: Vec<String>) -> Option<Aliases> {
+    let aliases: Vec<String> = offered
+        .into_iter()
+        .filter(|alias| alias != name && !workspace.is_taken(alias))
+        .collect();
+    (!aliases.is_empty()).then_some(Aliases(aliases))
 }
 
 /// A registry entry's `installer`, as the config writes it.

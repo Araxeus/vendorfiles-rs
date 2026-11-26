@@ -44,6 +44,7 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
   - [Versions and releases](#versions-and-releases)
   - [Downloading from other sites](#downloading-from-other-sites)
   - [Locking a dependency](#locking-a-dependency)
+  - [Aliases](#aliases)
   - [Installers](#installers)
   - [Default options](#default-options)
 - [Commands](#commands)
@@ -334,6 +335,7 @@ files = ['cooltipz.min.css', 'LICENSE']
 | `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
 | `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
 | `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
+| `alias` | Other names for the dependency, usable in any command ([details](#aliases)) |
 | `installer` | Run the downloaded file as an installer instead of keeping it ([details](#installers)) |
 | `url` | Where a dependency that isn't on GitHub downloads from ([details](#downloading-from-other-sites)) |
 | `versionUrl` | `url` dependencies only. Where the latest version comes from |
@@ -1090,6 +1092,68 @@ locked = true
 
 `vendor update` skips a locked dependency, and `vendor outdated` leaves it out. `vendor sync` still
 downloads its files if they're missing.
+
+### Aliases
+
+`alias` gives a dependency other names. It takes one name or a list:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "kubectl": {
+            "url": "https://dl.k8s.io/release/{tag}/bin/windows/amd64/kubectl.exe",
+            "versionUrl": "https://dl.k8s.io/release/stable.txt",
+            "files": "kubectl.exe",
+            "alias": ["k8s", "kc"]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  kubectl:
+    url: https://dl.k8s.io/release/{tag}/bin/windows/amd64/kubectl.exe
+    versionUrl: https://dl.k8s.io/release/stable.txt
+    files: kubectl.exe
+    alias:
+      - k8s
+      - kc
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.kubectl]
+url = 'https://dl.k8s.io/release/{tag}/bin/windows/amd64/kubectl.exe'
+versionUrl = 'https://dl.k8s.io/release/stable.txt'
+files = 'kubectl.exe'
+alias = ['k8s', 'kc']
+```
+
+</details>
+<!-- /formats -->
+
+- An alias works wherever a command takes a dependency name, so `vendor update k8s` updates
+  `kubectl`.
+- Each name and alias belongs to one dependency. A config where two share one doesn't load.
+- `alias` can't go in the `default` block, because an alias names one dependency.
+- `vendor add` copies a registry program's aliases into the entry it creates, leaving out any the
+  config already uses. `vendor add vendor` adds `vendorfiles-rs` with the aliases `vendorfiles`
+  and `vendor`.
+- The lockfile and the vendor folder use the dependency's own name.
 
 ### Installers
 

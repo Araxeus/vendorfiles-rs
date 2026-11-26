@@ -43,6 +43,8 @@ fn executable_suffix(host: &str) -> &'static str {
 pub struct Entry {
     /// The canonical name, which becomes the config key.
     pub name: String,
+    /// The program's other names, which a new config entry keeps.
+    pub aliases: Vec<String>,
     /// The repository to install from, for a GitHub program.
     pub repository: Option<String>,
     /// The `url` to install from, for a program that is not on GitHub.
@@ -166,6 +168,7 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
 fn entry(name: &str, program: &Program, files: Vec<FileEntry>) -> Entry {
     Entry {
         name: name.to_owned(),
+        aliases: program.aliases.clone(),
         repository: program.repository.clone(),
         url: program.url.clone(),
         version_url: program.version_url.clone(),

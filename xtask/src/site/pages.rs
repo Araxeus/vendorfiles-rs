@@ -106,6 +106,12 @@ pub const PAGES: &[PageSpec] = &[
         "Keep a dependency at its current version so vendor update leaves it alone.",
     ),
     page(
+        "configuration/aliases",
+        Some("Aliases"),
+        Start::Heading("Aliases"),
+        "Give a dependency other names that every command accepts.",
+    ),
+    page(
         "configuration/installers",
         Some("Installers"),
         Start::Heading("Installers"),
@@ -199,6 +205,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/versions",
             "configuration/other-sites",
             "configuration/locking",
+            "configuration/aliases",
             "configuration/installers",
             "configuration/defaults",
         ],
