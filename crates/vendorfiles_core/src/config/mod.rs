@@ -1,5 +1,6 @@
 //! Config discovery, the [`Workspace`] that owns everything parsed out of it, and write-back.
 
+mod aliases;
 pub mod document;
 pub mod format;
 pub mod yaml_emit;
@@ -108,6 +109,7 @@ impl Workspace {
         check_url_keys(&canonical)?;
         let defaults = read_defaults(&canonical);
         let mut dependencies = read_dependencies(&canonical, &display_path)?;
+        aliases::check(&canonical, &dependencies)?;
         for dependency in dependencies.values_mut() {
             dependency.apply_defaults(&defaults);
         }

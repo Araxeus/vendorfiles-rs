@@ -695,6 +695,38 @@ fn invalid_config_keys_are_reported() {
             r#"{"vendorDependencies": 7}"#,
             "Invalid vendorDependencies key in",
         ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": 7}}}"#,
+            "config key 'vendorDependencies.a.alias' must be a name or a list of names",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": ["z", ""]}}}"#,
+            "config key 'vendorDependencies.a.alias' must be a name or a list of names",
+        ),
+        (
+            r#"{"default": {"alias": "x"}, "vendorDependencies": {}}"#,
+            "config key 'default.alias' is not allowed",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "a"}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'a', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": ["z", "z"]}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'z', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"]}, "b": {"repository": "https://github.com/b/b", "files": ["x"], "alias": "a"}}}"#,
+            "config key 'vendorDependencies.b.alias' repeats 'a', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "z"}, "b": {"repository": "https://github.com/b/b", "files": ["x"], "alias": "z"}}}"#,
+            "config key 'vendorDependencies.b.alias' repeats 'z', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "b"}, "b": {"repository": "https://github.com/b/b", "files": ["x"]}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'b', which already names 'b'",
+        ),
     ];
 
     for (config, expected) in cases {
