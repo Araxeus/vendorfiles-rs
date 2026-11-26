@@ -68,6 +68,21 @@ pub enum VendorError {
     #[error("config key '{key}' must be a string. In YAML, quote a value that starts with '{{'")]
     KeyNotString { key: String },
 
+    #[error("config key 'vendorDependencies.{name}.alias' must be a name or a list of names")]
+    InvalidAliasKey { name: String },
+
+    #[error("config key '{key}.alias' is not allowed, because an alias names one dependency")]
+    AliasInDefaults { key: String },
+
+    #[error(
+        "config key 'vendorDependencies.{name}.alias' repeats '{alias}', which already names '{owner}'"
+    )]
+    AliasTaken {
+        name: String,
+        alias: String,
+        owner: String,
+    },
+
     #[error(
         "config keys 'vendorDependencies.{name}.versionSelector' and 'versionJsonPointer' can't both be set; keep one"
     )]
@@ -153,6 +168,9 @@ pub enum VendorError {
         held: String,
         repository: String,
     },
+
+    #[error("'{name}' is already an alias of '{owner}', so it can't name another dependency")]
+    NameIsAlias { name: String, owner: String },
 
     #[error("{0} describes one dependency, so it cannot be used with more than one source")]
     SingleSourceOption(&'static str),

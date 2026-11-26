@@ -20,6 +20,8 @@ pub struct Known {
     pub files: Vec<FileEntry>,
     /// Where the files belong, when the usual `vendor/<name>` is wrong.
     pub folder: Option<String>,
+    /// The entry's other names, which a new config entry keeps.
+    pub aliases: &'static [&'static str],
 }
 
 /// The entry `name` describes, if there is one.
@@ -49,6 +51,7 @@ fn itself() -> Known {
         repository: REPOSITORY,
         files: vec![FileEntry::Mapped(files)],
         folder: installed_beside_the_binary(),
+        aliases: &["vendorfiles", "vendor"],
     }
 }
 

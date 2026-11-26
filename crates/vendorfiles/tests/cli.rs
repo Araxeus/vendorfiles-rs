@@ -695,6 +695,38 @@ fn invalid_config_keys_are_reported() {
             r#"{"vendorDependencies": 7}"#,
             "Invalid vendorDependencies key in",
         ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": 7}}}"#,
+            "config key 'vendorDependencies.a.alias' must be a name or a list of names",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": ["z", ""]}}}"#,
+            "config key 'vendorDependencies.a.alias' must be a name or a list of names",
+        ),
+        (
+            r#"{"default": {"alias": "x"}, "vendorDependencies": {}}"#,
+            "config key 'default.alias' is not allowed",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "a"}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'a', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": ["z", "z"]}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'z', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"]}, "b": {"repository": "https://github.com/b/b", "files": ["x"], "alias": "a"}}}"#,
+            "config key 'vendorDependencies.b.alias' repeats 'a', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "z"}, "b": {"repository": "https://github.com/b/b", "files": ["x"], "alias": "z"}}}"#,
+            "config key 'vendorDependencies.b.alias' repeats 'z', which already names 'a'",
+        ),
+        (
+            r#"{"vendorDependencies": {"a": {"repository": "https://github.com/a/a", "files": ["x"], "alias": "b"}, "b": {"repository": "https://github.com/b/b", "files": ["x"]}}}"#,
+            "config key 'vendorDependencies.a.alias' repeats 'b', which already names 'b'",
+        ),
     ];
 
     for (config, expected) in cases {
@@ -1347,6 +1379,24 @@ fn a_known_name_does_not_move_the_entry_already_under_it() {
 
     assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
     assert!(!stdout(&out).contains("vendorFolder"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("alias"), "{}", stdout(&out));
+}
+
+#[test]
+fn add_vendor_writes_its_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor(dir.path(), &["add", "vendor", "--dry-run"]);
+    let printed = stdout(&out);
+    assert!(
+        printed.contains("vendorfiles-rs would be added as"),
+        "{printed}{}",
+        stderr(&out)
+    );
+    assert!(printed.contains(r#""alias": ["#), "{printed}");
+    assert!(
+        printed.contains(r#""vendorfiles""#) && printed.contains(r#""vendor""#),
+        "{printed}"
+    );
 }
 
 #[test]
@@ -1490,6 +1540,7 @@ programs:
       plan9-x86_64:
         asset: "{release}/plan9-tool"
   urltool:
+    aliases: [ut]
     description: "A program served from its own website"
     url: https://x.io/dl/v{version}
     versionUrl: https://x.io/latest
@@ -1536,6 +1587,115 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
         .env("VENDOR_REGISTRY", &registry)
         .output()
         .expect("running the vendor binary")
+}
+
+#[test]
+fn update_takes_an_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","version":"1","locked":true,"files":"t","alias":"tl"}}}"#,
+    );
+    let err = stderr(&vendor(dir.path(), &["update", "tl"]));
+    assert!(
+        err.contains("Dependency tool is locked and cannot be upgraded"),
+        "{err}"
+    );
+}
+
+#[test]
+fn uninstall_takes_an_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","version":"1","files":"t","alias":["tl"]}}}"#,
+    );
+    let out = vendor(dir.path(), &["uninstall", "tl", "--keep"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let config = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+    assert!(!config.contains("\"tool\""), "{config}");
+}
+
+#[test]
+fn add_by_alias_reuses_the_entry_it_names() {
+    let dir = project(
+        r#"{"vendorDependencies":{"ripgrep":{"repository":"https://github.com/BurntSushi/ripgrep","version":"14.0.0","files":["rg"],"alias":"rg"}}}"#,
+    );
+    let out = vendor_with_registry(dir.path(), &["add", "rg", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let printed = stdout(&out);
+    assert!(printed.contains("ripgrep would be added as"), "{printed}");
+    assert!(!printed.contains("\"rg\": {"), "{printed}");
+}
+
+#[test]
+fn add_by_alias_means_the_entry_the_alias_names() {
+    // Offline only through the swap, since `vf` alone would go to the GitHub search.
+    let dir = project(
+        r#"{"vendorDependencies":{"vendorfiles-rs":{
+            "repository":"https://github.com/Araxeus/vendorfiles-rs",
+            "version":"v1.0.0","files":["LICENSE"],"alias":"vf"
+        }}}"#,
+    );
+    let out = vendor_with_registry(dir.path(), &["add", "vf", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("vendorfiles-rs would be added as"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn add_refuses_a_name_that_is_another_entrys_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","files":"t","alias":"other"}}}"#,
+    );
+    let err = stderr(&vendor(
+        dir.path(),
+        &[
+            "add",
+            "owner/repo",
+            "-n",
+            "other",
+            "-f",
+            "LICENSE",
+            "--dry-run",
+        ],
+    ));
+    assert!(
+        err.contains("'other' is already an alias of 'tool'"),
+        "{err}"
+    );
+    assert!(!err.contains("Pass -n"), "{err}");
+}
+
+#[test]
+fn add_writes_the_registry_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "rg", "--dry-run"]);
+    assert!(
+        stdout(&out).contains(r#""alias": "rg""#),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+}
+
+#[test]
+fn add_leaves_out_a_registry_alias_the_config_already_uses() {
+    let dir = project(r#"{"vendorDependencies":{"fdfind":{"url":"https://x.io/t","files":"t"}}}"#);
+    let out = vendor_with_registry(dir.path(), &["add", "fd", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(!stdout(&out).contains("alias"), "{}", stdout(&out));
+}
+
+#[test]
+fn add_writes_a_url_program_s_registry_aliases() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "urltool", "--dry-run"]);
+    assert!(
+        stdout(&out).contains(r#""alias": "ut""#),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
 }
 
 #[test]

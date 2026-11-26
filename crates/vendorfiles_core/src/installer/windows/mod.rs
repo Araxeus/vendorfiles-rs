@@ -872,7 +872,7 @@ mod tests {
         let launch = super::Launch {
             program: "cmd.exe".into(),
             params: format!(
-                r#"/c copy /y C:\Windows\System32\PING.EXE "{0}" >nul && start "" "{0}" -n 4 127.0.0.1"#,
+                r#"/c copy /y C:\Windows\System32\PING.EXE "{0}" >nul && start /b "" "{0}" -n 4 127.0.0.1"#,
                 copy.display()
             ),
             elevate: false,

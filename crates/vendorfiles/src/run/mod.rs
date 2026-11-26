@@ -142,6 +142,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
                     .await?;
             } else {
                 for name in names {
+                    let name = config_name(session, name);
                     upgrade_one(session, &name).await?;
                 }
             }
@@ -180,6 +181,7 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
                 bail!(VendorError::NoPackageNames);
             }
             for name in names {
+                let name = config_name(session, name);
                 session.uninstall(&name, keep).await?;
             }
         }
@@ -197,6 +199,14 @@ async fn run_command(session: &mut Session, command: Command) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The config key `typed` names through an alias, or `typed` itself.
+fn config_name(session: &Session, typed: String) -> String {
+    session
+        .workspace
+        .dependency_name(&typed)
+        .map_or(typed, str::to_owned)
 }
 
 /// `vendor update <name>` - re-resolve one dependency to its latest version.
