@@ -1149,11 +1149,6 @@ alias = ['k8s', 'kc']
 - An alias works wherever a command takes a dependency name, so `vendor update k8s` updates
   `kubectl`.
 - Each name and alias belongs to one dependency. A config where two share one doesn't load.
-- `alias` can't go in the `default` block, because an alias names one dependency.
-- `vendor add` copies a registry program's aliases into the entry it creates, leaving out any the
-  config already uses. `vendor add vendor` adds `vendorfiles-rs` with the aliases `vendorfiles`
-  and `vendor`.
-- The lockfile and the vendor folder use the dependency's own name.
 
 ### Installers
 
