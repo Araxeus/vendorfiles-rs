@@ -1571,6 +1571,79 @@ fn vendor_with_registry(dir: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
+fn update_takes_an_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","version":"1","locked":true,"files":"t","alias":"tl"}}}"#,
+    );
+    let err = stderr(&vendor(dir.path(), &["update", "tl"]));
+    assert!(
+        err.contains("Dependency tool is locked and cannot be upgraded"),
+        "{err}"
+    );
+}
+
+#[test]
+fn uninstall_takes_an_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","version":"1","files":"t","alias":["tl"]}}}"#,
+    );
+    let out = vendor(dir.path(), &["uninstall", "tl", "--keep"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let config = std::fs::read_to_string(dir.path().join("vendor.json")).unwrap();
+    assert!(!config.contains("\"tool\""), "{config}");
+}
+
+#[test]
+fn add_by_alias_reuses_the_entry_it_names() {
+    let dir = project(
+        r#"{"vendorDependencies":{"ripgrep":{"repository":"https://github.com/BurntSushi/ripgrep","version":"14.0.0","files":["rg"],"alias":"rg"}}}"#,
+    );
+    let out = vendor_with_registry(dir.path(), &["add", "rg", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let printed = stdout(&out);
+    assert!(printed.contains("ripgrep would be added as"), "{printed}");
+    assert!(!printed.contains("\"rg\": {"), "{printed}");
+}
+
+#[test]
+fn add_by_alias_means_the_entry_the_alias_names() {
+    // Offline only through the swap, since `vf` alone would go to the GitHub search.
+    let dir = project(
+        r#"{"vendorDependencies":{"vendorfiles-rs":{
+            "repository":"https://github.com/Araxeus/vendorfiles-rs",
+            "version":"v1.0.0","files":["LICENSE"],"alias":"vf"
+        }}}"#,
+    );
+    let out = vendor_with_registry(dir.path(), &["add", "vf", "--dry-run"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("vendorfiles-rs would be added as"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn add_refuses_a_name_that_is_another_entrys_alias() {
+    let dir = project(
+        r#"{"vendorDependencies":{"tool":{"url":"https://x.io/t","files":"t","alias":"other"}}}"#,
+    );
+    let err = stderr(&vendor(
+        dir.path(),
+        &[
+            "add",
+            "owner/repo",
+            "-n",
+            "other",
+            "-f",
+            "LICENSE",
+            "--dry-run",
+        ],
+    ));
+    assert!(err.contains("'other' is an alias of 'tool'"), "{err}");
+}
+
+#[test]
 fn add_writes_a_url_entry_for_a_url_program() {
     let dir = project(r#"{ "vendorDependencies": {} }"#);
     let out = vendor_with_registry(dir.path(), &["add", "urltool", "--dry-run"]);

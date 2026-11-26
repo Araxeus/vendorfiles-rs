@@ -169,6 +169,9 @@ pub enum VendorError {
         repository: String,
     },
 
+    #[error("'{name}' is an alias of '{owner}'. Pass -n to choose another name")]
+    NameIsAlias { name: String, owner: String },
+
     #[error("{0} describes one dependency, so it cannot be used with more than one source")]
     SingleSourceOption(&'static str),
 

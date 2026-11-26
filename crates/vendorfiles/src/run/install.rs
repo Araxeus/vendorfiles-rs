@@ -240,6 +240,19 @@ async fn install(
     files: Option<Vec<String>>,
     preview: Preview,
 ) -> Result<()> {
+    // A bare alias means the entry it names, so the rest of `add` sees the real name.
+    let source = match session.workspace.dependency_name(source) {
+        Some(real)
+            if files.is_none()
+                && real != source
+                && !is_github_url(source)
+                && !is_owner_repo_shorthand(source) =>
+        {
+            real.to_owned()
+        }
+        _ => source.to_owned(),
+    };
+    let source = source.as_str();
     let Source {
         repository,
         known,
@@ -266,6 +279,7 @@ async fn install(
             None => owner_and_name_from_repo_url(&repository)?.name,
         },
     };
+    refuse_an_alias(&session.workspace, &name)?;
 
     // `add` never repoints an entry, so a name holding another repository, or any `url`, is a
     // clash. A `url` on github.com can name this very repository and still be a url entry.
@@ -366,6 +380,7 @@ async fn install_listed_url(
     let name = name
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| listed.name.clone());
+    refuse_an_alias(&session.workspace, &name)?;
     let existing = session.workspace.dependencies.get(&name).cloned();
 
     // `add` never repoints an entry, so a name holding a repository, or another `url`, is a
@@ -431,6 +446,17 @@ async fn install_listed_url(
         )
         .await?;
     Ok(())
+}
+
+/// Refuses `name` when it is another entry's alias, since an entry under it would clash.
+fn refuse_an_alias(workspace: &Workspace, name: &str) -> Result<()> {
+    match workspace.dependency_name(name) {
+        Some(owner) if owner != name => bail!(VendorError::NameIsAlias {
+            name: name.to_owned(),
+            owner: owner.to_owned(),
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// The config entry a new install builds on.
