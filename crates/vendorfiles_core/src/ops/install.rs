@@ -23,7 +23,8 @@ use crate::lockfile::{
     retire_folder_entry, save_path, saved_folder, write_lockfile,
 };
 use crate::model::{
-    Dependency, FileSpec, FileTarget, RawDependency, Repository, Source, flatten_files,
+    Dependency, FileSpec, FileTarget, RawDependency, Repository, Source, files_config_value,
+    flatten_files,
 };
 use crate::ops::{OpResult, Session};
 use crate::progress;
@@ -355,7 +356,11 @@ impl Session {
                     document.set_dependency_value(name, "repository", &dependency.repository)?;
                 }
                 if files {
-                    document.set_dependency_value(name, "files", &dependency.files)?;
+                    let url = dependency
+                        .is_url()
+                        .then_some(dependency.repository.as_str());
+                    let files = files_config_value(&dependency.files, url);
+                    document.set_dependency_value(name, "files", &files)?;
                 }
                 if version_changed {
                     document.set_dependency_version(name, version)?;

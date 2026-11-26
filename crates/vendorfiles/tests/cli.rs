@@ -1500,6 +1500,16 @@ programs:
       macos-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-x86_64: { asset: "{url}/urltool", as: urltool }
       linux-aarch64: { asset: "{url}/urltool", as: urltool }
+  pagetool:
+    description: "A program whose url is the download itself"
+    url: https://x.io/pagetool
+    targets:
+      windows-x86_64: { asset: "{url}", as: pagetool }
+      windows-aarch64: { asset: "{url}", as: pagetool }
+      macos-aarch64: { asset: "{url}", as: pagetool }
+      macos-x86_64: { asset: "{url}", as: pagetool }
+      linux-x86_64: { asset: "{url}", as: pagetool }
+      linux-aarch64: { asset: "{url}", as: pagetool }
   setuptool:
     description: "A desktop program that ships a setup"
     repository: https://github.com/example/setuptool
@@ -1543,6 +1553,18 @@ fn add_writes_a_url_entry_for_a_url_program() {
         "{printed}"
     );
     assert!(!printed.contains("repository"), "{printed}");
+}
+
+#[test]
+fn add_writes_the_short_files_form_for_a_bare_url_asset() {
+    let dir = project(r#"{ "vendorDependencies": {} }"#);
+    let out = vendor_with_registry(dir.path(), &["add", "pagetool", "--dry-run"]);
+    let printed = stdout(&out);
+    assert!(
+        printed.contains(r#""files": "pagetool""#),
+        "{printed}{}",
+        stderr(&out)
+    );
 }
 
 #[test]

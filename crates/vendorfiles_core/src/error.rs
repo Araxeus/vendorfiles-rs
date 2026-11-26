@@ -90,6 +90,11 @@ pub enum VendorError {
     UrlFileNotUrl { name: String, input: String },
 
     #[error(
+        "vendorDependencies.{name}.files names no URL, so it describes {{url}} alone: one output name, like \"tool.exe\", or a map of archive members to names"
+    )]
+    UrlFilesShortForm { name: String },
+
+    #[error(
         "vendorDependencies.{name} uses {{version}} or {{tag}} but sets neither 'version' nor 'versionUrl'"
     )]
     UrlNeedsVersion { name: String },
