@@ -28,6 +28,22 @@ gh release view -R owner/repo --json tagName,assets -q '.tagName, (.assets[].nam
 gh release list -R owner/repo --limit 10
 ```
 
+A program off GitHub releases has no release to view, so find a GET request that names the latest
+version. Many sites have one, so look before scraping a page. Prefer the first that exists:
+
+| The site answers with | `versionUrl` takes | Example |
+| --- | --- | --- |
+| Just the version, as plain text | Nothing else | `kubectl`'s `stable.txt`, `helm`'s `helm-latest-version` |
+| JSON with a version field | `versionJsonPointer` to that field | `terraform`'s `current_version` |
+| JSON with a list of versions | `versionJsonPointer` to the list, and the latest stable one wins | `libclang`'s `versions` |
+| JSON with versions inside objects or arrays | `versionJsonPointer` with a `*` segment, like `*/version` | Go's `go.dev/dl/?mode=json` |
+| XML with a version field | `versionSelector`, with `::attr(name)` for an attribute | A VS Code manifest's `Identity::attr(Version)` |
+| A redirect to a file named after the version | `versionRegex` on the redirected URL | `file-pilot`, `curl` |
+| Only an HTML page | `versionSelector` or `versionRegex` | `wiztree`'s download page |
+
+Fetch the `versionUrl` and check that it gives the version you expect, then request each host's
+asset URL to confirm it exists. The README section "Downloading from other sites" explains each key.
+
 Download archives into a new scratch folder and list them from Git Bash with `unzip -l` or `tar tf`.
 List one Windows and one Unix archive at least, because the layout often differs between them. A
 leading `./` in a listing stays out of `member`, because paths compare normalized.
@@ -35,11 +51,14 @@ leading `./` in a listing stays out of `member`, because paths compare normalize
 | What you find | What to do |
 | --- | --- |
 | Only a source tarball | Look for a builds repo with `gh repo list <org>` and point `repository` there, as `tmux` does with `tmux/tmux-builds` |
+| Binaries only on the project's own site | Write a `url` program with `url` and `versionUrl`, as `file-pilot` and `kubectl` do. The header and `docs/add_to_registry.md` explain the keys |
 | Several kinds of tag in the release list | Add an anchored `releaseRegex`, as `biome` does, because "latest" can land on a tag with no binaries |
 | A rolling release marked pre-release (`preview`, `nightly`) | Leave it, because "latest" skips pre-releases. A regex takes the newest match of any kind, so anchor it |
 | A rolling release not marked pre-release (neovim's `stable`) | Add an anchored `releaseRegex`, because nothing else excludes it |
 | A tag holding `x.y.z` | `{version}` is that `x.y.z` alone: `@biomejs/biome@2.6.4` gives `2.6.4` |
 | A tag with no `x.y.z` | `{version}` is the tag minus leading `v`s: `v3.7c` gives `3.7c` |
+| A tag with more than three parts | `{version}` keeps only `x.y.z`, so use `{tag}`, as `imageglass` does for `10.0.6.906` |
+| Only a Windows installer | Write an `installer` entry, as described below |
 | Both gnu and musl Linux builds | Use gnu, as `fd` and `bat` do. Use musl where gnu is missing |
 
 ### Hosts
@@ -47,6 +66,18 @@ leading `./` in a listing stays out of `member`, because paths compare normalize
 The registry uses six host keys: `windows`, `macos` and `linux`, each with `x86_64` and `aarch64`.
 List each of the six that upstream publishes. Report any the requester did not name. Leave out other
 builds, such as 32-bit, riscv64 or FreeBSD.
+
+### Installers
+
+`installer: true` runs the one downloaded file silently on Windows instead of keeping it. Prefer a
+portable build when upstream ships one, because an installer changes the machine.
+
+- List only programs that do not update themselves, because vendor records the version it installed.
+- List only Windows hosts.
+- Each host names exactly one file, the installer itself. One `member` may pick it out of an archive.
+- `true` detects the installer's type. Name the type, or give `{ type, args, scope }`, only when
+  detection or the default switches fail. The README section "Installers" lists the types.
+- Note in the comment when a per-user build installs without admin, as `winmerge` does.
 
 ### Programs that cannot run alone
 
@@ -146,6 +177,10 @@ cargo xtask readme
 cargo test
 GITHUB_TOKEN=$(gh auth token) cargo test -p vendorfiles_core --lib registry -- --ignored
 ```
+
+Installing an `installer` entry runs it on this machine for real, with a UAC prompt when it needs
+admin. Ask the maintainer before running `add` without `--dry-run`, and remove it afterwards with
+`./target/debug/vendor -c <scratch> uninstall <name>`, which runs its uninstaller.
 
 The first build in a fresh worktree takes minutes, so run long commands in the background. If a
 permission check blocks running a downloaded binary, report it as untested and give the exact
