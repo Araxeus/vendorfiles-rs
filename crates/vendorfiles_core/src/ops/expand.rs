@@ -5,13 +5,16 @@
 //! anything. A repository is listed through the Trees API. An archive is downloaded here and
 //! listed, and the download stage extracts from that same copy.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use indexmap::IndexMap;
 
 use crate::archive;
 use crate::error::{Result, VendorError};
 use crate::fsx::{anchor, stream_to_file};
 use crate::github::{GitHubClient, TreeEntry};
-use crate::lockfile::{LockFiles, expanded_lock};
+use crate::lockfile::{LockFiles, VendorLock, expanded_lock, saved_folder};
 use crate::model::{Dependency, FileTarget, Repository, Source};
 use crate::ops::Session;
 use crate::ops::install::{Prepared, archive_name, cannot_extract, place_members, save};
@@ -29,11 +32,65 @@ pub struct Planned {
     pub files: LockFiles,
     /// Source path → output, for every repository file a folder or pattern selected.
     downloads: Vec<(String, String)>,
+    /// The git blob of each of those source files.
+    blobs: IndexMap<String, String>,
+    /// Sources whose file from the previous install is already right, so they are not fetched.
+    kept: HashSet<String>,
     /// The archives that were downloaded to be listed.
     archives: Vec<Fetched>,
 }
 
 impl Planned {
+    /// Marks every selected file the previous install already holds, unchanged, as kept.
+    ///
+    /// A file is kept when its blob, its output and its folder are all the same as before and
+    /// the file is still there. Its content is not checked, so a local edit survives.
+    pub(super) fn reuse(&mut self, previous: Option<&VendorLock>, folder: &Path, lockfile: &Path) {
+        let Some(previous) = previous else {
+            return;
+        };
+        let lock_dir = lockfile.parent().unwrap_or_else(|| Path::new("."));
+        if saved_folder(lock_dir, previous).is_some_and(|old| old != folder) {
+            return;
+        }
+        let placed: IndexMap<&str, &str> = previous
+            .files
+            .values()
+            .filter_map(|target| match target {
+                FileTarget::ExtractMap(map) => Some(map),
+                _ => None,
+            })
+            .flatten()
+            .map(|(source, output)| (source.as_str(), output.as_str()))
+            .collect();
+        for (source, output) in &self.downloads {
+            let same_blob = self
+                .blobs
+                .get(source)
+                .is_some_and(|blob| previous.blobs.get(source) == Some(blob));
+            if same_blob
+                && placed.get(source.as_str()) == Some(&output.as_str())
+                && anchor(folder, output).is_file()
+            {
+                self.kept.insert(source.clone());
+            }
+        }
+    }
+
+    /// The outputs of every kept file, which the cleanup leaves in place.
+    pub(super) fn kept_outputs(&self) -> HashSet<String> {
+        self.downloads
+            .iter()
+            .filter(|(source, _)| self.kept.contains(source))
+            .map(|(_, output)| output.clone())
+            .collect()
+    }
+
+    /// The blobs to record in the lockfile.
+    pub(super) fn into_blobs(self) -> IndexMap<String, String> {
+        self.blobs
+    }
+
     /// The downloaded copy of the archive under `files` key `key`, if it was listed.
     pub(super) fn archive(&self, key: &str) -> Option<&Fetched> {
         self.archives.iter().find(|fetched| fetched.key == key)
@@ -114,6 +171,7 @@ async fn plan(
 ) -> Result<Planned> {
     let mut git_ref = version.to_owned();
     let mut matched = Matched::default();
+    let mut blobs = IndexMap::new();
     if let Source::GitHub(repo) = &dependency.source
         && !selections.repo.is_empty()
     {
@@ -127,7 +185,7 @@ async fn plan(
         } else {
             version
         };
-        matched.repo =
+        (matched.repo, blobs) =
             match_repository(github, dependency, repo, &selections.repo, &git_ref, at).await?;
     }
 
@@ -164,11 +222,14 @@ async fn plan(
         git_ref,
         files,
         downloads,
+        blobs,
+        kept: HashSet::new(),
         archives,
     })
 }
 
-/// What each repository selection matches, from one listing per distinct base folder.
+/// What each repository selection matches, from one listing per distinct base folder, with the
+/// blob of every file matched.
 ///
 /// `at` names the version in a "matched nothing" error.
 async fn match_repository(
@@ -178,7 +239,7 @@ async fn match_repository(
     selections: &[Selection],
     git_ref: &str,
     at: &str,
-) -> Result<Vec<Vec<String>>> {
+) -> Result<(Vec<Vec<String>>, IndexMap<String, String>)> {
     let mut listings: Vec<(String, Vec<TreeEntry>)> = Vec::new();
     for base in listed_bases(selections) {
         let entries = match github.list_tree(repo, git_ref, &base).await {
@@ -193,6 +254,7 @@ async fn match_repository(
     }
 
     let mut matched = Vec::with_capacity(selections.len());
+    let mut blobs = IndexMap::new();
     for selection in selections {
         let entries = listings
             .iter()
@@ -214,9 +276,14 @@ async fn match_repository(
                 reason,
             });
         }
+        for entry in entries.iter().filter(|entry| !entry.sha.is_empty()) {
+            if sources.binary_search(&entry.path).is_ok() {
+                blobs.insert(entry.path.clone(), entry.sha.clone());
+            }
+        }
         matched.push(sources);
     }
-    Ok(matched)
+    Ok((matched, blobs))
 }
 
 /// What each declared member of `archive` matches among `members`, sorted.
@@ -365,11 +432,16 @@ pub(super) async fn download_selected(
     folder: &Path,
     progress: &progress::Dependency,
 ) -> Result<Vec<PathBuf>> {
-    if planned.downloads.is_empty() {
+    let wanted: Vec<_> = planned
+        .downloads
+        .iter()
+        .filter(|(source, _)| !planned.kept.contains(source))
+        .collect();
+    if wanted.is_empty() {
         return Ok(Vec::new());
     }
-    progress.status(format!("downloading {} file(s)", planned.downloads.len()));
-    futures_util::future::try_join_all(planned.downloads.iter().map(|(source, output)| async {
+    progress.status(format!("downloading {} file(s)", wanted.len()));
+    futures_util::future::try_join_all(wanted.into_iter().map(|(source, output)| async {
         let _permit = github.raw_permit().await;
         let response = github
             .download_raw(repo, &planned.git_ref, source)
@@ -580,6 +652,96 @@ mod tests {
                 .unwrap();
         let found = selections(&files, "v1").unwrap();
         assert_eq!(listed_bases(&found), ["docs/", "skills/"]);
+    }
+
+    fn tree(entries: &[(&str, &str)]) -> Vec<u8> {
+        let tree: Vec<_> = entries
+            .iter()
+            .map(
+                |(path, sha)| json!({ "path": path, "mode": "100644", "type": "blob", "sha": sha }),
+            )
+            .collect();
+        json!({ "truncated": false, "tree": tree })
+            .to_string()
+            .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn an_update_downloads_only_files_whose_blob_changed_or_went_missing() {
+        let (base, hits) = serve_counted(vec![
+            route(
+                "/repos/a/b/git/trees/v1%3Askills?recursive=1",
+                200,
+                "",
+                &tree(&[("pdf/SKILL.md", "p1"), ("xlsx/SKILL.md", "x1")]),
+            ),
+            route(
+                "/repos/a/b/git/trees/v1%3Afonts?recursive=1",
+                200,
+                "",
+                &tree(&[("a.ttf", "f1")]),
+            ),
+            route(
+                "/repos/a/b/git/trees/v2%3Askills?recursive=1",
+                200,
+                "",
+                &tree(&[("pdf/SKILL.md", "p1"), ("xlsx/SKILL.md", "x2")]),
+            ),
+            route(
+                "/repos/a/b/git/trees/v2%3Afonts?recursive=1",
+                200,
+                "",
+                &tree(&[("a.ttf", "f1")]),
+            ),
+            route("/a/b/v1/skills/pdf/SKILL.md", 200, "", b"pdf v1"),
+            route("/a/b/v1/skills/xlsx/SKILL.md", 200, "", b"xlsx v1"),
+            route("/a/b/v1/fonts/a.ttf", 200, "", b"font"),
+            // Served differently at v2 only to show whether it was fetched again.
+            route("/a/b/v2/skills/pdf/SKILL.md", 200, "", b"pdf v2"),
+            route("/a/b/v2/skills/xlsx/SKILL.md", 200, "", b"xlsx v2"),
+            route("/a/b/v2/fonts/a.ttf", 200, "", b"font v2"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let config = |version: &str| {
+            json!({ "vendorDependencies": { "skills": {
+                "repository": "https://github.com/a/b",
+                "version": version,
+                "files": [{ "fonts/": "myfonts/", "skills/**/SKILL.md": "{parent}.md" }],
+            }}})
+            .to_string()
+        };
+        sync(dir.path(), &config("v1"), &base).await.unwrap();
+        let folder = dir.path().join("vendor/skills");
+        std::fs::remove_file(folder.join("myfonts/a.ttf")).unwrap();
+
+        let before = hits.load(Ordering::SeqCst);
+        sync(dir.path(), &config("v2"), &base).await.unwrap();
+
+        assert_eq!(
+            read(&folder.join("pdf.md")),
+            "pdf v1",
+            "an unchanged blob is kept"
+        );
+        assert_eq!(
+            read(&folder.join("xlsx.md")),
+            "xlsx v2",
+            "a changed blob is fetched"
+        );
+        assert_eq!(
+            read(&folder.join("myfonts/a.ttf")),
+            "font v2",
+            "a missing file is fetched"
+        );
+        assert_eq!(
+            hits.load(Ordering::SeqCst) - before,
+            4,
+            "two listings and two files"
+        );
+
+        let lock = read_lockfile(&folder.join("vendor-lock.json"))
+            .await
+            .unwrap();
+        assert_eq!(lock["skills"].blobs["skills/xlsx/SKILL.md"], "x2");
     }
 
     fn zip_bytes(members: &[(&str, &[u8])]) -> Vec<u8> {

@@ -300,6 +300,7 @@ impl Session {
                     (None, Some(plan)) => plan.files.clone(),
                     (None, None) => config_files_to_lock_files(&dependency.files, &version),
                 },
+                blobs: plan.map(Planned::into_blobs).unwrap_or_default(),
                 installed,
                 save_path,
                 pending: false,
@@ -543,6 +544,20 @@ pub async fn clear_previous(prepared: &mut Prepared) -> Result<()> {
         Some(plan) => plan.files.clone(),
         None => config_files_to_lock_files(&prepared.dependency.files, &prepared.version),
     };
+    if let Some(plan) = prepared.plan.as_mut()
+        && !prepared.options.force
+    {
+        plan.reuse(
+            prepared.previous.as_ref(),
+            &prepared.folder,
+            &prepared.lockfile_path,
+        );
+    }
+    let kept = prepared
+        .plan
+        .as_ref()
+        .map(Planned::kept_outputs)
+        .unwrap_or_default();
     let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
     let cleared = match marked {
         Ok(()) => {
@@ -550,6 +565,7 @@ pub async fn clear_previous(prepared: &mut Prepared) -> Result<()> {
                 &prepared.folder,
                 &prepared.lockfile_path,
                 prepared.previous.as_ref(),
+                &kept,
             )
             .await
         }
@@ -673,6 +689,7 @@ async fn remove_previously_installed(
     folder: &Path,
     lockfile_path: &Path,
     previous: Option<&VendorLock>,
+    kept: &std::collections::HashSet<String>,
 ) -> Result<()> {
     let Some(locked) = previous else {
         return Ok(());
@@ -680,6 +697,10 @@ async fn remove_previously_installed(
     let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
     let old_folder = saved_folder(lock_dir, locked).unwrap_or_else(|| folder.to_path_buf());
     for file in locked.outputs() {
+        // A file the new install would download unchanged stays where it is.
+        if kept.contains(&file) {
+            continue;
+        }
         let path = anchor(&old_folder, file.as_str());
         if !path.exists() {
             continue;

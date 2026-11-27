@@ -40,6 +40,9 @@ pub struct TreeEntry {
     /// `blob`, `tree`, or `commit` for a submodule.
     #[serde(rename = "type")]
     pub kind: String,
+    /// The git object id, which changes whenever the content does.
+    #[serde(default)]
+    pub sha: String,
 }
 
 impl TreeEntry {

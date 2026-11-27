@@ -37,6 +37,10 @@ pub struct VendorLock {
     pub url: Option<String>,
     pub version: String,
     pub files: LockFiles,
+    /// The git blob of each repository file a folder or pattern selected, by source path. An
+    /// update reuses a file whose blob and output have not changed.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub blobs: IndexMap<String, String>,
     /// What an installer put on the machine, for an `installer` dependency. Its `files` are then
     /// empty, since nothing is kept in the dependency folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -527,6 +531,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -550,6 +555,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -575,6 +581,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files, "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: None,
                 pending: false,
@@ -601,6 +608,7 @@ mod tests {
             url: None,
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -640,6 +648,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -691,6 +700,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -761,6 +771,7 @@ mod tests {
                 url: None,
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: None,
                 pending: false,
