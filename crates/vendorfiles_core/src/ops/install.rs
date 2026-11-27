@@ -26,9 +26,11 @@ use crate::model::{
     Dependency, FileSpec, FileTarget, RawDependency, Repository, Source, files_config_value,
     flatten_files,
 };
+use crate::ops::expand::{Planned, download_selected};
 use crate::ops::{OpResult, Session};
 use crate::progress;
 use crate::remote_zip;
+use crate::selection::is_selection;
 use crate::template::{expand_url, is_release_path, replace_version, strip_release_prefix};
 use crate::ui;
 use crate::url_source::{self, UrlSource};
@@ -68,6 +70,10 @@ pub struct Prepared {
     /// Where an installer is downloaded, outside the dependency folder. Set by [`download`] and
     /// deleted once `commit` has run it.
     pub staging: Option<tempfile::TempDir>,
+    /// What the dependency's folders and patterns select. Set by [`Session::expand`].
+    pub plan: Option<Planned>,
+    /// Why the install cannot go ahead, found before anything was written.
+    pub blocked: Option<VendorError>,
 }
 
 impl Prepared {
@@ -117,7 +123,9 @@ impl Session {
         self.progress.reserve_rows(usize::from(prepared.has_work()));
 
         // The two stages below report their own failures, so there is nothing to add here.
-        let outcome = match clear_previous(&prepared).await {
+        let mut prepared = prepared;
+        self.expand(&mut prepared).await;
+        let outcome = match clear_previous(&mut prepared).await {
             Ok(()) => download(Arc::clone(&self.github), prepared).await,
             Err(error) => Err(error),
         };
@@ -193,6 +201,8 @@ impl Session {
             progress,
             refused_installer,
             staging: None,
+            plan: None,
+            blocked: None,
         }
     }
 
@@ -216,6 +226,8 @@ impl Session {
             previous,
             refused_installer: _,
             staging,
+            plan,
+            blocked: _,
         } = prepared;
 
         if options.show_outdated_only {
@@ -283,10 +295,10 @@ impl Session {
                 repository: (!dependency.is_url()).then(|| dependency.repository.clone()),
                 url: dependency.is_url().then(|| dependency.repository.clone()),
                 version: version.clone(),
-                files: if installed.is_some() {
-                    LockFiles::new()
-                } else {
-                    config_files_to_lock_files(&dependency.files, &version)
+                files: match (&installed, &plan) {
+                    (Some(_), _) => LockFiles::new(),
+                    (None, Some(plan)) => plan.files.clone(),
+                    (None, None) => config_files_to_lock_files(&dependency.files, &version),
                 },
                 installed,
                 save_path,
@@ -517,16 +529,19 @@ pub async fn download(github: Arc<GitHubClient>, mut prepared: Prepared) -> Resu
 /// # Errors
 ///
 /// Returns the error of the lockfile write, or of the first file that could not be deleted.
-pub async fn clear_previous(prepared: &Prepared) -> Result<()> {
+pub async fn clear_previous(prepared: &mut Prepared) -> Result<()> {
     if !prepared.has_work() {
         return Ok(());
     }
+    if let Some(error) = prepared.blocked.take() {
+        return Err(blame(&prepared.progress, error));
+    }
     prepared.progress.status("clearing previous install");
     // An installer's download never lands in the dependency folder, so it adds nothing to clear.
-    let incoming = if prepared.dependency.installer.is_some() {
-        LockFiles::new()
-    } else {
-        config_files_to_lock_files(&prepared.dependency.files, &prepared.version)
+    let incoming = match &prepared.plan {
+        _ if prepared.dependency.installer.is_some() => LockFiles::new(),
+        Some(plan) => plan.files.clone(),
+        None => config_files_to_lock_files(&prepared.dependency.files, &prepared.version),
     };
     let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
     let cleared = match marked {
@@ -559,6 +574,7 @@ async fn fetch_all(github: &GitHubClient, prepared: &Prepared) -> Result<()> {
         &prepared.dependency,
         folder,
         &prepared.version,
+        prepared.plan.as_ref(),
         &prepared.progress,
     )
     .await
@@ -663,7 +679,7 @@ async fn remove_previously_installed(
     };
     let lock_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
     let old_folder = saved_folder(lock_dir, locked).unwrap_or_else(|| folder.to_path_buf());
-    for file in flat_files(&locked.files) {
+    for file in locked.outputs() {
         let path = anchor(&old_folder, file.as_str());
         if !path.exists() {
             continue;
@@ -690,6 +706,7 @@ async fn download_all(
     dependency: &Dependency,
     folder: &Path,
     version: &str,
+    plan: Option<&Planned>,
     progress: &progress::Dependency,
 ) -> Result<()> {
     let repo = match &dependency.source {
@@ -699,7 +716,7 @@ async fn download_all(
                 .await;
         }
     };
-    match download_each(github, dependency, repo, folder, version, progress).await {
+    match download_each(github, dependency, repo, folder, version, plan, progress).await {
         Ok(()) => Ok(()),
         Err(error) => Err(explain_absence(github, dependency, repo, error).await),
     }
@@ -738,11 +755,13 @@ async fn download_each(
     repo: &Repository,
     folder: &Path,
     version: &str,
+    plan: Option<&Planned>,
     progress: &progress::Dependency,
 ) -> Result<()> {
     let (release_files, repo_files): (Vec<FileSpec>, Vec<FileSpec>) =
         flatten_files(&dependency.files)
             .into_iter()
+            .filter(|spec| !is_selection(&spec.input))
             .partition(|spec| is_release_path(&spec.input));
 
     if !repo_files.is_empty() {
@@ -764,6 +783,11 @@ async fn download_each(
         }))
         .await?;
         record(progress, saved.iter().flatten());
+    }
+
+    if let Some(plan) = plan {
+        let saved = download_selected(github, dependency, repo, plan, folder, progress).await?;
+        record(progress, saved.iter());
     }
 
     Ok(())
@@ -1289,7 +1313,7 @@ mod tests {
             ..InstallOptions::default()
         };
         let progress = Arc::new(session.progress.dependency("first"));
-        let interrupted = session
+        let mut interrupted = session
             .prepare(
                 dependency("first", "v2", "README.md"),
                 forced(),
@@ -1298,13 +1322,13 @@ mod tests {
             )
             .await;
         // The old file goes and new ones land, one under the old name, then the run stops.
-        super::clear_previous(&interrupted).await.unwrap();
+        super::clear_previous(&mut interrupted).await.unwrap();
         std::fs::write(dir.path().join("vendor/first/LICENSE"), "half").unwrap();
         std::fs::write(dir.path().join("vendor/first/README.md"), "half").unwrap();
         assert!(stale(&session, dependency("first", "v1", "LICENSE")).await);
 
         let progress = Arc::new(session.progress.dependency("first"));
-        let next = session
+        let mut next = session
             .prepare(
                 dependency("first", "v1", "LICENSE"),
                 forced(),
@@ -1312,7 +1336,7 @@ mod tests {
                 progress,
             )
             .await;
-        super::clear_previous(&next).await.unwrap();
+        super::clear_previous(&mut next).await.unwrap();
 
         assert!(!dir.path().join("vendor/first/README.md").exists());
     }
@@ -1336,7 +1360,7 @@ mod tests {
             force: true,
             ..InstallOptions::default()
         };
-        let prepared = session
+        let mut prepared = session
             .prepare(
                 dependency("first", "v1", "LICENSE"),
                 options,
@@ -1345,7 +1369,7 @@ mod tests {
             )
             .await;
 
-        super::clear_previous(&prepared).await.unwrap();
+        super::clear_previous(&mut prepared).await.unwrap();
         session.commit(prepared).await.unwrap();
 
         let names: Vec<_> = read_lockfile(&lockfile)

@@ -149,7 +149,8 @@ impl Session {
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
-        for item in &prepared {
+        futures_util::future::join_all(prepared.iter_mut().map(|item| self.expand(item))).await;
+        for item in &mut prepared {
             clear_previous(item).await?;
         }
 

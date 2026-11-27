@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::error::{Result, VendorError};
 use crate::fsx::anchor;
 use crate::installer;
-use crate::lockfile::{config_files_to_lock_files, flat_files, read_lockfile, saved_folder};
+use crate::lockfile::{expanded_lock, flat_files, locked_matches, read_lockfile, saved_folder};
 use crate::model::{Dependency, Repository, Source};
 use crate::ops::Session;
 use crate::url_source::latest_version;
@@ -158,9 +158,25 @@ impl Session {
             return !locked.files.is_empty()
                 || !locked.installed.as_ref().is_some_and(installer::is_present);
         }
-        let expected = config_files_to_lock_files(&dependency.files, new_version);
-        expected != locked.files
-            || flat_files(&expected)
+        // Folders and patterns are checked against what they matched at install, re-rendered through
+        // the current destinations. A changed destination renders differently and reinstalls.
+        let Ok(selections) = dependency.selections(new_version) else {
+            return true;
+        };
+        let Some(matched) = locked_matches(&selections, locked) else {
+            return true;
+        };
+        let Ok(files) = expanded_lock(
+            &dependency.name,
+            &dependency.files,
+            &selections,
+            &matched,
+            new_version,
+        ) else {
+            return true;
+        };
+        files != locked.files
+            || flat_files(&files)
                 .iter()
                 .any(|file| !anchor(folder, file.as_str()).exists())
     }

@@ -11,9 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor};
 use crate::model::{FileEntry, FileTarget};
+use crate::selection::{Selection, is_selection};
 use crate::template::{basename, replace_version};
 
 /// The `files` map of a single locked dependency: config input → what landed on disk.
+///
+/// A folder or pattern key maps each source file it matched to its output, in the shape of an
+/// archive's member map.
 pub type LockFiles = IndexMap<String, FileTarget>;
 
 /// How many `..` a recorded `savePath` may climb before it is written as an absolute path.
@@ -111,11 +115,15 @@ fn replace_version_in_target(target: &FileTarget, version: &str) -> FileTarget {
 ///
 /// Later entries overwrite earlier ones by key while keeping the earlier key's position -
 /// the semantics of repeated `Object.assign` in the reference.
+///
+/// Folders and patterns are left out, since their outputs depend on what the repository holds.
+/// See [`expanded_lock`].
 #[must_use]
 pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFiles {
     let mut out = LockFiles::new();
     for entry in files {
         match entry {
+            FileEntry::Simple(input) if is_selection(input) => {}
             FileEntry::Simple(input) => {
                 out.insert(
                     input.clone(),
@@ -123,13 +131,100 @@ pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFil
                 );
             }
             FileEntry::Mapped(map) => {
-                for (input, target) in map {
+                for (input, target) in map.iter().filter(|(input, _)| !is_selection(input)) {
                     out.insert(input.clone(), replace_version_in_target(target, version));
                 }
             }
         }
     }
     out
+}
+
+/// A dependency's lock `files`, given the source files each selection matched.
+///
+/// `matched` runs parallel to `selections`. A source that two selections place at the same
+/// output is kept once, under the first.
+///
+/// # Errors
+///
+/// Returns [`VendorError::InvalidSelection`] for an output that cannot be rendered, or
+/// [`VendorError::OutputCollision`] when two different sources would land on one path.
+pub fn expanded_lock(
+    name: &str,
+    files: &[FileEntry],
+    selections: &[Selection],
+    matched: &[Vec<String>],
+    version: &str,
+) -> Result<LockFiles> {
+    let mut lock_files = config_files_to_lock_files(files, version);
+
+    // Output → the key that writes it, and the source file when a selection does.
+    let mut owners: IndexMap<String, (String, Option<String>)> = IndexMap::new();
+    for (input, target) in &lock_files {
+        for output in outputs(target) {
+            owners.insert(collision_key(&output), (input.clone(), None));
+        }
+    }
+
+    for (selection, sources) in selections.iter().zip(matched) {
+        let mut placed = IndexMap::new();
+        for source in sources {
+            let output = selection
+                .output(source, version)
+                .map_err(|invalid| invalid.named(name))?;
+            match owners.get(&collision_key(&output)) {
+                Some((_, Some(owner))) if owner == source => continue,
+                Some((first, _)) => {
+                    return Err(VendorError::OutputCollision {
+                        name: name.to_owned(),
+                        output,
+                        first: first.clone(),
+                        second: selection.key.clone(),
+                    });
+                }
+                None => {}
+            }
+            owners.insert(
+                collision_key(&output),
+                (selection.key.clone(), Some(source.clone())),
+            );
+            placed.insert(source.clone(), output);
+        }
+        lock_files.insert(selection.key.clone(), FileTarget::ExtractMap(placed));
+    }
+    Ok(lock_files)
+}
+
+/// What `selections` matched when `locked` was installed, or `None` if it lacks one of them.
+#[must_use]
+pub fn locked_matches(selections: &[Selection], locked: &VendorLock) -> Option<Vec<Vec<String>>> {
+    selections
+        .iter()
+        .map(|selection| match locked.files.get(&selection.key)? {
+            FileTarget::ExtractMap(map) => Some(map.keys().cloned().collect()),
+            FileTarget::Rename(_) | FileTarget::ExtractList(_) => None,
+        })
+        .collect()
+}
+
+/// How two outputs compare when deciding whether they collide.
+///
+/// Windows and macOS fold case by default, so names that differ only in case are one file.
+fn collision_key(output: &str) -> String {
+    let output = output.strip_prefix("./").unwrap_or(output);
+    if cfg!(any(windows, target_os = "macos")) {
+        output.to_lowercase()
+    } else {
+        output.to_owned()
+    }
+}
+
+impl VendorLock {
+    /// Every path the entry wrote into the dependency folder, relative to it.
+    #[must_use]
+    pub fn outputs(&self) -> Vec<String> {
+        flat_files(&self.files)
+    }
 }
 
 /// Every path written into the dependency folder, relative to it.
