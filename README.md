@@ -585,7 +585,7 @@ repository = 'https://github.com/anthropics/skills'
 This saves every font under `fonts/`, keeping its subfolders, and each skill's `SKILL.md` as
 `<skill>.md`.
 
-Folders and globs work for `repository` dependencies. They don't reach inside release archives yet.
+Folders and globs also work [inside archives](#inside-archives).
 
 #### Folders
 
@@ -640,9 +640,79 @@ Any other destination is a file name, built from these placeholders:
 - `hashVersionFile` is `true` and the first file is a folder or pattern. Name the file to track
   instead.
 
+#### Inside archives
+
+An archive's members can be folders and patterns too, for release assets and `url` downloads
+alike:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "rg": {
+            "version": "14.1.1",
+            "repository": "https://github.com/BurntSushi/ripgrep",
+            "files": {
+                "{release}/ripgrep-{version}-x86_64-pc-windows-msvc.zip": {
+                    "ripgrep-{version}-x86_64-pc-windows-msvc/rg.exe": "rg.exe",
+                    "ripgrep-{version}-x86_64-pc-windows-msvc/doc/": "doc/",
+                    "ripgrep-{version}-x86_64-pc-windows-msvc/complete/*.ps1": "complete/"
+                }
+            }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  rg:
+    version: 14.1.1
+    repository: https://github.com/BurntSushi/ripgrep
+    files:
+      '{release}/ripgrep-{version}-x86_64-pc-windows-msvc.zip':
+        ripgrep-{version}-x86_64-pc-windows-msvc/rg.exe: rg.exe
+        ripgrep-{version}-x86_64-pc-windows-msvc/doc/: doc/
+        ripgrep-{version}-x86_64-pc-windows-msvc/complete/*.ps1: complete/
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.rg]
+version = '14.1.1'
+repository = 'https://github.com/BurntSushi/ripgrep'
+
+[vendorDependencies.rg.files.'{release}/ripgrep-{version}-x86_64-pc-windows-msvc.zip']
+'ripgrep-{version}-x86_64-pc-windows-msvc/rg.exe' = 'rg.exe'
+'ripgrep-{version}-x86_64-pc-windows-msvc/doc/' = 'doc/'
+'ripgrep-{version}-x86_64-pc-windows-msvc/complete/*.ps1' = 'complete/'
+```
+
+</details>
+<!-- /formats -->
+
+Members follow the same rules as repository paths, and a leading `./` in a tarball's member names
+is ignored. In a list of members, a folder keeps its own name and a pattern keeps paths below its
+fixed folder.
+
+To list its members, `vendor` downloads the whole archive, even a `.zip` it could otherwise read
+in pieces.
+
 #### Requests
 
-An install lists each folder with one GitHub API request, and downloads the files from
+An install lists each repository folder with one GitHub API request, and downloads the files from
 `raw.githubusercontent.com`, which doesn't count against the rate limit. A `sync` with nothing
 changed makes no request at all, because the lockfile records every file a folder or pattern
 matched.
@@ -780,7 +850,8 @@ files = [
 
 - The supported formats are zip, tar, gzip, xz, tar.gz, tar.xz, 7z and `.crx`/`.xpi`.
   `vendor` detects the format from the file's contents, not its name.
-- Only the files you name are unpacked.
+- Only the files you name are unpacked. Members can also be
+  [folders and patterns](#inside-archives).
 - For a large `.zip`, only those files are downloaded, using HTTP range requests. The rest of the
   archive never is.
 
@@ -1932,7 +2003,7 @@ the file that landed on disk. A [`url` dependency](#downloading-from-other-sites
 where a GitHub one records `repository`.
 
 A [folder or pattern](#folders-and-globs) records each file it matched, by its path in the
-repository:
+repository. Inside an archive, each declared member maps to the members it matched:
 
 ```json
 "files": {
@@ -1942,6 +2013,18 @@ repository:
   "skills/**/SKILL.md": { "skills/pdf/SKILL.md": "pdf.md" }
 }
 ```
+
+```json
+"files": {
+  "{release}/ripgrep-{version}-x86_64-pc-windows-msvc.zip": {
+    "ripgrep-{version}-x86_64-pc-windows-msvc/doc/": {
+      "ripgrep-14.1.1-x86_64-pc-windows-msvc/doc/FAQ.md": "doc/FAQ.md"
+    }
+  }
+}
+```
+
+A binary older than this format can't read a lockfile that holds an archive entry like this one.
 
 `vendor sync` downloads a dependency again when any of these is true:
 
