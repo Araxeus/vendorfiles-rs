@@ -28,6 +28,31 @@ pub enum VendorError {
     )]
     InvalidFilesKey { name: String },
 
+    #[error("'{key}' in vendorDependencies.{name} {reason}")]
+    InvalidSelection {
+        name: String,
+        key: String,
+        reason: String,
+    },
+
+    #[error("vendorDependencies.{name} writes {output} from both '{first}' and '{second}'")]
+    OutputCollision {
+        name: String,
+        output: String,
+        first: String,
+        second: String,
+    },
+
+    #[error(
+        "vendorDependencies.{name}.hashVersionFile is true, but its first file is a folder or pattern. Set hashVersionFile to the path to track"
+    )]
+    HashVersionFileNeedsFile { name: String },
+
+    #[error(
+        "GitHub cut the listing of {folder} short because the folder is too large. Use a pattern that starts deeper in the tree"
+    )]
+    TreeTruncated { folder: String },
+
     #[error("config key 'vendorDependencies.{name}.hashVersionFile' must be a string or true")]
     InvalidHashVersionFileKey { name: String },
 

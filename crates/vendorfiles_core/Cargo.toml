@@ -17,6 +17,7 @@ arboard.workspace = true
 fancy-regex.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
+globset.workspace = true
 indexmap.workspace = true
 jsonc-parser.workspace = true
 keyring-core.workspace = true

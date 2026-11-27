@@ -26,6 +26,7 @@ dialoguer = { version = "0.12.0", default-features = false }
 fancy-regex = "0.20.0"
 flate2 = "1.1.10"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+globset = { version = "0.4.22", default-features = false }
 indexmap = { version = "2.14.2", features = ["serde"] }
 # Reads and edits JSON configs, which are parsed as JSON5. The `cst` feature keeps comments and
 # layout as ordinary nodes, so a version bump rewrites one string and leaves the rest of the file
