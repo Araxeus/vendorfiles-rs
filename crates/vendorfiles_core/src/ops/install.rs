@@ -26,7 +26,7 @@ use crate::model::{
     Dependency, FileSpec, FileTarget, RawDependency, Repository, Source, files_config_value,
     flatten_files,
 };
-use crate::ops::expand::{Planned, download_selected};
+use crate::ops::expand::{Fetched, Planned, download_selected};
 use crate::ops::{OpResult, Session};
 use crate::progress;
 use crate::remote_zip;
@@ -712,8 +712,16 @@ async fn download_all(
     let repo = match &dependency.source {
         Source::GitHub(repo) => repo,
         Source::Url(source) => {
-            return download_urls(github.http(), dependency, source, folder, version, progress)
-                .await;
+            return download_urls(
+                github.http(),
+                dependency,
+                source,
+                folder,
+                version,
+                plan,
+                progress,
+            )
+            .await;
         }
     };
     match download_each(github, dependency, repo, folder, version, plan, progress).await {
@@ -778,8 +786,14 @@ async fn download_each(
             "downloading {} release asset(s)",
             release_files.len()
         ));
-        let saved = futures_util::future::try_join_all(release_files.iter().map(|spec| {
-            download_release_file(github, dependency, repo, folder, version, spec, progress)
+        let saved = futures_util::future::try_join_all(release_files.iter().map(|spec| async {
+            match listed(plan, spec) {
+                Some((fetched, pairs)) => fetched.place(&pairs, version, folder, progress).await,
+                None => {
+                    download_release_file(github, dependency, repo, folder, version, spec, progress)
+                        .await
+                }
+            }
         }))
         .await?;
         record(progress, saved.iter().flatten());
@@ -791,6 +805,17 @@ async fn download_each(
     }
 
     Ok(())
+}
+
+/// The archive expansion already downloaded for `spec`, with the members to take from it.
+fn listed<'a>(
+    plan: Option<&'a Planned>,
+    spec: &FileSpec,
+) -> Option<(&'a Fetched, Vec<(String, String)>)> {
+    let plan = plan?;
+    let fetched = plan.archive(&spec.input)?;
+    let pairs = plan.files.get(&spec.input)?.extraction_pairs()?;
+    Some((fetched, pairs))
 }
 
 /// Notes every destination a batch produced, in declaration order.
@@ -895,7 +920,7 @@ async fn download_release_file(
 }
 
 /// Moves extracted archive members into the dependency folder, in declaration order.
-async fn place_members(
+pub(super) async fn place_members(
     extracted: &Path,
     pairs: &[(String, String)],
     version: &str,
@@ -912,7 +937,7 @@ async fn place_members(
 }
 
 /// Streams a response to `path` with its own bar.
-async fn save(
+pub(super) async fn save(
     response: reqwest::Response,
     path: &Path,
     progress: &progress::Dependency,
@@ -930,15 +955,20 @@ async fn download_urls(
     source: &UrlSource,
     folder: &Path,
     version: &str,
+    plan: Option<&Planned>,
     progress: &progress::Dependency,
 ) -> Result<()> {
     let specs = flatten_files(&dependency.files);
     progress.status(format!("downloading {} file(s)", specs.len()));
-    let saved =
-        futures_util::future::try_join_all(specs.iter().map(|spec| {
-            download_url_file(http, dependency, source, folder, version, spec, progress)
-        }))
-        .await?;
+    let saved = futures_util::future::try_join_all(specs.iter().map(|spec| async {
+        match listed(plan, spec) {
+            Some((fetched, pairs)) => fetched.place(&pairs, version, folder, progress).await,
+            None => {
+                download_url_file(http, dependency, source, folder, version, spec, progress).await
+            }
+        }
+    }))
+    .await?;
     record(progress, saved.iter().flatten());
     Ok(())
 }
@@ -1157,7 +1187,7 @@ async fn save_and_extract(
 }
 
 /// The reference's wording for an archive that would not open, over the reason it would not.
-fn cannot_extract(asset: &str, source: VendorError) -> VendorError {
+pub(super) fn cannot_extract(asset: &str, source: VendorError) -> VendorError {
     VendorError::CannotExtract {
         file: asset.to_owned(),
         source: Box::new(source),

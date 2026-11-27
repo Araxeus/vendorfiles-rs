@@ -15,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::error::{Result, VendorError};
 use crate::installer::{InstallerKey, InstallerOptions};
 use crate::lockfile::{config_files_to_lock_files, flat_files};
-use crate::selection::{Selection, is_selection, selections};
+use crate::selection::{Selections, is_selection};
 use crate::template::{
     basename, browsable_url, expand_url, is_github_url, is_http_url, is_release_path,
     owner_and_name_from_repo_url, uses_version,
@@ -72,6 +72,9 @@ pub enum FileTarget {
     ExtractList(Vec<String>),
     /// `"archive.zip": { "a": "b" }` - extract these entries under new names.
     ExtractMap(IndexMap<String, String>),
+    /// Lockfile only: each declared member of an archive, mapped to the members it matched and
+    /// where each landed. Written for an archive whose members include a folder or pattern.
+    Selected(IndexMap<String, IndexMap<String, String>>),
 }
 
 impl FileTarget {
@@ -86,6 +89,12 @@ impl FileTarget {
             Self::ExtractMap(map) => {
                 Some(map.iter().map(|(i, o)| (i.clone(), o.clone())).collect())
             }
+            Self::Selected(declared) => Some(
+                declared
+                    .values()
+                    .flat_map(|matched| matched.iter().map(|(i, o)| (i.clone(), o.clone())))
+                    .collect(),
+            ),
         }
     }
 }
@@ -159,7 +168,9 @@ pub fn expand_url_files(files: &[FileEntry], url: &str) -> Option<Vec<FileEntry>
                 .iter()
                 .map(|(member, target)| match target {
                     FileTarget::Rename(output) => Some((member.clone(), output.clone())),
-                    FileTarget::ExtractList(_) | FileTarget::ExtractMap(_) => None,
+                    FileTarget::ExtractList(_)
+                    | FileTarget::ExtractMap(_)
+                    | FileTarget::Selected(_) => None,
                 })
                 .collect::<Option<IndexMap<_, _>>>()?;
             FileTarget::ExtractMap(members)
@@ -210,6 +221,7 @@ fn target_uses_version(target: &FileTarget) -> bool {
         FileTarget::ExtractMap(members) => members
             .iter()
             .any(|(member, output)| uses_version(member) || uses_version(output)),
+        FileTarget::Selected(declared) => declared.keys().any(|m| uses_version(m)),
     }
 }
 
@@ -574,7 +586,7 @@ impl RawDependency {
             });
         }
         let files = self.files.as_deref().unwrap_or_default();
-        let chosen = selections(files, "").map_err(|invalid| invalid.named(name))?;
+        self.validate_selections(name, files, true)?;
         if let Some(key) = files
             .iter()
             .flat_map(entry_inputs)
@@ -593,12 +605,6 @@ impl RawDependency {
         {
             return Err(VendorError::HashVersionFileNeedsFile {
                 name: name.to_owned(),
-            });
-        }
-        if !chosen.is_empty() && self.installer(name)?.is_some() {
-            return Err(VendorError::InstallerNeedsOneFile {
-                name: name.to_owned(),
-                count: chosen.len() + flat_files(&config_files_to_lock_files(files, "")).len(),
             });
         }
         // `fancy_regex`, not `regex`: users write JavaScript patterns, which may use
@@ -690,7 +696,32 @@ impl RawDependency {
         if mentions_version && !versioned {
             return Err(VendorError::UrlNeedsVersion { name: name() });
         }
+        self.validate_selections(&name(), &files, false)?;
         self.validate_installer(&name(), &files)
+    }
+
+    /// Checks the folders and patterns among `files`, which an installer cannot take.
+    fn validate_selections(&self, name: &str, files: &[FileEntry], repository: bool) -> Result<()> {
+        // The nested form is how the lockfile records a selection, not something to write.
+        let lock_only = files.iter().any(|entry| {
+            matches!(entry, FileEntry::Mapped(map)
+                if map.values().any(|target| matches!(target, FileTarget::Selected(_))))
+        });
+        if lock_only {
+            return Err(VendorError::InvalidFilesKey {
+                name: name.to_owned(),
+            });
+        }
+        let chosen =
+            Selections::of(files, "", repository).map_err(|invalid| invalid.named(name))?;
+        if !chosen.is_empty() && self.installer(name)?.is_some() {
+            let literal = flat_files(&config_files_to_lock_files(files, "")).len();
+            return Err(VendorError::InstallerNeedsOneFile {
+                name: name.to_owned(),
+                count: literal + chosen.repo.len() + chosen.archives.len(),
+            });
+        }
+        Ok(())
     }
 
     /// `files` of a `url` dependency in the full form, and whether they use the version.
@@ -851,16 +882,15 @@ impl Dependency {
         matches!(self.source, Source::Url(_))
     }
 
-    /// The dependency's repository folders and patterns, at `version`.
+    /// The dependency's folders and patterns, in the repository and inside archives, at
+    /// `version`.
     ///
     /// # Errors
     ///
     /// Returns [`VendorError::InvalidSelection`] for a selection that cannot be used.
-    pub fn selections(&self, version: &str) -> Result<Vec<Selection>> {
-        if self.is_url() {
-            return Ok(Vec::new());
-        }
-        selections(&self.files, version).map_err(|invalid| invalid.named(&self.name))
+    pub fn selections(&self, version: &str) -> Result<Selections> {
+        Selections::of(&self.files, version, !self.is_url())
+            .map_err(|invalid| invalid.named(&self.name))
     }
 
     /// The `hashVersionFile` path to track, resolving `true` to the first declared file.
@@ -1473,6 +1503,8 @@ mod tests {
             r#"{"repository": "https://github.com/a/b", "files": ["a/[b*"]}"#,
             r#"{"repository": "https://github.com/a/b", "files": [{"a/": ["x"]}]}"#,
             r#"{"repository": "https://github.com/a/b", "files": [{"a/*": {"x": "y"}}]}"#,
+            r#"{"repository": "https://github.com/a/b", "files": [{"{release}/a.zip": {"x/*": {"x/a": "a"}}}]}"#,
+            r#"{"url": "https://x.io/a.zip", "files": {"bin/[*": "bin/"}}"#,
         ] {
             assert!(validated(json).is_err(), "{json}");
         }

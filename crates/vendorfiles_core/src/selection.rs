@@ -129,8 +129,11 @@ impl Selection {
     }
 
     /// Whether `path`, relative to the repository root, belongs to this selection.
+    ///
+    /// A leading `./`, as some tarballs write their members, is ignored.
     #[must_use]
     pub fn matches(&self, path: &str) -> bool {
+        let path = path.strip_prefix("./").unwrap_or(path);
         self.matcher.as_ref().map_or_else(
             || path.starts_with(&self.base),
             |matcher| matcher.is_match(path),
@@ -144,10 +147,122 @@ impl Selection {
     /// Returns [`Invalid`] for an unknown placeholder, a `{parent}` the source does not have, or
     /// a source path that could escape the destination.
     pub fn output(&self, source: &str, version: &str) -> Result<String, Invalid> {
+        let source = source.strip_prefix("./").unwrap_or(source);
         check_source(source).map_err(|reason| Invalid::new(&self.key, reason))?;
         let relative = source.strip_prefix(&self.base).unwrap_or(source);
         render(&self.destination, source, relative, version)
             .map_err(|reason| Invalid::new(&self.key, reason))
+    }
+}
+
+/// One declared member of an archive whose members include folders or patterns.
+#[derive(Debug, Clone)]
+pub enum Member {
+    /// A member named outright, with its output, both with the version filled in.
+    Literal { member: String, output: String },
+    /// A folder or pattern of members.
+    Selected(Selection),
+}
+
+/// An archive input whose members include a folder or pattern.
+#[derive(Debug, Clone)]
+pub struct ArchiveSelection {
+    /// The `files` key of the archive: a `{release}/` asset or a URL.
+    pub key: String,
+    /// Each declared member as written, with what it selects, in declaration order.
+    pub members: Vec<(String, Member)>,
+}
+
+/// Every folder and pattern a dependency declares: in the repository, and inside archives.
+#[derive(Debug, Clone, Default)]
+pub struct Selections {
+    pub repo: Vec<Selection>,
+    pub archives: Vec<ArchiveSelection>,
+}
+
+impl Selections {
+    /// Both kinds, at `version`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Invalid`] for a selection that cannot be used.
+    pub fn of(files: &[FileEntry], version: &str, repository: bool) -> Result<Self, Invalid> {
+        Ok(Self {
+            repo: if repository {
+                selections(files, version)?
+            } else {
+                Vec::new()
+            },
+            archives: archive_selections(files, version)?,
+        })
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.repo.is_empty() && self.archives.is_empty()
+    }
+}
+
+/// What each selection matched: one list per repository selection, then one list per declared
+/// member of each archive, empty for a literal member.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Matched {
+    pub repo: Vec<Vec<String>>,
+    pub archives: Vec<Vec<Vec<String>>>,
+}
+
+/// Whether an archive member names a folder or a pattern rather than one member.
+#[must_use]
+pub fn is_member_selection(member: &str) -> bool {
+    member.ends_with('/') || member.contains(['*', '?'])
+}
+
+/// Every archive among a dependency's files whose members include a folder or pattern.
+///
+/// # Errors
+///
+/// Returns [`Invalid`] for a pattern that does not compile, or an unsafe folder path.
+pub fn archive_selections(
+    files: &[FileEntry],
+    version: &str,
+) -> Result<Vec<ArchiveSelection>, Invalid> {
+    let mut out = Vec::new();
+    for spec in crate::model::flatten_files(files) {
+        let Some(pairs) = declared_members(&spec.output) else {
+            continue;
+        };
+        if !pairs.iter().any(|(member, _)| is_member_selection(member)) {
+            continue;
+        }
+        let mut members = Vec::with_capacity(pairs.len());
+        for (member, output) in pairs {
+            let resolved = match Selection::of(&member, output.as_deref(), version) {
+                Some(selection) => Member::Selected(selection?),
+                None => Member::Literal {
+                    member: replace_version(&member, version),
+                    output: replace_version(output.as_deref().unwrap_or(&member), version),
+                },
+            };
+            members.push((member, resolved));
+        }
+        out.push(ArchiveSelection {
+            key: spec.input,
+            members,
+        });
+    }
+    Ok(out)
+}
+
+/// An archive target's members with their written outputs, or `None` for a plain file.
+fn declared_members(target: &FileTarget) -> Option<Vec<(String, Option<String>)>> {
+    match target {
+        FileTarget::Rename(_) | FileTarget::Selected(_) => None,
+        FileTarget::ExtractList(list) => Some(list.iter().map(|m| (m.clone(), None)).collect()),
+        FileTarget::ExtractMap(map) => Some(
+            map.iter()
+                .map(|(m, o)| (m.clone(), Some(o.clone())))
+                .collect(),
+        ),
     }
 }
 

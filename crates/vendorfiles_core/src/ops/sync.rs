@@ -149,7 +149,13 @@ impl Session {
         self.progress
             .reserve_rows(MAX_CONCURRENT_DOWNLOADS.min(working));
 
-        futures_util::future::join_all(prepared.iter_mut().map(|item| self.expand(item))).await;
+        // Expanding may download an archive, so it shares the download limit.
+        futures_util::StreamExt::for_each_concurrent(
+            futures_util::stream::iter(prepared.iter_mut()),
+            MAX_CONCURRENT_DOWNLOADS,
+            |item| self.expand(item),
+        )
+        .await;
         for item in &mut prepared {
             clear_previous(item).await?;
         }

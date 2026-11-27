@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor};
 use crate::model::{FileEntry, FileTarget};
-use crate::selection::{Selection, is_selection};
+use crate::selection::{Matched, Member, Selections, is_selection};
 use crate::template::{basename, replace_version};
 
 /// The `files` map of a single locked dependency: config input → what landed on disk.
@@ -108,6 +108,7 @@ fn replace_version_in_target(target: &FileTarget, version: &str) -> FileTarget {
                 .map(|(k, v)| (k.clone(), replace_version(v, version)))
                 .collect(),
         ),
+        FileTarget::Selected(_) => target.clone(),
     }
 }
 
@@ -140,10 +141,10 @@ pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFil
     out
 }
 
-/// A dependency's lock `files`, given the source files each selection matched.
+/// A dependency's lock `files`, given what each selection matched.
 ///
-/// `matched` runs parallel to `selections`. A source that two selections place at the same
-/// output is kept once, under the first.
+/// A source that two selections place at the same output is kept once, under the first. An
+/// archive whose members include a selection records [`FileTarget::Selected`].
 ///
 /// # Errors
 ///
@@ -152,59 +153,132 @@ pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFil
 pub fn expanded_lock(
     name: &str,
     files: &[FileEntry],
-    selections: &[Selection],
-    matched: &[Vec<String>],
+    selections: &Selections,
+    matched: &Matched,
     version: &str,
 ) -> Result<LockFiles> {
     let mut lock_files = config_files_to_lock_files(files, version);
-
-    // Output → the key that writes it, and the source file when a selection does.
-    let mut owners: IndexMap<String, (String, Option<String>)> = IndexMap::new();
+    for archive in &selections.archives {
+        lock_files.shift_remove(&archive.key);
+    }
+    let mut owners = Owners::new(name);
     for (input, target) in &lock_files {
         for output in outputs(target) {
-            owners.insert(collision_key(&output), (input.clone(), None));
+            owners.claim(&output, input, None)?;
         }
     }
 
-    for (selection, sources) in selections.iter().zip(matched) {
+    for (selection, sources) in selections.repo.iter().zip(&matched.repo) {
         let mut placed = IndexMap::new();
         for source in sources {
             let output = selection
                 .output(source, version)
                 .map_err(|invalid| invalid.named(name))?;
-            match owners.get(&collision_key(&output)) {
-                Some((_, Some(owner))) if owner == source => continue,
-                Some((first, _)) => {
-                    return Err(VendorError::OutputCollision {
-                        name: name.to_owned(),
-                        output,
-                        first: first.clone(),
-                        second: selection.key.clone(),
-                    });
-                }
-                None => {}
+            if owners.claim(&output, &selection.key, Some(("", source)))? {
+                placed.insert(source.clone(), output);
             }
-            owners.insert(
-                collision_key(&output),
-                (selection.key.clone(), Some(source.clone())),
-            );
-            placed.insert(source.clone(), output);
         }
         lock_files.insert(selection.key.clone(), FileTarget::ExtractMap(placed));
+    }
+
+    for (archive, members) in selections.archives.iter().zip(&matched.archives) {
+        let mut declared = IndexMap::new();
+        let mut taken = std::collections::HashSet::new();
+        for ((key, member), sources) in archive.members.iter().zip(members) {
+            let mut placed = IndexMap::new();
+            match member {
+                Member::Literal { member, output } => {
+                    owners.claim(output, key, Some((&archive.key, member)))?;
+                    taken.insert(member.clone());
+                    placed.insert(member.clone(), output.clone());
+                }
+                Member::Selected(selection) => {
+                    for source in sources {
+                        if !taken.insert(source.clone()) {
+                            continue;
+                        }
+                        let output = selection
+                            .output(source, version)
+                            .map_err(|invalid| invalid.named(name))?;
+                        owners.claim(&output, key, Some((&archive.key, source)))?;
+                        placed.insert(source.clone(), output);
+                    }
+                }
+            }
+            declared.insert(key.clone(), placed);
+        }
+        lock_files.insert(archive.key.clone(), FileTarget::Selected(declared));
     }
     Ok(lock_files)
 }
 
+/// Who writes each output, so two different sources never land on one path.
+struct Owners<'a> {
+    name: &'a str,
+    /// Output → the key that writes it, and the archive and source file when a selection does.
+    by_output: IndexMap<String, (String, Option<(String, String)>)>,
+}
+
+impl<'a> Owners<'a> {
+    fn new(name: &'a str) -> Self {
+        Self {
+            name,
+            by_output: IndexMap::new(),
+        }
+    }
+
+    /// Records that `key` writes `output`. Returns `false` when the same source already does.
+    fn claim(&mut self, output: &str, key: &str, source: Option<(&str, &str)>) -> Result<bool> {
+        let source = source.map(|(origin, path)| (origin.to_owned(), path.to_owned()));
+        match self.by_output.get(&collision_key(output)) {
+            Some((_, Some(owner))) if source.as_ref() == Some(owner) => Ok(false),
+            Some((first, _)) => Err(VendorError::OutputCollision {
+                name: self.name.to_owned(),
+                output: output.to_owned(),
+                first: first.clone(),
+                second: key.to_owned(),
+            }),
+            None => {
+                self.by_output
+                    .insert(collision_key(output), (key.to_owned(), source));
+                Ok(true)
+            }
+        }
+    }
+}
+
 /// What `selections` matched when `locked` was installed, or `None` if it lacks one of them.
 #[must_use]
-pub fn locked_matches(selections: &[Selection], locked: &VendorLock) -> Option<Vec<Vec<String>>> {
-    selections
+pub fn locked_matches(selections: &Selections, locked: &VendorLock) -> Option<Matched> {
+    let repo = selections
+        .repo
         .iter()
         .map(|selection| match locked.files.get(&selection.key)? {
             FileTarget::ExtractMap(map) => Some(map.keys().cloned().collect()),
-            FileTarget::Rename(_) | FileTarget::ExtractList(_) => None,
+            FileTarget::Rename(_) | FileTarget::ExtractList(_) | FileTarget::Selected(_) => None,
         })
-        .collect()
+        .collect::<Option<_>>()?;
+    let archives = selections
+        .archives
+        .iter()
+        .map(|archive| {
+            let FileTarget::Selected(declared) = locked.files.get(&archive.key)? else {
+                return None;
+            };
+            archive
+                .members
+                .iter()
+                .map(|(key, member)| {
+                    let placed = declared.get(key)?;
+                    Some(match member {
+                        Member::Literal { .. } => Vec::new(),
+                        Member::Selected(_) => placed.keys().cloned().collect(),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .collect::<Option<_>>()?;
+    Some(Matched { repo, archives })
 }
 
 /// How two outputs compare when deciding whether they collide.
@@ -239,6 +313,10 @@ fn outputs(target: &FileTarget) -> Vec<String> {
         FileTarget::Rename(s) => vec![s.clone()],
         FileTarget::ExtractList(list) => list.clone(),
         FileTarget::ExtractMap(map) => map.values().cloned().collect(),
+        FileTarget::Selected(declared) => declared
+            .values()
+            .flat_map(|matched| matched.values().cloned())
+            .collect(),
     }
 }
 
