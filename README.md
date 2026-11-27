@@ -41,6 +41,7 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
   - [Where vendor looks for the config](#where-vendor-looks-for-the-config)
   - [Dependency fields](#dependency-fields)
   - [Output folders and file names](#output-folders-and-file-names)
+  - [Folders and globs](#folders-and-globs)
   - [Versions and releases](#versions-and-releases)
   - [Downloading from other sites](#downloading-from-other-sites)
   - [Locking a dependency](#locking-a-dependency)
@@ -330,7 +331,7 @@ files = ['cooltipz.min.css', 'LICENSE']
 | --- | --- |
 | `repository` | The GitHub repository URL. Use `url` instead for anything else |
 | `version` | A release tag like `v1.0.0`, or a commit hash when tracking commits |
-| `files` | The files to download |
+| `files` | The files to download. A path ending in `/` takes a folder, and `*` makes a pattern ([details](#folders-and-globs)) |
 | `vendorFolder` | Where to save this dependency's files ([output folders](#output-folders)) |
 | `hashVersionFile` | Track a file's commits instead of releases ([details](#tracking-commits-instead-of-releases)) |
 | `releaseRegex` | Which releases count when looking for the latest ([details](#choosing-which-releases-count)) |
@@ -523,6 +524,128 @@ If every file has a destination, you can leave out the array:
 ```json
 "files": { "LICENSE": "../licenses/COLORIS_LICENSE" }
 ```
+
+### Folders and globs
+
+A `files` path that ends in `/` takes the whole folder. A path with `*` or `?` is a glob pattern,
+and takes every file that matches:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "skills": {
+            "version": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+            "repository": "https://github.com/anthropics/skills",
+            "files": {
+                "skills/canvas-design/canvas-fonts/": "fonts/",
+                "skills/**/SKILL.md": "{parent}.md"
+            }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  skills:
+    version: e4bb5d960d87126ff3b3a8af1a104b7db67560ba
+    repository: https://github.com/anthropics/skills
+    files:
+      skills/canvas-design/canvas-fonts/: fonts/
+      skills/**/SKILL.md: '{parent}.md'
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.skills]
+version = 'e4bb5d960d87126ff3b3a8af1a104b7db67560ba'
+repository = 'https://github.com/anthropics/skills'
+
+[vendorDependencies.skills.files]
+'skills/canvas-design/canvas-fonts/' = 'fonts/'
+'skills/**/SKILL.md' = '{parent}.md'
+```
+
+</details>
+<!-- /formats -->
+
+This saves every font under `fonts/`, keeping its subfolders, and each skill's `SKILL.md` as
+`<skill>.md`.
+
+Folders and globs work for `repository` dependencies. They don't reach inside release archives yet.
+
+#### Folders
+
+The folder's contents land in the destination, keeping their own subfolders. Without a
+destination, the folder keeps its own name, so `"skills/canvas-design/canvas-fonts/"` saves to
+`canvas-fonts/`.
+
+#### Patterns
+
+Only `*` and `?` make a path a pattern, so paths like `app/[id].tsx` stay literal. Inside a
+pattern, the rest of the glob syntax works too:
+
+| Pattern | Matches |
+| --- | --- |
+| `dist/*` | Files directly in `dist` |
+| `dist/**` | Every file in `dist`, at any depth |
+| `dist/**/*.js` | `.js` files in `dist`, at any depth |
+| `*.{md,txt}` | `.md` and `.txt` files at the top of the repository |
+| `docs/[ab]*.md` | `.md` files in `docs` that start with `a` or `b` |
+
+- Matching is case sensitive, on `/`-separated paths, on every platform.
+- Dotfiles match like any other file, and `.gitignore` doesn't apply.
+- `\` makes the next character literal, so `a\*b` matches a file named `a*b`.
+- `{version}` and `{tag}` are filled in before matching.
+
+#### Destinations
+
+A destination that ends in `/` keeps each file's path below the pattern's fixed folder. With
+`"dist/**/*.js": "scripts/"`, `dist/utils/a.js` saves as `scripts/utils/a.js`. A pattern with no
+destination, like `"files": ["dist/**/*.js"]`, does the same into the dependency folder.
+
+Any other destination is a file name, built from these placeholders:
+
+| Placeholder | For `skills/pdf/a.tar.gz` matched by `skills/**` |
+| --- | --- |
+| `{path}` | `pdf/a.tar.gz` |
+| `{filename}` | `a.tar.gz` |
+| `{stem}` | `a.tar` |
+| `{ext}` | `gz` |
+| `{parent}` | `pdf` |
+| `{version}`, `{tag}` | The version, as for [renamed files](#renaming-files) |
+
+`{ext}` is empty for names like `Makefile` and `.bashrc`.
+
+#### Errors
+
+`vendor` checks the whole selection before it writes anything, and stops when:
+
+- A folder or pattern matches no files.
+- Two files would land on the same destination.
+- A match is a symlink or a submodule.
+- `hashVersionFile` is `true` and the first file is a folder or pattern. Name the file to track
+  instead.
+
+#### Requests
+
+An install lists each folder with one GitHub API request, and downloads the files from
+`raw.githubusercontent.com`, which doesn't count against the rate limit. A `sync` with nothing
+changed makes no request at all, because the lockfile records every file a folder or pattern
+matched.
 
 ### Versions and releases
 
@@ -1807,6 +1930,18 @@ You can keep the token across reboots in two ways.
 Under `files`, each key is a path from your config, with `{version}` left as written. Each value is
 the file that landed on disk. A [`url` dependency](#downloading-from-other-sites) records its `url`
 where a GitHub one records `repository`.
+
+A [folder or pattern](#folders-and-globs) records each file it matched, by its path in the
+repository:
+
+```json
+"files": {
+  "skills/canvas-design/canvas-fonts/": {
+    "skills/canvas-design/canvas-fonts/Lora-Regular.ttf": "fonts/Lora-Regular.ttf"
+  },
+  "skills/**/SKILL.md": { "skills/pdf/SKILL.md": "pdf.md" }
+}
+```
 
 `vendor sync` downloads a dependency again when any of these is true:
 
