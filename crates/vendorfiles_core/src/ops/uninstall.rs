@@ -4,7 +4,7 @@ use crate::error::{Result, VendorError};
 use crate::fsx::delete_file_and_empty_folders;
 use crate::installer::{self, Installed};
 use crate::lockfile::{
-    Lockfile, config_files_to_lock_files, flat_files, previous_entry, read_lockfile,
+    Lockfile, VendorLock, config_files_to_lock_files, flat_files, previous_entry, read_lockfile,
     retire_folder_entry, saved_folder, to_json, write_string,
 };
 use crate::model::RawDependency;
@@ -130,10 +130,7 @@ impl Owned {
             .as_ref()
             .and_then(|entry| saved_folder(lock_dir, entry))
             .unwrap_or_else(|| folder.to_path_buf());
-        let locked_files = locked
-            .as_ref()
-            .map(|entry| flat_files(&entry.files))
-            .unwrap_or_default();
+        let locked_files = locked.as_ref().map(VendorLock::outputs).unwrap_or_default();
 
         // An installer's download never lands in the folder, so a file there under its name is
         // someone else's.

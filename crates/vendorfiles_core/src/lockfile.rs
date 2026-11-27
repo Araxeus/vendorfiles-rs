@@ -11,9 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor};
 use crate::model::{FileEntry, FileTarget};
+use crate::selection::{Matched, Member, Selections, is_selection};
 use crate::template::{basename, replace_version};
 
 /// The `files` map of a single locked dependency: config input → what landed on disk.
+///
+/// A folder or pattern key maps each source file it matched to its output, in the shape of an
+/// archive's member map.
 pub type LockFiles = IndexMap<String, FileTarget>;
 
 /// How many `..` a recorded `savePath` may climb before it is written as an absolute path.
@@ -33,6 +37,10 @@ pub struct VendorLock {
     pub url: Option<String>,
     pub version: String,
     pub files: LockFiles,
+    /// The git blob of each repository file a folder or pattern selected, by source path. An
+    /// update reuses a file whose blob and output have not changed.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub blobs: IndexMap<String, String>,
     /// What an installer put on the machine, for an `installer` dependency. Its `files` are then
     /// empty, since nothing is kept in the dependency folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,6 +112,7 @@ fn replace_version_in_target(target: &FileTarget, version: &str) -> FileTarget {
                 .map(|(k, v)| (k.clone(), replace_version(v, version)))
                 .collect(),
         ),
+        FileTarget::Selected(_) => target.clone(),
     }
 }
 
@@ -111,11 +120,15 @@ fn replace_version_in_target(target: &FileTarget, version: &str) -> FileTarget {
 ///
 /// Later entries overwrite earlier ones by key while keeping the earlier key's position -
 /// the semantics of repeated `Object.assign` in the reference.
+///
+/// Folders and patterns are left out, since their outputs depend on what the repository holds.
+/// See [`expanded_lock`].
 #[must_use]
 pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFiles {
     let mut out = LockFiles::new();
     for entry in files {
         match entry {
+            FileEntry::Simple(input) if is_selection(input) => {}
             FileEntry::Simple(input) => {
                 out.insert(
                     input.clone(),
@@ -123,13 +136,173 @@ pub fn config_files_to_lock_files(files: &[FileEntry], version: &str) -> LockFil
                 );
             }
             FileEntry::Mapped(map) => {
-                for (input, target) in map {
+                for (input, target) in map.iter().filter(|(input, _)| !is_selection(input)) {
                     out.insert(input.clone(), replace_version_in_target(target, version));
                 }
             }
         }
     }
     out
+}
+
+/// A dependency's lock `files`, given what each selection matched.
+///
+/// A source that two selections place at the same output is kept once, under the first. An
+/// archive whose members include a selection records [`FileTarget::Selected`].
+///
+/// # Errors
+///
+/// Returns [`VendorError::InvalidSelection`] for an output that cannot be rendered, or
+/// [`VendorError::OutputCollision`] when two different sources would land on one path.
+pub fn expanded_lock(
+    name: &str,
+    files: &[FileEntry],
+    selections: &Selections,
+    matched: &Matched,
+    version: &str,
+) -> Result<LockFiles> {
+    let mut lock_files = config_files_to_lock_files(files, version);
+    for archive in &selections.archives {
+        lock_files.shift_remove(&archive.key);
+    }
+    let mut owners = Owners::new(name);
+    for (input, target) in &lock_files {
+        for output in outputs(target) {
+            owners.claim(&output, input, None)?;
+        }
+    }
+
+    for (selection, sources) in selections.repo.iter().zip(&matched.repo) {
+        let mut placed = IndexMap::new();
+        for source in sources {
+            let output = selection
+                .output(source, version)
+                .map_err(|invalid| invalid.named(name))?;
+            if owners.claim(&output, &selection.key, Some(("", source)))? {
+                placed.insert(source.clone(), output);
+            }
+        }
+        lock_files.insert(selection.key.clone(), FileTarget::ExtractMap(placed));
+    }
+
+    for (archive, members) in selections.archives.iter().zip(&matched.archives) {
+        let mut declared = IndexMap::new();
+        let mut taken = std::collections::HashSet::new();
+        for ((key, member), sources) in archive.members.iter().zip(members) {
+            let mut placed = IndexMap::new();
+            match member {
+                Member::Literal { member, output } => {
+                    owners.claim(output, key, Some((&archive.key, member)))?;
+                    taken.insert(member.clone());
+                    placed.insert(member.clone(), output.clone());
+                }
+                Member::Selected(selection) => {
+                    for source in sources {
+                        if !taken.insert(source.clone()) {
+                            continue;
+                        }
+                        let output = selection
+                            .output(source, version)
+                            .map_err(|invalid| invalid.named(name))?;
+                        owners.claim(&output, key, Some((&archive.key, source)))?;
+                        placed.insert(source.clone(), output);
+                    }
+                }
+            }
+            declared.insert(key.clone(), placed);
+        }
+        lock_files.insert(archive.key.clone(), FileTarget::Selected(declared));
+    }
+    Ok(lock_files)
+}
+
+/// Who writes each output, so two different sources never land on one path.
+struct Owners<'a> {
+    name: &'a str,
+    /// Output → the key that writes it, and the archive and source file when a selection does.
+    by_output: IndexMap<String, (String, Option<(String, String)>)>,
+}
+
+impl<'a> Owners<'a> {
+    fn new(name: &'a str) -> Self {
+        Self {
+            name,
+            by_output: IndexMap::new(),
+        }
+    }
+
+    /// Records that `key` writes `output`. Returns `false` when the same source already does.
+    fn claim(&mut self, output: &str, key: &str, source: Option<(&str, &str)>) -> Result<bool> {
+        let source = source.map(|(origin, path)| (origin.to_owned(), path.to_owned()));
+        match self.by_output.get(&collision_key(output)) {
+            Some((_, Some(owner))) if source.as_ref() == Some(owner) => Ok(false),
+            Some((first, _)) => Err(VendorError::OutputCollision {
+                name: self.name.to_owned(),
+                output: output.to_owned(),
+                first: first.clone(),
+                second: key.to_owned(),
+            }),
+            None => {
+                self.by_output
+                    .insert(collision_key(output), (key.to_owned(), source));
+                Ok(true)
+            }
+        }
+    }
+}
+
+/// What `selections` matched when `locked` was installed, or `None` if it lacks one of them.
+#[must_use]
+pub fn locked_matches(selections: &Selections, locked: &VendorLock) -> Option<Matched> {
+    let repo = selections
+        .repo
+        .iter()
+        .map(|selection| match locked.files.get(&selection.key)? {
+            FileTarget::ExtractMap(map) => Some(map.keys().cloned().collect()),
+            FileTarget::Rename(_) | FileTarget::ExtractList(_) | FileTarget::Selected(_) => None,
+        })
+        .collect::<Option<_>>()?;
+    let archives = selections
+        .archives
+        .iter()
+        .map(|archive| {
+            let FileTarget::Selected(declared) = locked.files.get(&archive.key)? else {
+                return None;
+            };
+            archive
+                .members
+                .iter()
+                .map(|(key, member)| {
+                    let placed = declared.get(key)?;
+                    Some(match member {
+                        Member::Literal { .. } => Vec::new(),
+                        Member::Selected(_) => placed.keys().cloned().collect(),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .collect::<Option<_>>()?;
+    Some(Matched { repo, archives })
+}
+
+/// How two outputs compare when deciding whether they collide.
+///
+/// Windows and macOS fold case by default, so names that differ only in case are one file.
+fn collision_key(output: &str) -> String {
+    let output = output.strip_prefix("./").unwrap_or(output);
+    if cfg!(any(windows, target_os = "macos")) {
+        output.to_lowercase()
+    } else {
+        output.to_owned()
+    }
+}
+
+impl VendorLock {
+    /// Every path the entry wrote into the dependency folder, relative to it.
+    #[must_use]
+    pub fn outputs(&self) -> Vec<String> {
+        flat_files(&self.files)
+    }
 }
 
 /// Every path written into the dependency folder, relative to it.
@@ -144,6 +317,10 @@ fn outputs(target: &FileTarget) -> Vec<String> {
         FileTarget::Rename(s) => vec![s.clone()],
         FileTarget::ExtractList(list) => list.clone(),
         FileTarget::ExtractMap(map) => map.values().cloned().collect(),
+        FileTarget::Selected(declared) => declared
+            .values()
+            .flat_map(|matched| matched.values().cloned())
+            .collect(),
     }
 }
 
@@ -354,6 +531,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -377,6 +555,7 @@ mod tests {
             url: None,
             version: "1".to_owned(),
             files: LockFiles::new(),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -402,6 +581,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files, "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: None,
                 pending: false,
@@ -428,6 +608,7 @@ mod tests {
             url: None,
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
+            blobs: indexmap::IndexMap::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -467,6 +648,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -518,6 +700,7 @@ mod tests {
                 url: None,
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -588,6 +771,7 @@ mod tests {
                 url: None,
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
+                blobs: indexmap::IndexMap::new(),
                 installed: None,
                 save_path: None,
                 pending: false,

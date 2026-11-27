@@ -34,6 +34,7 @@ pub mod ops;
 pub mod progress;
 pub mod registry;
 pub mod remote_zip;
+pub mod selection;
 pub mod template;
 #[cfg(test)]
 mod test_server;

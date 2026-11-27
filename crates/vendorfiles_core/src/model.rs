@@ -15,9 +15,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::error::{Result, VendorError};
 use crate::installer::{InstallerKey, InstallerOptions};
 use crate::lockfile::{config_files_to_lock_files, flat_files};
+use crate::selection::{Selections, is_selection};
 use crate::template::{
-    basename, browsable_url, expand_url, is_github_url, is_http_url, owner_and_name_from_repo_url,
-    uses_version,
+    basename, browsable_url, expand_url, is_github_url, is_http_url, is_release_path,
+    owner_and_name_from_repo_url, uses_version,
 };
 use crate::url_source::page::VersionSelector;
 use crate::url_source::{UrlSource, is_git_url};
@@ -71,6 +72,9 @@ pub enum FileTarget {
     ExtractList(Vec<String>),
     /// `"archive.zip": { "a": "b" }` - extract these entries under new names.
     ExtractMap(IndexMap<String, String>),
+    /// Lockfile only: each declared member of an archive, mapped to the members it matched and
+    /// where each landed. Written for an archive whose members include a folder or pattern.
+    Selected(IndexMap<String, IndexMap<String, String>>),
 }
 
 impl FileTarget {
@@ -85,6 +89,12 @@ impl FileTarget {
             Self::ExtractMap(map) => {
                 Some(map.iter().map(|(i, o)| (i.clone(), o.clone())).collect())
             }
+            Self::Selected(declared) => Some(
+                declared
+                    .values()
+                    .flat_map(|matched| matched.iter().map(|(i, o)| (i.clone(), o.clone())))
+                    .collect(),
+            ),
         }
     }
 }
@@ -97,6 +107,14 @@ pub enum FileEntry {
     Simple(String),
     /// `{ "dist/coloris.min.js": "coloris.js" }` - one or more explicit input→output pairs.
     Mapped(IndexMap<String, FileTarget>),
+}
+
+/// The input keys of one `files` element.
+fn entry_inputs(entry: &FileEntry) -> Box<dyn Iterator<Item = &str> + '_> {
+    match entry {
+        FileEntry::Simple(input) => Box::new(std::iter::once(input.as_str())),
+        FileEntry::Mapped(map) => Box::new(map.keys().map(String::as_str)),
+    }
 }
 
 /// A single input→output pair, after flattening the `files` array.
@@ -150,7 +168,9 @@ pub fn expand_url_files(files: &[FileEntry], url: &str) -> Option<Vec<FileEntry>
                 .iter()
                 .map(|(member, target)| match target {
                     FileTarget::Rename(output) => Some((member.clone(), output.clone())),
-                    FileTarget::ExtractList(_) | FileTarget::ExtractMap(_) => None,
+                    FileTarget::ExtractList(_)
+                    | FileTarget::ExtractMap(_)
+                    | FileTarget::Selected(_) => None,
                 })
                 .collect::<Option<IndexMap<_, _>>>()?;
             FileTarget::ExtractMap(members)
@@ -201,6 +221,7 @@ fn target_uses_version(target: &FileTarget) -> bool {
         FileTarget::ExtractMap(members) => members
             .iter()
             .any(|(member, output)| uses_version(member) || uses_version(output)),
+        FileTarget::Selected(declared) => declared.keys().any(|m| uses_version(m)),
     }
 }
 
@@ -564,6 +585,28 @@ impl RawDependency {
                 name: name.to_owned(),
             });
         }
+        let files = self.files.as_deref().unwrap_or_default();
+        self.validate_selections(name, files, true)?;
+        if let Some(key) = files
+            .iter()
+            .flat_map(entry_inputs)
+            .find(|input| input.ends_with('/') && is_release_path(input))
+        {
+            return Err(VendorError::InvalidSelection {
+                name: name.to_owned(),
+                key: key.to_owned(),
+                reason: "is a folder inside a release, which vendor cannot list yet".to_owned(),
+            });
+        }
+        if matches!(self.hash_version_file, Some(HashVersionFile::Flag(true)))
+            && files
+                .first()
+                .is_none_or(|first| entry_inputs(first).next().is_none_or(is_selection))
+        {
+            return Err(VendorError::HashVersionFileNeedsFile {
+                name: name.to_owned(),
+            });
+        }
         // `fancy_regex`, not `regex`: users write JavaScript patterns, which may use
         // lookaround (the reference README suggests `^v(?!.*-(?:alpha|beta)).*`).
         if let Some(regex) = self.release_regex.as_deref()
@@ -653,7 +696,32 @@ impl RawDependency {
         if mentions_version && !versioned {
             return Err(VendorError::UrlNeedsVersion { name: name() });
         }
+        self.validate_selections(&name(), &files, false)?;
         self.validate_installer(&name(), &files)
+    }
+
+    /// Checks the folders and patterns among `files`, which an installer cannot take.
+    fn validate_selections(&self, name: &str, files: &[FileEntry], repository: bool) -> Result<()> {
+        // The nested form is how the lockfile records a selection, not something to write.
+        let lock_only = files.iter().any(|entry| {
+            matches!(entry, FileEntry::Mapped(map)
+                if map.values().any(|target| matches!(target, FileTarget::Selected(_))))
+        });
+        if lock_only {
+            return Err(VendorError::InvalidFilesKey {
+                name: name.to_owned(),
+            });
+        }
+        let chosen =
+            Selections::of(files, "", repository).map_err(|invalid| invalid.named(name))?;
+        if !chosen.is_empty() && self.installer(name)?.is_some() {
+            let literal = flat_files(&config_files_to_lock_files(files, "")).len();
+            return Err(VendorError::InstallerNeedsOneFile {
+                name: name.to_owned(),
+                count: literal + chosen.repo.len() + chosen.archives.len(),
+            });
+        }
+        Ok(())
     }
 
     /// `files` of a `url` dependency in the full form, and whether they use the version.
@@ -814,6 +882,17 @@ impl Dependency {
         matches!(self.source, Source::Url(_))
     }
 
+    /// The dependency's folders and patterns, in the repository and inside archives, at
+    /// `version`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::InvalidSelection`] for a selection that cannot be used.
+    pub fn selections(&self, version: &str) -> Result<Selections> {
+        Selections::of(&self.files, version, !self.is_url())
+            .map_err(|invalid| invalid.named(&self.name))
+    }
+
     /// The `hashVersionFile` path to track, resolving `true` to the first declared file.
     ///
     /// `None` means "track releases instead".
@@ -828,6 +907,11 @@ impl Dependency {
             Some(HashVersionFile::Path(path)) if path.is_empty() => Ok(None),
             Some(HashVersionFile::Path(path)) => Ok(Some(path.clone())),
             Some(HashVersionFile::Flag(true)) => match self.files.first() {
+                Some(first) if entry_inputs(first).next().is_some_and(is_selection) => {
+                    Err(VendorError::HashVersionFileNeedsFile {
+                        name: self.name.clone(),
+                    })
+                }
                 Some(FileEntry::Simple(first)) => Ok(Some(first.clone())),
                 Some(FileEntry::Mapped(map)) => map
                     .keys()
@@ -1399,5 +1483,52 @@ mod tests {
         assert_eq!(d.version.as_deref(), Some("v1"));
         assert_eq!(d.repository.as_deref(), Some("https://github.com/a/b"));
         assert_eq!(d.hash_version_file, Some(HashVersionFile::Flag(true)));
+    }
+
+    fn validated(json: &str) -> crate::error::Result<()> {
+        dep(json).validate("d")
+    }
+
+    #[test]
+    fn folders_and_patterns_are_valid_files() {
+        validated(r#"{"repository": "https://github.com/a/b", "files": ["docs/*.md", "fonts/"]}"#)
+            .unwrap();
+        validated(r#"{"repository": "https://github.com/a/b", "files": {"*.md": "docs/"}}"#)
+            .unwrap();
+    }
+
+    #[test]
+    fn malformed_selections_are_refused() {
+        for json in [
+            r#"{"repository": "https://github.com/a/b", "files": ["a/[b*"]}"#,
+            r#"{"repository": "https://github.com/a/b", "files": [{"a/": ["x"]}]}"#,
+            r#"{"repository": "https://github.com/a/b", "files": [{"a/*": {"x": "y"}}]}"#,
+            r#"{"repository": "https://github.com/a/b", "files": [{"{release}/a.zip": {"x/*": {"x/a": "a"}}}]}"#,
+            r#"{"url": "https://x.io/a.zip", "files": {"bin/[*": "bin/"}}"#,
+        ] {
+            assert!(validated(json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn a_folder_inside_a_release_is_refused() {
+        assert!(
+            validated(r#"{"repository": "https://github.com/a/b", "files": ["{release}/dist/"]}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn hash_version_file_true_needs_a_single_first_file() {
+        for json in [
+            r#"{"repository": "https://github.com/a/b", "files": ["fonts/"], "hashVersionFile": true}"#,
+            r#"{"repository": "https://github.com/a/b", "files": ["*.md"], "hashVersionFile": true}"#,
+        ] {
+            assert!(validated(json).is_err(), "{json}");
+        }
+        validated(
+            r#"{"repository": "https://github.com/a/b", "files": ["*.md"], "hashVersionFile": "README.md"}"#,
+        )
+        .unwrap();
     }
 }

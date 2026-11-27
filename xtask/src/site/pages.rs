@@ -88,6 +88,12 @@ pub const PAGES: &[PageSpec] = &[
         "Choose where vendored files land, and rename them as they are saved.",
     ),
     page(
+        "configuration/folders-and-globs",
+        Some("Folders and globs"),
+        Start::Heading("Folders and globs"),
+        "Take a whole folder from a repository, or every file that matches a glob pattern, and choose where each lands.",
+    ),
+    page(
         "configuration/versions",
         None,
         Start::Heading("Versions and releases"),
@@ -202,6 +208,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
         &[
             "configuration/config-files",
             "configuration/paths",
+            "configuration/folders-and-globs",
             "configuration/versions",
             "configuration/other-sites",
             "configuration/locking",

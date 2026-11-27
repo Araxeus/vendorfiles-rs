@@ -270,6 +270,10 @@ fn no_file_written_twice(name: &str, host: &str, files: &[FileEntry]) -> Result<
                 FileTarget::Rename(output) => vec![output],
                 FileTarget::ExtractList(list) => list.iter().collect(),
                 FileTarget::ExtractMap(members) => members.values().collect(),
+                FileTarget::Selected(declared) => declared
+                    .values()
+                    .flat_map(|matched| matched.values())
+                    .collect(),
             })
             .collect(),
         FileEntry::Simple(_) => Vec::new(),

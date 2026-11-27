@@ -25,6 +25,33 @@ pub use auth::Token;
 pub use http::USER_AGENT;
 
 const API_ROOT: &str = "https://api.github.com";
+const RAW_ROOT: &str = "https://raw.githubusercontent.com";
+
+/// How many raw files may download at once, across the whole run.
+const MAX_RAW_DOWNLOADS: usize = 16;
+
+/// One entry of a repository tree listing.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct TreeEntry {
+    /// Relative to the repository root, with `/` separators.
+    pub path: String,
+    /// The git file mode: `100644`, `100755`, `120000` for a symlink, `040000` for a folder.
+    pub mode: String,
+    /// `blob`, `tree`, or `commit` for a submodule.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The git object id, which changes whenever the content does.
+    #[serde(default)]
+    pub sha: String,
+}
+
+impl TreeEntry {
+    /// Whether the entry is a regular file, the only kind vendor copies.
+    #[must_use]
+    pub fn is_file(&self) -> bool {
+        self.kind == "blob" && self.mode != "120000"
+    }
+}
 
 /// The quota below which a run is worth mentioning.
 ///
@@ -95,6 +122,10 @@ pub struct GitHubClient {
     /// Requests charged to the core limit since that lookup was started.
     spent: AtomicU64,
     probing: Once,
+    api_root: String,
+    raw_root: String,
+    /// Bounds raw downloads across every dependency of a run.
+    raw_permits: tokio::sync::Semaphore,
 }
 
 impl std::fmt::Debug for GitHubClient {
@@ -126,6 +157,9 @@ impl GitHubClient {
             quota: Mutex::new(None),
             spent: AtomicU64::new(0),
             probing: Once::new(),
+            api_root: API_ROOT.to_owned(),
+            raw_root: RAW_ROOT.to_owned(),
+            raw_permits: tokio::sync::Semaphore::new(MAX_RAW_DOWNLOADS),
         })
     }
 
@@ -614,6 +648,133 @@ impl GitHubClient {
             || format!("https://github.com/{}", item.full_name.unwrap_or(item.name)),
             |url| url.to_string(),
         ))
+    }
+
+    /// The commit a branch or other ref points at now.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::RequestFailed`] if the API rejects the request.
+    pub async fn commit_sha(&self, repo: &Repository, git_ref: &str) -> Result<String> {
+        self.note_api_request();
+        let url = format!(
+            "{}/repos/{}/{}/commits/{}",
+            self.api_root,
+            repo.owner,
+            repo.name,
+            encode_query(git_ref)
+        );
+        let response = self.send(url, "application/vnd.github.sha").await?;
+        let sha = response
+            .text()
+            .await
+            .map_err(|e| VendorError::Http(e.to_string()))?;
+        Ok(sha.trim().to_owned())
+    }
+
+    /// Every entry below `folder` at `git_ref`, with paths relative to the repository root.
+    ///
+    /// `folder` is `""` for the root, or a path with a trailing `/`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::RequestFailed`] for a folder that does not exist (`404`) or a path
+    /// that is a file (`422`), and [`VendorError::TreeTruncated`] when GitHub cut the listing
+    /// short.
+    pub async fn list_tree(
+        &self,
+        repo: &Repository,
+        git_ref: &str,
+        folder: &str,
+    ) -> Result<Vec<TreeEntry>> {
+        #[derive(Deserialize)]
+        struct Listing {
+            tree: Vec<TreeEntry>,
+            #[serde(default)]
+            truncated: bool,
+        }
+
+        self.note_api_request();
+        let folder = folder.trim_end_matches('/');
+        let object = if folder.is_empty() {
+            git_ref.to_owned()
+        } else {
+            format!("{git_ref}:{folder}")
+        };
+        let url = format!(
+            "{}/repos/{}/{}/git/trees/{}?recursive=1",
+            self.api_root,
+            repo.owner,
+            repo.name,
+            encode_query(&object)
+        );
+        let response = self.send(url, "application/vnd.github+json").await?;
+        let body = response
+            .bytes()
+            .await
+            .map_err(|e| VendorError::Http(e.to_string()))?;
+        let listing: Listing =
+            serde_json::from_slice(&body).map_err(|e| VendorError::Http(e.to_string()))?;
+        if listing.truncated {
+            return Err(VendorError::TreeTruncated {
+                folder: if folder.is_empty() {
+                    "/".to_owned()
+                } else {
+                    format!("{folder}/")
+                },
+            });
+        }
+        let prefix = if folder.is_empty() {
+            String::new()
+        } else {
+            format!("{folder}/")
+        };
+        Ok(listing
+            .tree
+            .into_iter()
+            .map(|entry| TreeEntry {
+                path: format!("{prefix}{}", entry.path),
+                ..entry
+            })
+            .collect())
+    }
+
+    /// Starts a streaming download of one repository file from the raw host.
+    ///
+    /// The raw host serves files without spending API quota. A token is sent when there is one,
+    /// which is what lets it serve private repositories.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::RequestFailed`] for any non-2xx response.
+    pub async fn download_raw(
+        &self,
+        repo: &Repository,
+        git_ref: &str,
+        path: &str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/{}/{}/{}/{}",
+            self.raw_root,
+            repo.owner,
+            repo.name,
+            encode_query(git_ref),
+            encode_path(path)
+        );
+        self.send(url, "*/*").await
+    }
+
+    /// Waits for a turn to download from the raw host. Held until the file is written.
+    pub async fn raw_permit(&self) -> Option<tokio::sync::SemaphorePermit<'_>> {
+        self.raw_permits.acquire().await.ok()
+    }
+
+    /// Points the client at local servers, for tests.
+    #[cfg(test)]
+    pub(crate) fn with_roots(mut self, api_root: &str, raw_root: &str) -> Self {
+        api_root.clone_into(&mut self.api_root);
+        raw_root.clone_into(&mut self.raw_root);
+        self
     }
 
     /// Issues an authenticated GET and rejects non-2xx responses.
