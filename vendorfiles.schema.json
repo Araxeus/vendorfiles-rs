@@ -288,12 +288,12 @@
           "description": "List of files to extract from an archive",
           "items": {
             "type": "string",
-            "description": "File to extract from the archive"
+            "description": "File to extract from the archive. A path ending in / takes a folder, and a path with * or ? is a glob pattern"
           }
         },
         {
           "type": "object",
-          "description": "Map of files to extract from an archive with custom destination names",
+          "description": "Map of files to extract from an archive with custom destination names. A folder or pattern maps to a destination, as in files",
           "additionalProperties": {
             "type": "string"
           }
