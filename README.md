@@ -717,6 +717,11 @@ An install lists each repository folder with one GitHub API request, and downloa
 changed makes no request at all, because the lockfile records every file a folder or pattern
 matched.
 
+An update downloads only the repository files that changed. The lockfile records each file's git
+blob, and a file whose blob, destination and folder are all the same as before stays in place.
+A missing file is downloaded again, and `--force` downloads everything. `vendor` doesn't check
+the content of a kept file, so a local edit to one survives the update.
+
 ### Versions and releases
 
 By default, `version` holds a release tag, and `vendor update` moves a dependency to the newest
@@ -2025,6 +2030,9 @@ repository. Inside an archive, each declared member maps to the members it match
 ```
 
 A binary older than this format can't read a lockfile that holds an archive entry like this one.
+
+`blobs` records the git blob of each repository file a folder or pattern selected, which is what
+lets an update skip the files that did not change.
 
 `vendor sync` downloads a dependency again when any of these is true:
 
