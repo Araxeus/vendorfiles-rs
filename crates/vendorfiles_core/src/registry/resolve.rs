@@ -11,7 +11,7 @@ use crate::error::{Result, VendorError};
 use crate::installer::InstallerKey;
 use crate::model::{FileEntry, FileTarget};
 use crate::selection::is_asset_pattern;
-use crate::template::is_http_url;
+use crate::template::{is_http_url, replace_version};
 
 /// The host key a registry entry is looked up under: `windows-x86_64`, `macos-aarch64`, …
 ///
@@ -493,7 +493,11 @@ fn output_name(name: &str, member: &str) -> Result<String> {
     }
     // Belt and braces: `join_normalized` already keeps writes inside the folder, but a registry
     // entry should never even look like it is trying to leave.
-    if basename.contains(':') || basename.starts_with('/') || basename.starts_with('\\') {
+    // Checked expanded, since `{version:<joiner>}` holds a colon of its own.
+    if replace_version(basename, "1.0.0").contains(':')
+        || basename.starts_with('/')
+        || basename.starts_with('\\')
+    {
         return Err(refuse(&format!("'{basename}' is not a plain file name")));
     }
     // `{url}` and `{release}` never expand in an output name, so a bare `{url}` asset needs `as`.
@@ -710,6 +714,29 @@ programs:
         assert!(asset.starts_with("{release}/"), "{asset}");
         assert!(asset.contains("{version}"), "{asset}");
         assert!(member.contains("{version}"), "{member}");
+    }
+
+    #[test]
+    fn a_version_joiner_is_a_plain_file_name() {
+        let document = program(
+            r#"
+version: 3
+programs:
+  sevenzip:
+    repository: https://github.com/ip7z/7zip
+    targets:
+      windows-x86_64:
+        asset: "{release}/7z{version:}-x64.exe"
+"#,
+        );
+        let entry = for_host("sevenzip", &document.programs["sevenzip"], "windows-x86_64").unwrap();
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("expected one mapped entry");
+        };
+        assert_eq!(
+            files.values().next(),
+            Some(&FileTarget::Rename("7z{version:}-x64.exe".to_owned()))
+        );
     }
 
     #[test]
