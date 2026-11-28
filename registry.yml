@@ -2183,28 +2183,6 @@ programs:
         asset: "{release}/aarch64-linux-rustscan.zip"
         member: rustscan
 
-  # Tags are dates. Bare binaries, except macOS, which gets a tarball. No windows-aarch64.
-  # A running tunnel replaces this copy every 24 hours unless started with `--no-autoupdate`.
-  cloudflared:
-    description: "Cloudflare Tunnel client that exposes local servers without open ports"
-    repository: https://github.com/cloudflare/cloudflared
-    targets:
-      windows-x86_64:
-        asset: "{release}/cloudflared-windows-amd64.exe"
-        as: cloudflared.exe
-      macos-x86_64:
-        asset: "{release}/cloudflared-darwin-amd64.tgz"
-        member: cloudflared
-      macos-aarch64:
-        asset: "{release}/cloudflared-darwin-arm64.tgz"
-        member: cloudflared
-      linux-x86_64:
-        asset: "{release}/cloudflared-linux-amd64"
-        as: cloudflared
-      linux-aarch64:
-        asset: "{release}/cloudflared-linux-arm64"
-        as: cloudflared
-
   # No windows-aarch64.
   presenterm:
     description: "Terminal slideshow tool for Markdown presentations, with images and code"
@@ -2299,20 +2277,6 @@ programs:
       macos-aarch64: darwin-arm64
       linux-x86_64: linux-amd64
       linux-aarch64: linux-arm64
-
-  # No windows-aarch64. Each run replaces this copy with the latest release, unless the config
-  # sets `no_self_update = true`.
-  topgrade:
-    description: "Upgrade everything at once: system packages, brew, cargo, npm and more"
-    repository: https://github.com/topgrade-rs/topgrade
-    asset: "{release}/topgrade-v{version}-{target}{ext}"
-    member: "topgrade{exe}"
-    targets:
-      windows-x86_64: x86_64-pc-windows-msvc
-      macos-x86_64: x86_64-apple-darwin
-      macos-aarch64: aarch64-apple-darwin
-      linux-x86_64: x86_64-unknown-linux-gnu
-      linux-aarch64: aarch64-unknown-linux-gnu
 
   # Tarballs on every platform. No windows-aarch64.
   viddy:
