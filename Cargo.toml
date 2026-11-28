@@ -17,14 +17,14 @@ categories = ["command-line-utilities", "development-tools"]
 [workspace.dependencies]
 vendorfiles_core = { path = "crates/vendorfiles_core", version = "2.4.0" }
 
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 # `vendor login` copies the one-time code. Text only: `image-data` would pull in the `image` crate.
 arboard = { version = "3.7.0", default-features = false }
-clap = { version = "4.6.7", features = ["derive", "string"] }
-clap_complete = "4.6.11"
+clap = { version = "4.6.10", features = ["derive", "string"] }
+clap_complete = "4.6.12"
 dialoguer = { version = "0.12.0", default-features = false }
-fancy-regex = "0.20.0"
-flate2 = "1.1.10"
+fancy-regex = "0.20.2"
+flate2 = "1.1.11"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 globset = { version = "0.4.22", default-features = false }
 indexmap = { version = "2.14.2", features = ["serde"] }
@@ -41,14 +41,14 @@ jsonc-parser = { version = "0.34.0", default-features = false, features = [
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
 # refers to nothing outside itself.
-jsonschema = { version = "0.60.2", default-features = false }
+jsonschema = { version = "0.63.2", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
 # on Linux, link libdbus for a Secret Service backend we do not use.
-keyring-core = "1.0.1"
+keyring-core = "1.1.0"
 # `keychain` selects the macOS login keychain; the iOS-only `protected` store stays out.
-apple-native-keyring-store = { version = "1.0.2", default-features = false, features = [
+apple-native-keyring-store = { version = "1.0.3", default-features = false, features = [
     "keychain",
 ] }
 # Preferred on Linux: the Secret Service persists to disk, so a token survives a reboot. The
@@ -63,11 +63,11 @@ linux-keyutils-keyring-store = "1.0.0"
 # `.tar.xz` releases. Pure Rust, like every other codec here - `xz2`/`liblzma` would bind the C
 # library and put a build toolchain between a user and `cargo install`. Its `xz` feature verifies
 # every check type xz defines, SHA-256 included, which `upx` ships. The encoder is for tests only.
-lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
+lzma-rust2 = { version = "0.26.0", default-features = false, features = ["std", "xz"] }
 # `.7z` archives, built on `lzma-rust2` above. The defaults are off: `aes256` opens encrypted
 # archives, which need a password nothing here has, and `compress` is the encoder, for tests only.
 # `bzip2` and `zstd` reuse the crates `zip` already pulls in, and `ppmd` is small and pure Rust.
-sevenz-rust2 = { version = "0.25.0", default-features = false, features = [
+sevenz-rust2 = { version = "0.27.0", default-features = false, features = [
     "bzip2",
     "ppmd",
     "zstd",
@@ -90,7 +90,7 @@ windows-sys = { version = "0.61.2", features = [
 # `search` (the default) would add a `regex` dependency for enumerating credentials, which
 # nothing here does.
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
-octocrab = { version = "0.54.7", default-features = false, features = [
+octocrab = { version = "0.54.9", default-features = false, features = [
     "default-client",
     "follow-redirect",
     "retry",
@@ -106,7 +106,7 @@ open = "5.4.5"
 # viewport is the whole reason for the dependency - a fixed region we redraw from a state
 # snapshot, rather than cursor arithmetic of our own.
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
-regex = "1.13.1"
+regex = "1.13.2"
 # `rustls-no-provider` rather than `rustls`: the latter hard-wires the aws-lc-rs provider,
 # which would compile a second crypto backend alongside the `ring` one octocrab uses (and drag
 # in aws-lc-sys's C build). `github::http` installs `ring` as the process default instead.
@@ -121,7 +121,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "s
 # Reads a version out of an HTML page with a CSS selector (`versionSelector`). It parses like a
 # browser, so a selector picks what `document.querySelector` would. Default features off: they
 # build a CLI.
-scraper = { version = "0.24.0", default-features = false }
+scraper = { version = "0.29.0", default-features = false }
 secrecy = "0.10.3"
 # Swapping a running binary is platform work: on Windows the file is locked, so the old image has
 # to be moved aside and deleted after exit. `vendor` uses it when an install lands on top of
@@ -148,7 +148,7 @@ toml_edit = { version = "0.25.17", features = ["serde"] }
 # Edits YAML configs in place, keeping comments, quoting and layout. Default features off: `binary`
 # decodes `!!binary` scalars through base64, which no config holds.
 yaml-edit = { version = "0.3.6", default-features = false }
-zip = { version = "9.1.3", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+zip = { version = "9.9.0", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 
 # The lint set CI enforces, declared here so a bare `cargo clippy` is the same gate as the
 # workflow. `priority = -1` keeps these groups below any individual lint, so a specific
