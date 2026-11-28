@@ -16,16 +16,32 @@
   </a>
 </p>
 
-vendorfiles pulls files from GitHub repositories, git hosts and plain URLs, and keeps them up to
-date. List the CSS libraries, binaries or config files you want in a config file, run
-`vendor sync`, and they land in your project.
+Get the files and tools you need, and keep them pinned and current. Name what you want from a
+GitHub repository, a release or any URL. `vendor` downloads it, writes a lockfile, and tells you
+when there's something newer.
 
-- Download any file from any GitHub repository, or from any URL
-- Download release assets, and unpack only the files you need from zip, tar, tar.gz, 7z and crx
+There are two ways to use it:
+
+- **In a project.** Pull CSS libraries, scripts, fonts or config files into your repository. Commit
+  the config and the lockfile, and everyone gets the same bytes.
+- **On your machine.** Install command-line tools and apps by name, like `vendor add rg fd`, on
+  Windows, macOS and Linux. See [Global programs](#global-programs).
+
+What it can fetch:
+
+- Single files, [whole folders and glob patterns](#folders-and-globs) from any repository
+- [Release assets](#release-assets), unpacking only the files you need from zip, tar, 7z and crx
   archives
-- Track versions by release, by commit, by git tag or from a version URL
+- Files from [any URL](#downloading-from-other-sites), with the latest version read from a page, a
+  redirect or JSON
+- [Programs by name](#program-registry) from the registry, with no asset names to look up
+- [Windows installers](#installers), run silently and uninstalled later
+
+How it keeps them current:
+
+- Track versions by release, by git tag or by commit, or [lock](#locking-a-dependency) one in place
+- Download in parallel, streaming to disk, and reuse unchanged files on update
 - Write the config in TOML, YAML, JSON, JSON5 or `package.json`
-- Download in parallel, streaming each file straight to disk
 - Install one static binary, with nothing else to set up
 
 vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/vendorfiles).
