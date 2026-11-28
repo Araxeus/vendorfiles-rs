@@ -739,8 +739,10 @@ impl RawDependency {
                 name: name.to_owned(),
             });
         }
+        // A stand-in version, since the real one may not be known yet. An empty one would turn a
+        // folder named `{tag}/` into `/`.
         let chosen =
-            Selections::of(files, "", repository).map_err(|invalid| invalid.named(name))?;
+            Selections::of(files, "1.0.0", repository).map_err(|invalid| invalid.named(name))?;
         if !chosen.is_empty() && self.installer(name)?.is_some() {
             let literal = flat_files(&config_files_to_lock_files(files, "")).len();
             return Err(VendorError::InstallerNeedsOneFile {
