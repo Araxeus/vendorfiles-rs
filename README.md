@@ -1795,8 +1795,8 @@ description, or its repository. Name matches come first. A program that runs an
 
 ```bash
 vendor search          # everything
-vendor search disk     # bottom, btop, dust, dysk and gdu
-vendor search git      # delta, gh, lazygit, actionlint and pinact
+vendor search disk     # dua, duf, dust, gdu, wiztree and more
+vendor search git      # git, gh, git-cliff, git-lfs, lazygit and more
 ```
 
 If you mistype a name the registry nearly knows, `vendor` suggests the right one before it searches
@@ -1816,24 +1816,49 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (67)</summary>
+<summary>Programs you can add by name (173)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
 | [7z](https://github.com/ip7z/7zip) | `7zz`, `7za` | Command-line archiver for 7z, zip, tar, xz and rar files | All |
 | [7zip](https://github.com/ip7z/7zip) | `7-zip` | File archiver with a file manager and Explorer menu for 7z and zip | Windows (installer) |
+| [act](https://github.com/nektos/act) |  | Run GitHub Actions workflows locally in Docker to test CI before pushing | All |
 | [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
+| [age](https://github.com/FiloSottile/age) |  | Simple, modern file encryption with small keys and no config | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
+| [asciinema](https://github.com/asciinema/asciinema) |  | Record and share terminal sessions as lightweight text casts | macOS, Linux |
 | [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
 | [audio-bartender](https://github.com/Araxeus/Audio-Bartender) |  | Tray volume control with per-app volume, level meters and media keys | Windows x64 (installer) |
+| [bandwhich](https://github.com/imsnif/bandwhich) |  | Terminal bandwidth monitor showing network use by process and connection | Windows x64, macOS, Linux |
 | [bat](https://github.com/sharkdp/bat) |  | cat clone and file viewer with syntax highlighting and a pager | All |
+| [betterleaks](https://github.com/betterleaks/betterleaks) |  | Secrets scanner for git repos, files and CI, from the gitleaks author | All |
 | [biome](https://github.com/biomejs/biome) |  | JavaScript, TypeScript, JSON, CSS and YAML/YML formatter and linter | All |
 | [bitwarden-secrets-cli](https://github.com/bitwarden/sdk) | `bws` | Bitwarden Secrets Manager CLI for fetching secrets in scripts and CI | All |
+| [bombardier](https://github.com/codesenberg/bombardier) |  | Fast HTTP benchmarking and load testing tool | All |
 | [bottom](https://github.com/ClementTsang/bottom) | `btm` | System monitor for processes, CPU, memory, disks and network, like htop | All |
 | [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
+| [buf](https://github.com/bufbuild/buf) |  | Protobuf toolkit to lint, format, check breaking changes and generate | All |
 | [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Shell completion for hundreds of commands in bash, zsh, fish and more | All |
+| [cloudflared](https://github.com/cloudflare/cloudflared) |  | Cloudflare Tunnel client that exposes local servers without open ports | Windows x64, macOS, Linux |
+| [cmake](https://github.com/Kitware/CMake) |  | C and C++ build system generator for make, ninja, MSBuild and Xcode | All |
+| [coreutils](https://github.com/uutils/coreutils) | `uutils` | Rust rewrite of GNU coreutils: ls, cp, mv, cat, sort and more | Windows, Linux |
+| [cosign](https://github.com/sigstore/cosign) |  | Sign and verify container images and blobs with Sigstore | Windows x64, macOS, Linux |
+| [croc](https://github.com/schollz/croc) |  | Send files and folders between computers securely with a code phrase | All |
+| [csvlens](https://github.com/YS-L/csvlens) |  | Command-line CSV file viewer, like less but for tables | All |
 | [curl](https://curl.se/) |  | Transfer data over HTTP, HTTPS, FTP and more; official Windows build | Windows |
+| [dekit](https://github.com/pvolok/dekit) | `mprocs` | Run and watch several processes at once in a TUI, for dev servers | Windows x64, macOS, Linux |
 | [delta](https://github.com/dandavison/delta) | `git-delta` | Syntax-highlighting pager and diff viewer for git, diff, grep and blame | Windows x64, macOS arm64, Linux |
+| [difftastic](https://github.com/Wilfred/difftastic) | `difft` | Structural diff that compares files by syntax tree, not line by line | All |
+| [diffutils](https://github.com/uutils/diffutils) |  | Cross-platform Rust rewrite of GNU diffutils: diff, cmp and more | Windows x64, macOS, Linux |
+| [direnv](https://github.com/direnv/direnv) |  | Load and unload environment variables per directory from .envrc files | All |
+| [dive](https://github.com/wagoodman/dive) |  | Explore Docker and OCI image layers and find wasted space | All |
+| [docker-compose](https://github.com/docker/compose) | `compose` | Define and run multi-container Docker apps from a compose.yaml file | All |
+| [doggo](https://github.com/mr-karan/doggo) |  | Command-line DNS client, like dig, with DoH, DoT and JSON output | Windows x64, macOS, Linux |
+| [dotnet](https://builds.dotnet.microsoft.com/) | `dotnet-sdk` | .NET SDK for C#, F# and ASP.NET apps: dotnet build, run, test, publish | All |
+| [dua](https://github.com/Byron/dua-cli) | `dua-cli` | Disk usage analyzer with a TUI to find and delete big folders | All |
+| [duckdb](https://github.com/duckdb/duckdb) |  | In-process SQL database for analytics on CSV, Parquet and JSON files | All |
+| [duf](https://github.com/muesli/duf) |  | Disk usage and free space of mounted drives in tables, a better df | All |
+| [dufs](https://github.com/sigoden/dufs) |  | File server for static serving, uploads, search and WebDAV over HTTP | All |
 | [dust](https://github.com/bootandy/dust) |  | Disk usage viewer showing what takes up space, a more intuitive du | All |
 | [dysk](https://github.com/Canop/dysk) |  | Lists mounted disks and filesystems with free space, a friendlier df | Windows x64, macOS, Linux |
 | [edamame](https://github.com/mijowi/edamame) |  | Terminal text editor for Markdown that stays rendered while you edit | Windows x64, macOS, Linux |
@@ -1843,49 +1868,130 @@ list is out of date.
 | [ffmpeg](https://github.com/GyanD/codexffmpeg) |  | Convert, transcode and stream video and audio media, plus ffprobe | Windows x64 |
 | [file-pilot](https://filepilot.tech/) | `fpilot`, `filepilot` | Fast, lightweight file manager and Explorer replacement for Windows | Windows x64 |
 | [flow](https://github.com/neurocyte/flow) |  | Flow Control, a programmer's text editor for the terminal | All |
+| [flux](https://github.com/fluxcd/flux2) | `flux2`, `fluxcd` | GitOps for Kubernetes that syncs clusters from git, Helm and Kustomize | All |
+| [fnm](https://github.com/Schniz/fnm) |  | Fast Node.js version manager that switches node per project, like nvm | Windows x64, macOS, Linux |
+| [freeze](https://github.com/charmbracelet/freeze) |  | Generate images of code and terminal output as PNG, SVG or WebP | Windows x64, macOS, Linux |
 | [fresh](https://github.com/sinelaw/fresh) |  | Fast, easy terminal text editor and IDE | All |
 | [fzf](https://github.com/junegunn/fzf) |  | Interactive command-line fuzzy finder for files, history and any list | All |
 | [gdu](https://github.com/dundee/gdu) |  | Fast disk usage analyzer with a terminal UI | All |
 | [gh](https://github.com/cli/cli) | `gh-cli`, `github-cli` | GitHub's official CLI for pull requests, issues, releases and repos | All |
+| [git-cliff](https://github.com/orhun/git-cliff) |  | Changelog generator from git history and conventional commits | All |
+| [git-lfs](https://github.com/git-lfs/git-lfs) |  | Git extension that stores large files like media outside the repo | All |
+| [gitleaks](https://github.com/gitleaks/gitleaks) |  | Find secrets like passwords, API keys and tokens in git repos and files | All |
+| [glow](https://github.com/charmbracelet/glow) |  | Render Markdown in the terminal, with a TUI to browse files | Windows x64, macOS, Linux |
+| [go](https://dl.google.com/go) | `golang` | Go programming language toolchain: compiler, go build, go test, gofmt | All |
+| [golangci-lint](https://github.com/golangci/golangci-lint) |  | Fast Go linters runner that runs many linters in parallel, with caching | All |
+| [gping](https://github.com/orf/gping) |  | Ping with a live graph in the terminal, for several hosts at once | Windows x64, macOS, Linux |
+| [grpcurl](https://github.com/fullstorydev/grpcurl) |  | Like curl, but for gRPC: call and inspect gRPC servers | All |
+| [grype](https://github.com/anchore/grype) |  | Vulnerability scanner for container images, filesystems and SBOMs | Windows x64, macOS, Linux |
 | [gum](https://github.com/charmbracelet/gum) |  | Prompts, menus, spinners and styled text for glamorous shell scripts | Windows x64, macOS, Linux |
+| [hadolint](https://github.com/hadolint/hadolint) |  | Dockerfile linter that checks best practices and shell with ShellCheck | Windows x64, macOS, Linux |
+| [helix](https://github.com/helix-editor/helix) | `hx` | Modal terminal text editor, like Vim or Kakoune, with LSP built in | Windows x64, macOS, Linux |
 | [helm](https://get.helm.sh) |  | Package manager for Kubernetes that installs and upgrades charts | All |
 | [herdr](https://github.com/herdrdev/herdr) |  | Terminal runtime for running and managing AI coding agents | Windows x64, macOS, Linux |
+| [hexyl](https://github.com/sharkdp/hexyl) |  | Hex viewer for the terminal that colors bytes by kind | Windows x64, macOS, Linux |
 | [hide-console](https://github.com/Araxeus/hide-console) | `hide` | Run a command on Windows with its console window hidden | Windows x64 |
+| [hugo](https://github.com/gohugoio/hugo) |  | Fast static site generator for blogs and docs sites from Markdown | Windows x64, Linux |
+| [hurl](https://github.com/Orange-OpenSource/hurl) |  | Run and test HTTP requests from plain text files, for APIs and CI | Windows x64, macOS, Linux |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
 | [imageglass](https://github.com/d2phap/ImageGlass) |  | Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC | Windows (installer) |
+| [jj](https://github.com/jj-vcs/jj) | `jujutsu` | Jujutsu, a Git-compatible version control system with undo and no index | All |
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
+| [k3d](https://github.com/k3d-io/k3d) |  | Run k3s Kubernetes clusters in Docker for local development | Windows x64, macOS, Linux |
+| [k6](https://github.com/grafana/k6) |  | Load testing tool scripted in JavaScript for APIs, sites and performance | Windows x64, macOS, Linux |
+| [k9s](https://github.com/derailed/k9s) |  | Terminal UI for Kubernetes clusters, pods, logs and resources | All |
+| [kind](https://github.com/kubernetes-sigs/kind) |  | Kubernetes in Docker: local clusters for development and CI testing | Windows x64, macOS, Linux |
+| [kopia](https://github.com/kopia/kopia) |  | Fast, encrypted, deduplicating backups with snapshots to cloud or disk | Windows x64, macOS, Linux |
 | [kubectl](https://dl.k8s.io/) | `k8s` | Kubernetes CLI for deploying apps and managing clusters, pods and logs | All |
+| [kubectx](https://github.com/ahmetb/kubectx) | `kubens` | Switch Kubernetes contexts and namespaces fast, with kubens included | All |
+| [lazydocker](https://github.com/jesseduffield/lazydocker) |  | Terminal UI for Docker and Compose containers, images, logs and stats | All |
 | [lazygit](https://github.com/jesseduffield/lazygit) |  | Terminal UI for git that handles staging, commits, branches and rebases | All |
+| [lazysql](https://github.com/jorgerojas26/lazysql) |  | Terminal UI SQL client for MySQL, PostgreSQL, SQLite and MSSQL | All |
+| [lefthook](https://github.com/evilmartians/lefthook) |  | Fast git hooks manager for pre-commit and pre-push checks | All |
+| [lf](https://github.com/gokcehan/lf) |  | Terminal file manager inspired by ranger, fast and in a single binary | Windows x64, macOS, Linux |
 | [libclang](https://www.nuget.org/api/v2/package) |  | Clang's C API as a shared library, for bindings and code analysis tools | Windows, macOS arm64, Linux |
+| [litestream](https://github.com/benbjohnson/litestream) |  | Streams SQLite database changes to S3 and other storage for backup | All |
+| [llvm](https://github.com/llvm/llvm-project) | `clang`, `clangd`, `clang-format` | LLVM and Clang C and C++ toolchain: clang, clangd, lld and clang-format | Windows, Linux |
+| [lnav](https://github.com/tstack/lnav) |  | Log file viewer that merges, filters and queries logs with SQL | Windows, macOS arm64, Linux |
 | [ls-interactive](https://github.com/Araxeus/ls-interactive) | `lsi` | Interactive ls for browsing files and navigating directories | All |
+| [mdbook](https://github.com/rust-lang/mdBook) |  | Create books and documentation sites from Markdown files | Windows x64, macOS, Linux |
 | [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
+| [miniserve](https://github.com/svenstaro/miniserve) |  | Serve files and folders over HTTP from the command line, with uploads | Windows x64, macOS, Linux |
+| [mkcert](https://github.com/FiloSottile/mkcert) |  | Make locally trusted HTTPS certificates for development, no config | All |
+| [neovim](https://github.com/neovim/neovim) | `nvim` | Vim-based text editor with Lua plugins, LSP and tree-sitter | All |
+| [ninja](https://github.com/ninja-build/ninja) |  | Small, fast build system focused on speed, used by CMake and Meson | All |
+| [node](https://nodejs.org/) | `nodejs`, `npm` | Node.js JavaScript runtime with npm and npx, the LTS release | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
+| [oh-my-posh](https://github.com/JanDeDobbeleer/oh-my-posh) | `posh` | Prompt theme engine for any shell: PowerShell, bash, zsh, fish, cmd | All |
+| [openssh](https://github.com/PowerShell/Win32-OpenSSH) | `ssh`, `win32-openssh` | OpenSSH for Windows: ssh, scp, sftp, ssh-keygen, ssh-agent and sshd | Windows |
+| [opentofu](https://github.com/opentofu/opentofu) | `tofu` | Open-source Terraform fork for infrastructure as code in HCL | All |
+| [ouch](https://github.com/ouch-org/ouch) |  | Compress and extract zip, tar, gz, xz, zst, 7z and rar with one command | All |
 | [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [pandoc](https://github.com/jgm/pandoc) |  | Document converter for Markdown, HTML, Word docx, PDF, EPUB and LaTeX | Windows x64, macOS, Linux |
 | [peazip](https://github.com/peazip/PeaZip) |  | Archiver for 200+ formats, with encryption, split archives and a GUI | Windows x64 (installer) |
 | [pinact](https://github.com/suzuki-shunsuke/pinact) |  | Pin GitHub Actions and workflows to commit SHAs and update versions | All |
+| [presenterm](https://github.com/mfontanini/presenterm) |  | Terminal slideshow tool for Markdown presentations, with images and code | Windows x64, macOS, Linux |
+| [protoc](https://github.com/protocolbuffers/protobuf) | `protobuf` | Protocol Buffers compiler that generates code from .proto files | Windows x64, macOS, Linux |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
+| [pulumi](https://github.com/pulumi/pulumi) |  | Infrastructure as code in TypeScript, Python, Go or C# for any cloud | All |
+| [pwsh](https://github.com/PowerShell/PowerShell) |  | PowerShell 7, the cross-platform shell and scripting language, portable | All |
+| [python](https://github.com/astral-sh/python-build-standalone) | `python3`, `cpython` | Python 3.15 interpreter with pip, a portable standalone build | All |
 | [qbittorrent](https://github.com/qbittorrent/qBittorrent) |  | BitTorrent client with a built-in search engine and no ads | Windows x64 (installer) |
+| [qsv](https://github.com/dathere/qsv) |  | Fast CSV toolkit to slice, join, sort, query, validate and convert data | Windows, macOS arm64, Linux |
 | [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
+| [restic](https://github.com/restic/restic) |  | Fast, encrypted, deduplicating backups to local disk, S3, SFTP and more | Windows x64 |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
+| [ripgrep-all](https://github.com/phiresky/ripgrep-all) | `rga` | ripgrep that also searches PDFs, ebooks, Office docs, zip and sqlite | macOS, Linux |
 | [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
+| [rustscan](https://github.com/bee-san/RustScan) |  | Fast port scanner that finds open ports, then hands them to nmap | Windows x64, Linux arm64 |
+| [sccache](https://github.com/mozilla/sccache) |  | Compiler cache for Rust, C and C++ builds, like ccache, local or cloud | All |
+| [sd](https://github.com/chmln/sd) |  | Find and replace text with regex, an intuitive sed alternative | Windows x64, macOS, Linux |
+| [shellcheck](https://github.com/koalaman/shellcheck) |  | Linter for bash and sh shell scripts that finds bugs and pitfalls | Windows x64, macOS, Linux |
 | [shfmt](https://github.com/mvdan/sh) |  | Shell script formatter for bash, POSIX sh and mksh | Windows x64, macOS, Linux |
+| [skaffold](https://github.com/GoogleContainerTools/skaffold) |  | Continuous development for Kubernetes: build, push and deploy on change | Windows x64, macOS, Linux |
+| [sops](https://github.com/getsops/sops) |  | Encrypt secrets in YAML, JSON and ENV files with age, PGP or cloud KMS | All |
+| [spotdl](https://github.com/spotDL/spotify-downloader) |  | Download Spotify playlists and songs with album art, via YouTube | Windows x64, macOS arm64, Linux x64 |
+| [spotify-player](https://github.com/aome510/spotify-player) | `spotify_player` | Spotify client for the terminal with search, playlists and lyrics | Windows x64, macOS, Linux |
 | [sshm](https://github.com/Gu1llaum-3/sshm) |  | Terminal UI for managing and connecting to SSH hosts | Windows x64, macOS, Linux |
 | [starship](https://github.com/starship/starship) |  | Fast, customizable prompt for any shell: bash, zsh, fish, PowerShell | All |
+| [stylua](https://github.com/JohnnyMorganz/StyLua) |  | Opinionated Lua and Luau code formatter, like prettier for Lua | Windows x64, macOS, Linux |
+| [superfile](https://github.com/yorukot/superfile) | `spf` | Modern terminal file manager with panels, previews and a fancy UI | All |
 | [surge](https://github.com/surge-downloader/surge) |  | Fast file download manager with a terminal UI | All |
+| [syft](https://github.com/anchore/syft) |  | Generate an SBOM from container images and filesystems | All |
+| [taplo](https://github.com/tamasfe/taplo) |  | TOML toolkit: formatter, linter and language server for TOML files | All |
+| [task](https://github.com/go-task/task) | `go-task` | Task runner and build tool driven by a Taskfile.yml, a simpler make | All |
+| [temurin](https://github.com/adoptium/temurin25-binaries) | `java`, `jdk`, `openjdk` | Eclipse Temurin OpenJDK 25 LTS: java, javac and the JDK tools | Windows x64, macOS, Linux |
+| [termscp](https://github.com/veeso/termscp) |  | Terminal file transfer and explorer for SCP, SFTP, FTP, S3 and WebDAV | All |
 | [terraform](https://releases.hashicorp.com/) | `tf` | Infrastructure as code that plans and applies cloud resources from HCL | All |
+| [terragrunt](https://github.com/gruntwork-io/terragrunt) |  | Terraform and OpenTofu wrapper that keeps configs DRY across modules | Windows x64, macOS, Linux |
+| [tflint](https://github.com/terraform-linters/tflint) |  | Terraform linter that finds errors and enforces best practices in HCL | Windows x64, macOS, Linux |
 | [tmux](https://github.com/tmux/tmux-builds) |  | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
+| [topgrade](https://github.com/topgrade-rs/topgrade) |  | Upgrade everything at once: system packages, brew, cargo, npm and more | Windows x64, macOS, Linux |
+| [trippy](https://github.com/fujiapple852/trippy) | `trip` | Network diagnostic tool combining traceroute and ping in a TUI | All |
+| [trivy](https://github.com/aquasecurity/trivy) |  | Scanner for vulnerabilities, secrets and misconfig in images and code | Windows x64, macOS, Linux |
 | [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |
+| [typos](https://github.com/crate-ci/typos) |  | Source code spell checker that finds and fixes typos, fast enough for CI | All |
+| [typst](https://github.com/typst/typst) |  | Markup typesetting for papers and documents, a LaTeX alternative | All |
 | [upx](https://github.com/upx/upx) |  | Executable packer that compresses binaries to shrink their size | Windows x64, Linux |
 | [vault](https://releases.hashicorp.com/) |  | HashiCorp secrets manager CLI and server for keys, tokens and passwords | Windows x64, macOS, Linux |
+| [vegeta](https://github.com/tsenart/vegeta) |  | HTTP load testing tool and library at a constant request rate | All |
+| [vhs](https://github.com/charmbracelet/vhs) |  | Record terminal sessions to GIF and video from a script, for demos | Windows x64, macOS, Linux |
+| [viddy](https://github.com/sachaos/viddy) |  | Modern watch command that reruns a command and shows diffs and history | Windows x64, macOS, Linux |
+| [watchexec](https://github.com/watchexec/watchexec) |  | Runs a command when files change, for rebuilds, tests and reloads | All |
 | [winkey-startmenu-disabler](https://github.com/Araxeus/winkey-startmenu-disabler) |  | Stop the Windows key opening Start while keeping Win key shortcuts | Windows x64 (installer) |
 | [winmerge](https://github.com/WinMerge/winmerge) |  | Visual diff and merge tool that compares files and folders | Windows x64 (installer) |
 | [winrar](https://www.rarlab.com/) |  | Archiver that creates RAR and extracts zip, 7z, tar and more | Windows x64 (installer) |
 | [wiztree](https://diskanalyzer.com/) |  | Disk space analyzer that finds what fills a drive, fast | Windows x64 (installer) |
 | [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
+| [xh](https://github.com/ducaale/xh) |  | Friendly, fast tool for sending HTTP requests, like HTTPie or curl | Windows x64, macOS, Linux |
 | [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |
+| [yazi](https://github.com/sxyazi/yazi) | `ya` | Fast terminal file manager with image previews, tabs and plugins | All |
 | [yq](https://github.com/mikefarah/yq) |  | Command-line YAML, JSON, XML, CSV and TOML processor, like jq | All |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) |  | Download video and audio from YouTube and many other sites | All |
+| [zellij](https://github.com/zellij-org/zellij) |  | Terminal multiplexer with panes, tabs, layouts and plugins, like tmux | Windows x64, macOS, Linux |
+| [zig](https://ziglang.org/) |  | Zig compiler and toolchain, also a drop-in C and C++ cross compiler | All |
+| [zls](https://github.com/zigtools/zls) |  | Zig language server for editor completion, diagnostics and navigation | All |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) |  | Smarter cd that jumps to the directories you use most | All |
 
 </details>
