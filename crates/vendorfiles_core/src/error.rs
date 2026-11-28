@@ -382,6 +382,17 @@ pub enum VendorError {
     )]
     ReleaseAssetNotFound { asset: String, url: String },
 
+    #[error(
+        "Release asset pattern \"{asset}\" matches {} assets in {url}, but must match one: {}",
+        matches.len(),
+        matches.join(", ")
+    )]
+    ReleaseAssetAmbiguous {
+        asset: String,
+        matches: Vec<String>,
+        url: String,
+    },
+
     #[error("Release asset \"{asset}\" failed to download from {url}")]
     ReleaseAssetDownloadFailed { asset: String, url: String },
 

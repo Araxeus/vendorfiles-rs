@@ -251,7 +251,7 @@
       "oneOf": [
         {
           "type": "string",
-          "description": "Simple file path to download. A path ending in / takes a whole folder, and a path with * or ? is a glob pattern. Use {release}/ prefix for release assets, {version} for the version's numbers, {version:_} for them joined with _ (any joiner, or none) and {tag} for the whole version. For a url dependency, a name that is not a URL is where its url download is saved",
+          "description": "Simple file path to download. A path ending in / takes a whole folder, and a path with * or ? is a glob pattern. Use {release}/ prefix for release assets (* or ? in an asset name must match exactly one asset, and needs a name to save it as), {version} for the version's numbers, {version:_} for them joined with _ (any joiner, or none) and {tag} for the whole version. For a url dependency, a name that is not a URL is where its url download is saved",
           "examples": [
             "dist/coloris.min.js",
             "LICENSE",

@@ -817,6 +817,13 @@ A part is a run of letters or digits, so `.`, `-` and `_` all separate parts:
 | `1.86.0` | `boost_{version:_}.tar.gz` | `boost_1_86_0.tar.gz` |
 | `3.12` | `python{version:}.zip` | `python312.zip` |
 
+An asset name with `*` or `?` is a glob pattern, for projects whose asset names don't follow the
+tag. `{release}/WinMerge-*-x64-PerUser-Setup.exe` finds the setup whatever the version. A
+pattern must match exactly one asset in the release, and vendor stops with the matching names
+when it matches several. Give a pattern a name to save the asset as, like
+`{ "{release}/WinMerge-*-x64-PerUser-Setup.exe": "WinMerge-Setup.exe" }`, or the members to
+extract from it.
+
 #### Extracting files from archives
 
 To take files out of an archive, map the archive to the files you want. A list keeps their names,

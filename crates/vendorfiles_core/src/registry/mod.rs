@@ -295,6 +295,7 @@ mod tests {
     use super::Registry;
     use crate::model::FileEntry;
     use crate::ops::install::archive_name;
+    use crate::selection::pick_asset;
     use crate::template::{expand_url, is_http_url, replace_version, strip_release_prefix};
     use crate::url_source::{UrlSource, fetch, latest_version};
 
@@ -581,14 +582,19 @@ programs:
                     // The same substitution the install path performs, so this checks the real
                     // name.
                     let wanted = strip_release_prefix(&replace_version(asset, &release.tag_name));
-                    if published.contains(&wanted.as_str()) {
-                        checked += 1;
-                    } else {
-                        problems.push(format!(
+                    match pick_asset(&published, |name| name, &wanted) {
+                        Ok(_) => checked += 1,
+                        Err(matches) if matches.is_empty() => problems.push(format!(
                             "{canonical} for {host}: '{wanted}' is not in {} - published: {}",
                             release.tag_name,
                             published.join(", ")
-                        ));
+                        )),
+                        Err(matches) => problems.push(format!(
+                            "{canonical} for {host}: '{wanted}' matches {} assets in {}: {}",
+                            matches.len(),
+                            release.tag_name,
+                            matches.join(", ")
+                        )),
                     }
                     // A bare binary has no member to look inside, so nothing more to say about it.
                     let _ = matches!(target, FileTarget::Rename(_));
@@ -678,6 +684,14 @@ programs:
     ) -> (String, crate::Result<reqwest::Response>) {
         if let Some(repo) = repo {
             let asset_name = strip_release_prefix(&replace_version(asset, tag));
+            let release_regex = program.release_regex.as_deref();
+            let asset_name = match github
+                .release_asset_name(repo, &asset_name, tag, release_regex)
+                .await
+            {
+                Ok(resolved) => resolved,
+                Err(error) => return (asset_name, Err(error)),
+            };
             let response = github
                 .download_release_asset(repo, &asset_name, tag, program.release_regex.as_deref())
                 .await;

@@ -33,6 +33,9 @@
 # Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
 # linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
 #
+# An asset name with `*` or `?` is a glob pattern that must match exactly one asset in the release.
+# A pattern with no `member` needs `as`, since the name it matches changes every release.
+#
 # `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a
 # member must be a container the extractor reads: zip, tar, gz, tar.gz/tgz, tar.xz, 7z, crx or xpi.

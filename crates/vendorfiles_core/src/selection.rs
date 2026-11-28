@@ -34,6 +34,56 @@ pub fn is_selection(input: &str) -> bool {
     is_folder(input) || is_pattern(input)
 }
 
+/// Whether a release asset name is a glob pattern, which must match exactly one asset.
+///
+/// Only `*` and `?` make a pattern, as for repository files.
+#[must_use]
+pub fn is_asset_pattern(name: &str) -> bool {
+    name.contains(['*', '?'])
+}
+
+/// A release asset pattern compiled for matching, or the reason it does not compile.
+///
+/// # Errors
+///
+/// Returns the glob's own complaint when `pattern` is not a valid glob.
+pub fn asset_matcher(pattern: &str) -> Result<GlobMatcher, String> {
+    GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .backslash_escape(true)
+        .build()
+        .map(|glob| glob.compile_matcher())
+        .map_err(|error| error.to_string())
+}
+
+/// The one asset `wanted` names: the asset of that exact name, or the only asset a pattern
+/// matches.
+///
+/// # Errors
+///
+/// Returns every matching name when there is not exactly one, so none is an empty list.
+pub fn pick_asset<'a, T>(
+    assets: &'a [T],
+    name: impl Fn(&T) -> &str,
+    wanted: &str,
+) -> Result<&'a T, Vec<&'a str>> {
+    let matcher = is_asset_pattern(wanted)
+        .then(|| asset_matcher(wanted).ok())
+        .flatten();
+    let found: Vec<&T> = assets
+        .iter()
+        .filter(|asset| {
+            matcher
+                .as_ref()
+                .map_or_else(|| name(asset) == wanted, |m| m.is_match(name(asset)))
+        })
+        .collect();
+    match found.as_slice() {
+        [one] => Ok(one),
+        _ => Err(found.iter().map(|asset| name(asset)).collect()),
+    }
+}
+
 /// A selection that cannot be used, with the key it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invalid {
@@ -587,6 +637,32 @@ mod tests {
     fn a_bare_pattern_keeps_paths_below_the_base() {
         let found = selections(&files(r#"["dist/**/*.js"]"#), "v1").unwrap();
         assert_eq!(found[0].output("dist/u/a.js", "v1").unwrap(), "u/a.js");
+    }
+
+    #[test]
+    fn an_asset_pattern_picks_its_only_match() {
+        let assets = [
+            "WinMerge-2.16.60.2-x64-PerUser-Setup.exe",
+            "WinMerge-2.16.60.2-x64-Setup.exe",
+            "WinMerge-2.16.60.2-Setup.exe",
+        ];
+        let pick = |wanted: &str| super::pick_asset(&assets, |a| a, wanted).copied();
+        assert_eq!(
+            pick("WinMerge-*-x64-PerUser-Setup.exe"),
+            Ok("WinMerge-2.16.60.2-x64-PerUser-Setup.exe")
+        );
+        assert_eq!(
+            pick("WinMerge-2.16.60.2-Setup.exe"),
+            Ok("WinMerge-2.16.60.2-Setup.exe")
+        );
+        assert_eq!(
+            pick("WinMerge-*-x64-*Setup.exe").unwrap_err(),
+            [
+                "WinMerge-2.16.60.2-x64-PerUser-Setup.exe",
+                "WinMerge-2.16.60.2-x64-Setup.exe"
+            ]
+        );
+        assert_eq!(pick("*.zip"), Err(vec![]));
     }
 
     #[test]

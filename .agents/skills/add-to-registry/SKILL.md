@@ -57,6 +57,7 @@ leading `./` in a listing stays out of `member`, because paths compare normalize
 | A rolling release not marked pre-release (neovim's `stable`) | Add an anchored `releaseRegex`, because nothing else excludes it |
 | A tag holding dotted numbers | `{version}` is the first dotted run alone: `@biomejs/biome@2.6.4` gives `2.6.4`, `v2.16.60.2` gives `2.16.60.2` |
 | Asset names that drop or swap the dots | `{version:<joiner>}` rejoins the parts: 7-Zip's `26.06` with `7z{version:}-x64.exe` gives `7z2606-x64.exe` |
+| Asset names that carry a version the tag doesn't | A glob such as `{release}/WinMerge-*-x64-PerUser-Setup.exe`, with `as`. It must match exactly one asset |
 | A tag with no dotted numbers | `{version}` is the tag minus leading `v`s: `v3.7c` gives `3.7c` |
 | Only a Windows installer | Write an `installer` entry, as described below |
 | Both gnu and musl Linux builds | Use gnu, as `fd` and `bat` do. Use musl where gnu is missing |

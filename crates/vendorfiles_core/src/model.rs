@@ -15,10 +15,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::error::{Result, VendorError};
 use crate::installer::{InstallerKey, InstallerOptions};
 use crate::lockfile::{config_files_to_lock_files, flat_files};
-use crate::selection::{Selections, is_selection};
+use crate::selection::{Selections, asset_matcher, is_asset_pattern, is_selection};
 use crate::template::{
     basename, browsable_url, expand_url, is_github_url, is_http_url, is_release_path,
-    owner_and_name_from_repo_url, uses_version,
+    owner_and_name_from_repo_url, replace_version, strip_release_prefix, uses_version,
 };
 use crate::url_source::page::VersionSelector;
 use crate::url_source::{UrlSource, is_git_url};
@@ -115,6 +115,26 @@ fn entry_inputs(entry: &FileEntry) -> Box<dyn Iterator<Item = &str> + '_> {
         FileEntry::Simple(input) => Box::new(std::iter::once(input.as_str())),
         FileEntry::Mapped(map) => Box::new(map.keys().map(String::as_str)),
     }
+}
+
+/// Why a release asset pattern in `entry` cannot be used, with its key.
+///
+/// A pattern must compile, and it must name the file it saves, since the asset it matches
+/// changes from release to release.
+fn asset_pattern_problem(entry: &FileEntry) -> Option<(&str, String)> {
+    let named = matches!(entry, FileEntry::Mapped(_));
+    entry_inputs(entry)
+        .filter(|input| is_release_path(input) && is_asset_pattern(input))
+        .find_map(|input| {
+            let pattern = strip_release_prefix(&replace_version(input, "1.0.0"));
+            if let Err(error) = asset_matcher(&pattern) {
+                return Some((input, format!("is not a valid glob ({error})")));
+            }
+            (!named).then(|| {
+                let reason = "is a release asset pattern, so it needs a name to save the asset as";
+                (input, reason.to_owned())
+            })
+        })
 }
 
 /// A single input→output pair, after flattening the `files` array.
@@ -596,6 +616,13 @@ impl RawDependency {
                 name: name.to_owned(),
                 key: key.to_owned(),
                 reason: "is a folder inside a release, which vendor cannot list yet".to_owned(),
+            });
+        }
+        if let Some((key, reason)) = files.iter().find_map(asset_pattern_problem) {
+            return Err(VendorError::InvalidSelection {
+                name: name.to_owned(),
+                key: key.to_owned(),
+                reason,
             });
         }
         if matches!(self.hash_version_file, Some(HashVersionFile::Flag(true)))
@@ -1516,6 +1543,30 @@ mod tests {
             validated(r#"{"repository": "https://github.com/a/b", "files": ["{release}/dist/"]}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_release_asset_pattern_needs_a_name_and_a_valid_glob() {
+        let repo = r#""repository": "https://github.com/a/b""#;
+        let unnamed = validated(&format!(
+            r#"{{{repo}, "files": ["{{release}}/tool-*.exe"]}}"#
+        ));
+        assert_eq!(
+            unnamed.unwrap_err().to_string(),
+            "'{release}/tool-*.exe' in vendorDependencies.d is a release asset pattern, so it needs a name to save the asset as"
+        );
+        assert!(
+            validated(&format!(
+                r#"{{{repo}, "files": {{"{{release}}/tool-[*.exe": "tool.exe"}}}}"#
+            ))
+            .is_err()
+        );
+        for files in [
+            r#"{"{release}/tool-*-x64.exe": "tool.exe"}"#,
+            r#"{"{release}/tool-{version}-*.zip": ["bin/tool"]}"#,
+        ] {
+            validated(&format!(r#"{{{repo}, "files": {files}}}"#)).unwrap();
+        }
     }
 
     #[test]

@@ -10,6 +10,7 @@ use super::schema::{Explicit, Member, Program, Target};
 use crate::error::{Result, VendorError};
 use crate::installer::InstallerKey;
 use crate::model::{FileEntry, FileTarget};
+use crate::selection::is_asset_pattern;
 use crate::template::is_http_url;
 
 /// The host key a registry entry is looked up under: `windows-x86_64`, `macos-aarch64`, …
@@ -139,7 +140,15 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
              }| {
                 let target = match member {
                     // No member: the asset is the binary itself, saved under its own name or the one
-                    // `as` gives it.
+                    // `as` gives it. A pattern's matches change names, so it needs `as`.
+                    None if named.is_none() && is_asset_pattern(&asset) => {
+                        return Err(VendorError::RegistryInvalidEntry {
+                            name: name.to_owned(),
+                            reason: format!(
+                                "asset '{asset}' is a pattern, so it needs 'as' to name the file"
+                            ),
+                        });
+                    }
                     None => {
                         FileTarget::Rename(output_name(name, named.as_ref().unwrap_or(&asset))?)
                     }
