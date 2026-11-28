@@ -96,9 +96,6 @@ octocrab = { version = "0.54.9", default-features = false, features = [
     "retry",
     "rustls",
     "rustls-ring",
-    # Required even though no GitHub App JWT is ever signed here; the pure-Rust backend keeps
-    # aws-lc-rs out of the tree.
-    "jwt-rust-crypto",
     "timeout",
 ] }
 open = "5.4.5"
