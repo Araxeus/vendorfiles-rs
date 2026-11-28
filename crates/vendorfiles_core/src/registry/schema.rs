@@ -121,6 +121,45 @@ impl Program {
             .is_some()
     }
 
+    /// The commands `host` exposes: its own target's `bin`, or the program's.
+    #[must_use]
+    pub fn bin_for(&self, host: &str) -> &[String] {
+        let own = match self.targets.get(host) {
+            Some(Target::Explicit(explicit)) => explicit.bin.as_deref(),
+            Some(Target::Several(several)) => several.iter().find_map(|one| one.bin.as_deref()),
+            _ => None,
+        };
+        own.unwrap_or(&self.bin)
+    }
+
+    /// What in it needs registry `version: 3`, which builds before 3.0 refuse to read, if
+    /// anything does.
+    #[must_use]
+    pub fn needs_version_3(&self) -> Option<&'static str> {
+        let explicit = self.targets.values().flat_map(|target| match target {
+            Target::Explicit(one) => std::slice::from_ref(one),
+            Target::Several(several) => several.as_slice(),
+            Target::Triple(_) => &[],
+        });
+        let members = std::iter::once(self.member.as_ref())
+            .chain(explicit.clone().map(|one| one.member.as_ref()))
+            .flatten();
+        if self.url.is_some() {
+            Some("downloads from a url")
+        } else if self.installer.is_some() {
+            Some("runs an installer")
+        } else if !self.bin.is_empty() || explicit.clone().any(|one| one.bin.is_some()) {
+            Some("links commands with bin")
+        } else if members
+            .flat_map(Member::inputs)
+            .any(|input| crate::selection::is_member_selection(input))
+        {
+            Some("takes a folder or pattern out of an archive")
+        } else {
+            None
+        }
+    }
+
     /// Whether adding it on `host` runs an installer. Installers run on Windows only.
     #[must_use]
     pub fn is_installer_on(&self, host: &str) -> bool {
@@ -196,6 +235,9 @@ pub struct Explicit {
     /// The name to save it under; defaults to the basename of whichever of the two is used.
     #[serde(rename = "as", default)]
     pub output: Option<String>,
+    /// This host's commands, for a tree whose layout differs from the program's `bin`.
+    #[serde(default)]
+    pub bin: Option<Vec<String>>,
 }
 
 #[cfg(test)]

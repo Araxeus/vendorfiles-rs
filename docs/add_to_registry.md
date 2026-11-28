@@ -102,7 +102,10 @@ and each command gets a link at the top of your vendor folder:
         member: "helix-{version}-x86_64-windows/"
 ```
 
-- `bin` paths are relative to the folder `member` takes. `{exe}` adds `.exe` on Windows.
+- `bin` paths are relative to the folder `member` takes. `{exe}` adds `.exe` on Windows, where each
+  command must be an `.exe`.
+- A host whose tree is laid out differently sets its own `bin`, which replaces the program's, as
+  `python.exe` on Windows does beside `bin/python3` elsewhere.
 - Leave `bin` out for a folder that holds only a few files to run, like OpenSSH's. Its files land
   at the top of the vendor folder, so the archive's versioned folder drops out, as it does for one
   file.

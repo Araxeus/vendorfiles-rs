@@ -179,10 +179,11 @@ fn finish(name: &str, program: &Program, host: &str, files: Vec<FileEntry>) -> R
     // Installers run on Windows only. Elsewhere the same entry keeps its files.
     let installer = program.installer.clone().filter(|_| is_windows(host));
     let runs_installer = installer.as_ref().and_then(InstallerKey::options).is_some();
-    let (files, bin) = if program.bin.is_empty() || runs_installer {
+    let bin = program.bin_for(host);
+    let (files, bin) = if bin.is_empty() || runs_installer {
         (files, Vec::new())
     } else {
-        into_tree(name, host, files, &program.bin)?
+        into_tree(name, host, files, bin)?
     };
     no_file_written_twice(name, host, &files)?;
     if runs_installer {
@@ -1400,6 +1401,32 @@ programs:
         refused("'../t.exe'");
         let error = refused("'a/T.exe', 'b/t.exe'");
         assert!(error.to_string().contains("twice"), "{error}");
+    }
+
+    #[test]
+    fn a_host_may_name_its_own_commands() {
+        let document = program(
+            r"
+version: 3
+programs:
+  py:
+    repository: https://github.com/e/py
+    asset: '{release}/py-{target}.tar.gz'
+    member: 'python/'
+    bin: [bin/python3]
+    targets:
+      linux-x86_64: linux
+      windows-x86_64:
+        asset: '{release}/py-win.tar.gz'
+        member: 'python/'
+        bin: [python.exe]
+",
+        );
+        let program = &document.programs["py"];
+        let linux = for_host("py", program, "linux-x86_64").unwrap();
+        assert_eq!(linux.bin, ["libexec/py/bin/python3"]);
+        let windows = for_host("py", program, "windows-x86_64").unwrap();
+        assert_eq!(windows.bin, ["libexec/py/python.exe"]);
     }
 
     #[test]

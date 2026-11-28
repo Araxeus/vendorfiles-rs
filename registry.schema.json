@@ -216,6 +216,13 @@
           "description": "The name to save it under.",
           "type": "string",
           "minLength": 1
+        },
+        "bin": {
+          "description": "This host's commands, for a tree laid out differently here, like `python.exe` on Windows beside `bin/python3` elsewhere. Replaces the program's `bin` for this host.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
         }
       },
       "allOf": [

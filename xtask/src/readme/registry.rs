@@ -146,7 +146,7 @@ mod tests {
     use super::regenerate;
 
     const REGISTRY: &str = r#"
-version: 2
+version: 3
 programs:
   zoxide:
     description: "Smarter cd"
