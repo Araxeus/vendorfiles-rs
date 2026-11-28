@@ -80,7 +80,15 @@ fn table(registry: &Registry) -> Vec<String> {
             .replace('|', "\\|");
         let mut platforms = platforms(program);
         if program.is_installer() {
-            platforms.push_str(" (installer)");
+            let elsewhere = program
+                .targets
+                .keys()
+                .any(|host| !host.starts_with("windows"));
+            platforms.push_str(if elsewhere {
+                " (installer on Windows)"
+            } else {
+                " (installer)"
+            });
         }
         lines.push(format!(
             "| [{name}]({}) | {aliases} | {description} | {platforms} |",
@@ -138,7 +146,7 @@ mod tests {
     use super::regenerate;
 
     const REGISTRY: &str = r#"
-version: 2
+version: 3
 programs:
   zoxide:
     description: "Smarter cd"

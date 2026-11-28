@@ -144,6 +144,13 @@
           "default": false
         },
         "installer": { "$ref": "#/definitions/installer" },
+        "bin": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Installed files to run as commands, relative to the dependency folder. Each gets a link at the top of the folder: a symlink on Linux and macOS, and .cmd and sh launchers on Windows",
+          "examples": [["libexec/go/bin/go", "libexec/go/bin/gofmt"]]
+        },
         "alias": {
           "oneOf": [
             { "type": "string", "minLength": 1 },

@@ -55,16 +55,17 @@ impl Registry {
         let document: Document = serde_yaml_ng::from_str(text)
             .map_err(|source| VendorError::RegistryUnreadable(source.to_string()))?;
 
-        // Builds before version 3 refuse `url` as an unknown field. A file that keeps saying 2
-        // would break them without telling them to update, so it has to say 3.
+        // Builds before version 3 refuse these keys as unknown, or read a folder `member` as a
+        // file. A file that keeps saying 2 would break them without telling them to update, so
+        // it has to say 3.
         if document.version < 3
-            && let Some(name) = document
+            && let Some((name, what)) = document
                 .programs
                 .iter()
-                .find_map(|(name, program)| program.url.is_some().then_some(name))
+                .find_map(|(name, program)| program.needs_version_3().map(|what| (name, what)))
         {
             return Err(VendorError::RegistryUnreadable(format!(
-                "'{name}' downloads from a url, which needs `version: 3`"
+                "'{name}' {what}, which needs `version: 3`"
             )));
         }
         Ok(Self { document })
@@ -938,6 +939,34 @@ programs:
                     "{canonical}: alias '{alias}' is already taken"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn bin_installer_and_folder_members_need_version_3() {
+        for (key, said) in [
+            ("bin: [bin/t]", "bin"),
+            ("installer: true", "installer"),
+            ("member: 't/'", "folder"),
+        ] {
+            let text = format!(
+                r"
+version: 2
+programs:
+  t:
+    repository: https://github.com/e/t
+    asset: '{{release}}/t.zip'
+    {key}
+    targets:
+      linux-x86_64: x
+"
+            );
+            let error = Registry::parse(&text).expect_err(key);
+            assert!(error.to_string().contains(said), "{key}: {error}");
+            assert!(
+                Registry::parse(&text.replace("version: 2", "version: 3")).is_ok(),
+                "{key}"
+            );
         }
     }
 

@@ -41,6 +41,9 @@ pub struct VendorLock {
     /// update reuses a file whose blob and output have not changed.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub blobs: IndexMap<String, String>,
+    /// The links `bin` wrote at the top of the dependency folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bin: Vec<String>,
     /// What an installer put on the machine, for an `installer` dependency. Its `files` are then
     /// empty, since nothing is kept in the dependency folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,10 +301,12 @@ fn collision_key(output: &str) -> String {
 }
 
 impl VendorLock {
-    /// Every path the entry wrote into the dependency folder, relative to it.
+    /// Every path the entry wrote into the dependency folder, relative to it, links included.
     #[must_use]
     pub fn outputs(&self) -> Vec<String> {
-        flat_files(&self.files)
+        let mut outputs = flat_files(&self.files);
+        outputs.extend(self.bin.iter().cloned());
+        outputs
     }
 }
 
@@ -389,6 +394,9 @@ async fn read_existing(path: &Path) -> Result<Lockfile> {
 }
 
 /// Marks `name`'s entry in the lockfile at `path` as pending and adds `incoming` to its files.
+///
+/// Links are left out: one is recorded only once it has been written, so a link that was refused
+/// never names someone else's file as this entry's.
 /// A missing file or entry leaves nothing to mark.
 ///
 /// The entry keeps its place, which keeps the lockfile's order stable across reinstalls.
@@ -532,6 +540,7 @@ mod tests {
             version: "1".to_owned(),
             files: LockFiles::new(),
             blobs: indexmap::IndexMap::new(),
+            bin: Vec::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -556,6 +565,7 @@ mod tests {
             version: "1".to_owned(),
             files: LockFiles::new(),
             blobs: indexmap::IndexMap::new(),
+            bin: Vec::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -582,6 +592,7 @@ mod tests {
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files, "1"),
                 blobs: indexmap::IndexMap::new(),
+                bin: Vec::new(),
                 installed: None,
                 save_path: None,
                 pending: false,
@@ -609,6 +620,7 @@ mod tests {
             version: version.to_owned(),
             files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), version),
             blobs: indexmap::IndexMap::new(),
+            bin: Vec::new(),
             installed: None,
             save_path: None,
             pending: false,
@@ -649,6 +661,7 @@ mod tests {
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 blobs: indexmap::IndexMap::new(),
+                bin: Vec::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -701,6 +714,7 @@ mod tests {
                 version: "1".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "1"),
                 blobs: indexmap::IndexMap::new(),
+                bin: Vec::new(),
                 installed: None,
                 save_path: Some(".".to_owned()),
                 pending: false,
@@ -772,6 +786,7 @@ mod tests {
                 version: "0.38.0".to_owned(),
                 files: config_files_to_lock_files(&files(r#"["LICENSE"]"#), "0.38.0"),
                 blobs: indexmap::IndexMap::new(),
+                bin: Vec::new(),
                 installed: None,
                 save_path: None,
                 pending: false,

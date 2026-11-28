@@ -389,6 +389,14 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub files: Option<Vec<FileEntry>>,
+    /// Installed files to expose as commands at the top of the dependency folder. One path or a
+    /// list; anything else is an error, since a dropped `bin` would leave the commands unlinked.
+    #[serde(
+        default,
+        deserialize_with = "de_one_or_many",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bin: Option<Vec<String>>,
     #[serde(
         rename = "hashVersionFile",
         default,
@@ -433,6 +441,13 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub alias: Option<Aliases>,
+}
+
+/// One string or a list of them, as a list.
+fn de_one_or_many<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error> {
+    Ok(Option::<Aliases>::deserialize(deserializer)?.map(|many| many.0))
 }
 
 /// A dependency's other names, written as one string or a list of them.
@@ -482,6 +497,25 @@ impl RawDependency {
             .map_err(|_| VendorError::InvalidInstallerKey {
                 name: name.to_owned(),
             })
+    }
+
+    /// Checks that `bin` names files to link without replacing any the dependency writes.
+    fn validate_bin(&self, name: &str) -> Result<()> {
+        let Some(bin) = self.bin.as_deref().filter(|bin| !bin.is_empty()) else {
+            return Ok(());
+        };
+        if self.installer(name)?.is_some() {
+            return Err(VendorError::InvalidBin {
+                name: name.to_owned(),
+                entry: bin[0].clone(),
+                reason: "has nothing to link, because an installer keeps no files".to_owned(),
+            });
+        }
+        let outputs = flat_files(&config_files_to_lock_files(
+            self.files.as_deref().unwrap_or_default(),
+            "",
+        ));
+        crate::bin_links::check(name, bin, &outputs)
     }
 
     /// Checks that an installer entry downloads exactly one file, the one that runs.
@@ -587,6 +621,7 @@ impl RawDependency {
     ///
     /// Returns the `Invalid*Key` variant naming the offending config key.
     pub fn validate(&self, name: &str) -> Result<()> {
+        self.validate_bin(name)?;
         if let Some(url) = &self.url {
             if self.repository.is_some() {
                 return Err(VendorError::RepositoryAndUrl {
@@ -865,6 +900,7 @@ impl RawDependency {
             locked: self.locked.unwrap_or(false),
             installer,
             aliases: self.alias.clone().unwrap_or_default().0,
+            bin: self.bin.clone().unwrap_or_default(),
         })
     }
 }
@@ -895,9 +931,17 @@ pub struct Dependency {
     pub installer: Option<InstallerOptions>,
     /// Other names a command accepts for this dependency.
     pub aliases: Vec<String>,
+    /// Installed files to expose as commands at the top of the dependency folder.
+    pub bin: Vec<String>,
 }
 
 impl Dependency {
+    /// The links `bin` writes into the dependency folder on this platform.
+    #[must_use]
+    pub fn links(&self) -> Vec<crate::bin_links::Link> {
+        crate::bin_links::links(&self.bin)
+    }
+
     /// Where a person can look the dependency up: its repository, or its `url`'s site while the
     /// `url` still holds a placeholder.
     #[must_use]
@@ -1202,6 +1246,19 @@ mod tests {
         assert!(d.repository.is_none());
         assert!(d.files.is_none());
         assert!(d.locked.is_none());
+    }
+
+    #[test]
+    fn bin_takes_one_path_or_a_list_and_refuses_anything_else() {
+        let parse = |bin: &str| {
+            serde_json::from_str::<RawDependency>(&format!(r#"{{"bin":{bin}}}"#)).map(|d| d.bin)
+        };
+        assert_eq!(parse(r#""a/go""#).unwrap(), Some(vec!["a/go".to_owned()]));
+        assert_eq!(
+            parse(r#"["a/go","a/gofmt"]"#).unwrap(),
+            Some(vec!["a/go".to_owned(), "a/gofmt".to_owned()])
+        );
+        assert!(parse("true").is_err());
     }
 
     #[test]

@@ -118,6 +118,12 @@ pub const PAGES: &[PageSpec] = &[
         "Give a dependency other names that every command accepts.",
     ),
     page(
+        "configuration/bin",
+        Some("Commands inside a folder"),
+        Start::Heading("Commands inside a folder"),
+        "Run a toolchain's commands from the top of its folder, without spreading its tree on PATH.",
+    ),
+    page(
         "configuration/installers",
         Some("Installers"),
         Start::Heading("Installers"),
@@ -213,6 +219,7 @@ pub const SIDEBAR: &[(&str, &[&str])] = &[
             "configuration/other-sites",
             "configuration/locking",
             "configuration/aliases",
+            "configuration/bin",
             "configuration/installers",
             "configuration/defaults",
         ],

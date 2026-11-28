@@ -89,26 +89,35 @@ holds two builds of `OpenConsole.exe`. Without their folders, the two would over
 ## Programs that need a whole folder
 
 A toolchain or editor can need thousands of files beside its executable. End `member` with `/` to
-take a whole folder. Alone, the folder's files land at the top of your vendor folder, so the
-archive's versioned folder drops out, as it does for one file:
+take a whole folder, and list its commands in `bin`. The folder then lands in `libexec/<name>/`,
+and each command gets a link at the top of your vendor folder:
 
 ```yaml
   helix:
     repository: https://github.com/helix-editor/helix
+    bin: ["hx{exe}"]
     targets:
       windows-x86_64:
         asset: "{release}/helix-{version}-x86_64-windows.zip"
         member: "helix-{version}-x86_64-windows/"
 ```
 
+- `bin` paths are relative to the folder `member` takes. `{exe}` adds `.exe` on Windows, where each
+  command must be an `.exe`.
+- A host whose tree is laid out differently sets its own `bin`, which replaces the program's, as
+  `python.exe` on Windows does beside `bin/python3` elsewhere.
+- Leave `bin` out for a folder that holds only a few files to run, like OpenSSH's. Its files land
+  at the top of the vendor folder, so the archive's versioned folder drops out, as it does for one
+  file.
 - `./` takes every file in the archive, for one that has no top folder.
 - A `*` or `?` takes every file that matches, like `"*.dll"`.
 - In a list, a folder or pattern keeps its path from the archive root.
 - In a map, a folder or pattern goes to a destination that ends in `/`, like `"include/": "include/"`.
 
 `vendor update` replaces the folder's files, and deletes the ones the new release no longer has.
-When the executable sits in a `bin/` folder, as go's and neovim's do, say so in a comment, because
-that folder is what goes on `PATH`.
+
+An entry with `installer` runs it on Windows hosts only. Other hosts keep their files, so one entry
+can run go's `.msi` on Windows and take go's folder, with `bin`, everywhere else.
 
 CI downloads each entry's archive to check its members. For an archive too large to fetch on every
 run, put `# ci: skip-archive-check` on its own line just above the program's name. CI still checks

@@ -92,8 +92,11 @@ command, such as `nvim --headless --clean` or `rg needle`.
 - A large tree fits a folder `member` ending in `/`, as `helix` and `go` do. Alone, the folder's
   files land at the top of the vendor folder, so the archive's versioned folder drops out. `./`
   takes an archive with no top folder, as `pwsh` does.
-- When the executable sits in a `bin/` folder, say so in a comment and in the report, because
-  that folder must go on `PATH` and the vendor folder alone is not enough.
+- A tree also needs `bin`, listing its commands relative to the folder `member` takes, like
+  `bin/go{exe}`. vendor links them at the top of the vendor folder and keeps the tree in
+  `libexec/<name>/`. Expose the commands people type, not every file in `bin/`.
+- When upstream ships a Windows installer for a tree program, set `installer` and give Windows
+  hosts the setup. It runs on Windows only, and other hosts keep the tree.
 - Mark an archive of a gigabyte or more with `# ci: skip-archive-check` on its own line just
   above the program's name, because the live test would download it on every run. Check its
   members by hand instead, and report it.

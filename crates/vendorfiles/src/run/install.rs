@@ -403,11 +403,14 @@ async fn install_listed_url(
     let existing = existing.unwrap_or_default();
     let installer = listed_installer(&listed);
     let aliases = std::mem::take(&mut listed.aliases);
-    let files = existing
-        .files
-        .clone()
-        .filter(|files| !files.is_empty())
-        .unwrap_or(listed.files);
+    let kept_files = existing.files.clone().filter(|files| !files.is_empty());
+    // `bin` names files inside the registry's layout, so it comes with the registry's files.
+    let bin = if kept_files.is_some() {
+        existing.bin.clone()
+    } else {
+        Some(std::mem::take(&mut listed.bin)).filter(|bin| !bin.is_empty())
+    };
+    let files = kept_files.unwrap_or(listed.files);
     let mut entry = RawDependency {
         url: Some(url),
         version_url: existing.version_url.clone().or(listed.version_url),
@@ -421,6 +424,7 @@ async fn install_listed_url(
             .clone()
             .or(listed.version_json_pointer),
         files: Some(files),
+        bin,
         installer: existing.installer.clone().or(installer),
         ..existing
     };
@@ -589,6 +593,13 @@ fn fill_from_source(
         }
         if entry.installer.is_none() {
             entry.installer = listed_installer(listed);
+        }
+        // `bin` names files inside the registry's layout, so it comes with the registry's files.
+        if entry.bin.is_none()
+            && !listed.bin.is_empty()
+            && entry.files.as_ref() == Some(&listed.files)
+        {
+            entry.bin = Some(listed.bin.clone());
         }
     }
 }

@@ -23,6 +23,7 @@
 #![allow(clippy::multiple_crate_versions)]
 
 pub mod archive;
+pub mod bin_links;
 pub mod config;
 pub mod error;
 pub mod fsx;
