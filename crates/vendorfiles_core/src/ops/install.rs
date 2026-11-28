@@ -1229,7 +1229,11 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
         source: source_error,
     };
 
-    tokio::fs::metadata(source).await.map_err(fail)?;
+    // `symlink_metadata`: a link's target may already have moved into place before it.
+    let kind = tokio::fs::symlink_metadata(source)
+        .await
+        .map_err(fail)?
+        .file_type();
     if fsx::is_running_executable(destination) {
         // The archive member is a new copy of this very binary: hand the swap to `self-replace`
         // rather than trying to move onto an image the operating system has open.
@@ -1238,11 +1242,34 @@ async fn move_extracted(source: &Path, destination: &Path) -> Result<()> {
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(fail)?;
     }
-    if tokio::fs::rename(source, destination).await.is_err() {
-        tokio::fs::copy(source, destination).await.map_err(fail)?;
-        let _ = tokio::fs::remove_file(source).await;
+    if tokio::fs::rename(source, destination).await.is_ok() {
+        return Ok(());
     }
+    // A copy would follow a link and duplicate its target, so the link is made again instead.
+    if kind.is_symlink() {
+        relink(source, destination).await.map_err(fail)?;
+    } else {
+        tokio::fs::copy(source, destination).await.map_err(fail)?;
+    }
+    let _ = tokio::fs::remove_file(source).await;
     Ok(())
+}
+
+/// Recreates the symlink at `source` as `destination`, pointing where it points.
+#[cfg(unix)]
+async fn relink(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let target = tokio::fs::read_link(source).await?;
+    match tokio::fs::remove_file(destination).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    tokio::fs::symlink(target, destination).await
+}
+
+/// Windows only makes symlinks in Developer Mode, so a link is copied there.
+#[cfg(not(unix))]
+async fn relink(source: &Path, destination: &Path) -> std::io::Result<()> {
+    tokio::fs::copy(source, destination).await.map(|_| ())
 }
 
 #[cfg(test)]
