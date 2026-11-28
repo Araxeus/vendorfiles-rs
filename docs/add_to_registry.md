@@ -110,6 +110,10 @@ archive's versioned folder drops out, as it does for one file:
 When the executable sits in a `bin/` folder, as go's and neovim's do, say so in a comment, because
 that folder is what goes on `PATH`.
 
+CI downloads each entry's archive to check its members. For an archive too large to fetch on every
+run, put `# ci: skip-archive-check` on its own line just above the program's name. CI still checks
+that its assets exist.
+
 ## Renaming files and using several assets
 
 Give `member` a map to choose where each file goes. That's how a file buried deep in the archive

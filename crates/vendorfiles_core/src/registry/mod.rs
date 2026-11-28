@@ -746,6 +746,41 @@ programs:
         None
     }
 
+    /// The comment that keeps an entry's archive out of the member check.
+    const SKIP_ARCHIVE_CHECK: &str = "# ci: skip-archive-check";
+
+    /// The programs whose key follows a [`SKIP_ARCHIVE_CHECK`] comment.
+    fn archive_check_skipped(text: &str) -> std::collections::HashSet<String> {
+        let mut skipped = std::collections::HashSet::new();
+        let mut marked = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == SKIP_ARCHIVE_CHECK {
+                marked = true;
+            } else if !trimmed.starts_with('#') {
+                if marked && let Some(name) = trimmed.strip_suffix(':') {
+                    skipped.insert(name.to_owned());
+                }
+                marked = false;
+            }
+        }
+        skipped
+    }
+
+    #[test]
+    fn the_skip_comment_names_the_entry_below_it() {
+        let text = "programs:
+  # Large.
+  # ci: skip-archive-check
+  # More.
+  llvm:
+                        description: x
+  zig:
+";
+        let skipped = archive_check_skipped(text);
+        assert_eq!(skipped.into_iter().collect::<Vec<_>>(), ["llvm"]);
+    }
+
     /// Whether an archive holding `held` has `member`, or for a folder or pattern, any file of it.
     ///
     /// Resolved the way installation resolves it - `join_normalized` under the directory the
@@ -779,7 +814,9 @@ programs:
     async fn the_shipped_registry_names_members_that_exist() {
         use crate::template::owner_and_name_from_repo_url;
 
-        let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
+        let text = shipped();
+        let registry = Registry::parse(&text).expect("the shipped registry parses");
+        let skipped = archive_check_skipped(&text);
         let github =
             crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
         let mut problems: Vec<String> = Vec::new();
@@ -790,8 +827,8 @@ programs:
 
         for name in registry.names() {
             let (canonical, program) = registry.find(name).expect("just listed");
-            if program.path.is_some() {
-                continue; // A repository file: no archive to look inside.
+            if program.path.is_some() || skipped.contains(canonical) {
+                continue; // A repository file, or an archive too large to download each run.
             }
             let Some((host, archives)) =
                 member_bearing_host(canonical, program, &local_host, &mut problems)

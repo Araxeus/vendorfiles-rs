@@ -8,6 +8,10 @@
 # on one platform - the runner's own where the entry covers it. So a wrong `member` is caught, and
 # the failure lists what the archive actually holds.
 #
+# An archive too large to download on every run can skip that member check. Put the comment
+# `# ci: skip-archive-check` on its own line just above the program's name. Its asset names are
+# still checked.
+#
 # Test your entry before opening the PR:
 #
 #     VENDOR_REGISTRY=./registry.yml vendor add <name>

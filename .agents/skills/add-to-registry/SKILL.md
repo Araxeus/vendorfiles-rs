@@ -94,8 +94,9 @@ command, such as `nvim --headless --clean` or `rg needle`.
   takes an archive with no top folder, as `pwsh` does.
 - When the executable sits in a `bin/` folder, say so in a comment and in the report, because
   that folder must go on `PATH` and the vendor folder alone is not enough.
-- Report a large archive, because the live test downloads it on every run. LLVM's Linux archive
-  is 2 GB.
+- Mark an archive of a gigabyte or more with `# ci: skip-archive-check` on its own line just
+  above the program's name, because the live test would download it on every run. Check its
+  members by hand instead, and report it.
 
 ## 3. Write the entry
 
