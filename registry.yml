@@ -2810,3 +2810,283 @@ programs:
     targets:
       windows-x86_64:
         asset: "{release}/peazip-{version}.WIN64.exe"
+
+  # A rebuild of one Git release is tagged like `v2.56.0.windows.4` and named
+  # Git-2.56.0.4-64-bit.exe, so the asset is matched by pattern. `git update-git-for-windows`
+  # installs over this, so update it through vendor instead.
+  git:
+    description: "Git for Windows: git, Git Bash and Git GUI, with credential manager"
+    aliases: [git-for-windows]
+    repository: https://github.com/git-for-windows/git
+    installer: true
+    as: git-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/Git-*-64-bit.exe"
+      windows-aarch64:
+        asset: "{release}/Git-*-arm64.exe"
+
+  # No arm64 setup.
+  localsend:
+    description: "Share files to nearby devices over the local network, like AirDrop"
+    repository: https://github.com/localsend/localsend
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/LocalSend-{version}-windows-x86-64.exe"
+
+  shotcut:
+    description: "Free video editor with a timeline, filters and wide format support"
+    repository: https://github.com/mltframework/shotcut
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/shotcut-win64-{version}.exe"
+      windows-aarch64:
+        asset: "{release}/shotcut-win_ARM-{version}.exe"
+
+  openshot:
+    description: "Video editor with a timeline, titles, transitions and animation"
+    repository: https://github.com/OpenShot/openshot-qt
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/OpenShot-v{version}-x86_64.exe"
+
+  # The GUI. HandBrake needs the .NET desktop runtime.
+  handbrake:
+    description: "Video transcoder that converts video to MP4 and MKV with H.265 and AV1"
+    repository: https://github.com/HandBrake/HandBrake
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/HandBrake-{version}-x86_64-Win_GUI.exe"
+      windows-aarch64:
+        asset: "{release}/HandBrake-{version}-arm64-Win_GUI.exe"
+
+  # The setup's name carries the bundled Python's version, like py311, so it is matched by
+  # pattern.
+  freecad:
+    description: "Parametric 3D CAD modeler for product design and 3D printing"
+    repository: https://github.com/FreeCAD/FreeCAD
+    installer: true
+    as: freecad-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/FreeCAD_{version}-Windows-x86_64-py*-installer.exe"
+
+  librecad:
+    description: "2D CAD drafting app for technical drawings, with DXF and DWG support"
+    repository: https://github.com/LibreCAD/LibreCAD
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/LibreCAD-v{version}-win64-msvc.exe"
+
+  bleachbit:
+    description: "Disk cleaner that frees space and removes caches, cookies and history"
+    repository: https://github.com/bleachbit/bleachbit
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/BleachBit-{version}-setup.exe"
+
+  # The maintained fork of Media Player Classic.
+  mpc-hc:
+    description: "Lightweight media player for video and audio, Media Player Classic"
+    repository: https://github.com/clsid2/mpc-hc
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/MPC-HC.{version}.x64.exe"
+
+  # The setup ships inside a zip, so this takes the portable build.
+  mpc-be:
+    description: "Media player for video and audio, based on Media Player Classic"
+    repository: https://github.com/Aleksoid1978/MPC-BE
+    targets:
+      windows-x86_64:
+        asset: "{release}/MPC-BE.{version}.x64.7z"
+        member: "MPC-BE.{version}.x64/"
+
+  mpv-net:
+    description: "Media player built on mpv, with a context menu and settings GUI"
+    aliases: [mpv.net]
+    repository: https://github.com/mpvnet-player/mpv.net
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/mpv.net-v{version}-setup-x64.exe"
+
+  angry-ip-scanner:
+    description: "Network scanner that finds hosts and open ports on a LAN"
+    aliases: [ipscan]
+    repository: https://github.com/angryip/ipscan
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ipscan-{version}-setup.exe"
+
+  # Tags carry a build number the setup's name leaves out, so the asset is matched by pattern.
+  rainmeter:
+    description: "Desktop customization with skins for widgets, clocks and system meters"
+    repository: https://github.com/rainmeter/rainmeter
+    installer: true
+    as: rainmeter-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/Rainmeter-*.exe"
+
+  ditto:
+    description: "Clipboard manager that keeps history of copied text and images"
+    repository: https://github.com/sabrogden/Ditto
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/DittoSetup_{version:_}.exe"
+
+  copyq:
+    description: "Clipboard manager with searchable, editable history and scripting"
+    repository: https://github.com/hluk/CopyQ
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/copyq-{version}-setup.exe"
+
+  # One bundle for every architecture. Windows 11 already includes it.
+  windows-terminal:
+    description: "Microsoft's terminal app with tabs, panes and profiles for every shell"
+    aliases: [wt]
+    repository: https://github.com/microsoft/terminal
+    installer: msix
+    targets:
+      windows-x86_64:
+        asset: "{release}/Microsoft.WindowsTerminal_{version}_8wekyb3d8bbwe.msixbundle"
+      windows-aarch64:
+        asset: "{release}/Microsoft.WindowsTerminal_{version}_8wekyb3d8bbwe.msixbundle"
+
+  # One bundle for every architecture. `pwsh` is the portable build.
+  powershell:
+    description: "PowerShell 7, the cross-platform shell and scripting language"
+    repository: https://github.com/PowerShell/PowerShell
+    installer: msix
+    targets:
+      windows-x86_64:
+        asset: "{release}/PowerShell-{version}.msixbundle"
+      windows-aarch64:
+        asset: "{release}/PowerShell-{version}.msixbundle"
+
+  # Its own setup, which installs for the current user with /silent.
+  autohotkey:
+    description: "Scripting language for Windows hotkeys, macros and automation"
+    aliases: [ahk]
+    repository: https://github.com/AutoHotkey/AutoHotkey
+    installer:
+      type: exe
+      args: [/silent]
+    targets:
+      windows-x86_64:
+        asset: "{release}/AutoHotkey_{version}_setup.exe"
+
+  # Its own setup, which raises a UAC prompt. The switches are the ones winget uses.
+  system-informer:
+    description: "Process monitor and task manager replacement, formerly Process Hacker"
+    aliases: [systeminformer, process-hacker]
+    repository: https://github.com/winsiderss/systeminformer
+    installer:
+      type: exe
+      args: [-install, -silent]
+    targets:
+      windows-x86_64:
+        asset: "{release}/systeminformer-{version}-release-setup.exe"
+      windows-aarch64:
+        asset: "{release}/systeminformer-{version}-release-setup.exe"
+
+  # A bootstrapper around an MSI, which takes msiexec's switches. They are the ones winget uses.
+  open-shell:
+    description: "Classic Start menu and Explorer tweaks for Windows 10 and 11"
+    aliases: [classic-shell]
+    repository: https://github.com/Open-Shell/Open-Shell-Menu
+    installer:
+      type: exe
+      args: [/quiet, /norestart]
+    targets:
+      windows-x86_64:
+        asset: "{release}/OpenShellSetup_{version:_}.exe"
+
+  # Portable, with no setup.
+  rufus:
+    description: "Create bootable USB drives from ISO images for Windows and Linux"
+    repository: https://github.com/pbatard/rufus
+    targets:
+      windows-x86_64:
+        asset: "{release}/rufus-{version}.exe"
+        as: rufus.exe
+      windows-aarch64:
+        asset: "{release}/rufus-{version}_arm64.exe"
+        as: rufus.exe
+
+  # Ventoy2Disk runs from its folder, beside the boot images it writes.
+  ventoy:
+    description: "Make a bootable USB drive once, then copy ISO files onto it to boot them"
+    repository: https://github.com/ventoy/Ventoy
+    targets:
+      windows-x86_64:
+        asset: "{release}/ventoy-{version}-windows.zip"
+        member: "ventoy-{version}/"
+      linux-x86_64:
+        asset: "{release}/ventoy-{version}-linux.tar.gz"
+        member: "ventoy-{version}/"
+      linux-aarch64:
+        asset: "{release}/ventoy-{version}-linux.tar.gz"
+        member: "ventoy-{version}/"
+
+  # Not on GitHub. The download page links the setup by its full version, like 1.4.1.1032.
+  everything:
+    description: "Instant file search for Windows that finds files by name as you type"
+    url: https://www.voidtools.com/Everything-{version}.x64-Setup.exe
+    versionUrl: https://www.voidtools.com/downloads/
+    versionRegex: 'Everything-(\d+\.\d+\.\d+\.\d+)\.x64-Setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: everything-setup.exe
+
+  # Not on GitHub. winscp.net hands downloads out through expiring links, so this takes the
+  # SourceForge copy. WinSCP checks for updates weekly unless turned off in Preferences.
+  winscp:
+    description: "SFTP, SCP, FTP, WebDAV and S3 client with a two-pane file manager"
+    url: https://sourceforge.net/projects/winscp/files/WinSCP/{version}
+    versionUrl: https://winscp.net/eng/downloads.php
+    versionRegex: 'WinSCP-(\d+\.\d+\.\d+)-Setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/WinSCP-{version}-Setup.exe/download"
+        as: winscp-setup.exe
+
+  # Not on GitHub. latest.html names the current release, like `latest release (0.85)`.
+  putty:
+    description: "SSH and telnet client with PuTTYgen, Pageant, psftp and plink"
+    url: https://the.earth.li/~sgtatham/putty/{version}
+    versionUrl: https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html
+    versionRegex: 'latest release \((\d+\.\d+)\)'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/w64/putty-64bit-{version}-installer.msi"
+      windows-aarch64:
+        asset: "{url}/wa64/putty-arm64-{version}-installer.msi"
+
+  # Not on GitHub. This takes KDE's CDN, because download.kde.org redirects to mirrors that can
+  # time out.
+  krita:
+    description: "Digital painting app for illustration, concept art, comics and animation"
+    url: https://cdn.download.kde.org/stable/krita/{version}
+    versionUrl: https://krita.org/en/download/
+    versionRegex: 'krita-x64-(\d+\.\d+\.\d+)-setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/krita-x64-{version}-setup.exe"
