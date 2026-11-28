@@ -1913,6 +1913,7 @@ programs:
 
   # The whole toolchain, which is large: 900 MB for Windows, 2 GB for Linux. The regex skips
   # release candidates. Put its bin/ on PATH. No macOS build.
+  # ci: skip-archive-check
   llvm:
     description: "LLVM and Clang C and C++ toolchain: clang, clangd, lld and clang-format"
     aliases: [clang, clangd, clang-format]
