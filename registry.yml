@@ -48,6 +48,11 @@
 # how `x64/programz.exe` arrives as `program.exe`. Naming more than one file leaves `as` nothing
 # single to rename, so it is refused beside either.
 #
+# A `member` ending in `/` takes that whole folder, and one with `*` or `?` takes every file it
+# matches, for a program that needs its tree, like go or neovim. Alone, a folder's files land at
+# the top of the vendor folder, which drops the archive's versioned folder; `./` takes the whole
+# archive. In a list, a folder keeps its path. In a map, a folder's destination ends in `/`.
+#
 # A host may name *several assets* instead of one, as a list of `asset`/`member` blocks, for a
 # release that splits what one host needs across an archive and a loose file beside it.
 #

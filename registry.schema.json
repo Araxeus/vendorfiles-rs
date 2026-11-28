@@ -225,7 +225,7 @@
       ]
     },
     "member": {
-      "description": "What to take out of the asset. One path is the executable, saved under its basename, which `as` may rename. A list is a layout every file of which is written out as it stands: `herdr.exe` loads the `conpty/` directory shipped beside it, and flattening would collide `conpty/x64/OpenConsole.exe` with the `arm64` build of the same name. A map is that same layout with the destinations spelled out, for an archive that buries what you want: `x64/programz.exe` under the name `program.exe`.",
+      "description": "What to take out of the asset. One path is the executable, saved under its basename, which `as` may rename. A list is a layout every file of which is written out as it stands: `herdr.exe` loads the `conpty/` directory shipped beside it, and flattening would collide `conpty/x64/OpenConsole.exe` with the `arm64` build of the same name. A map is that same layout with the destinations spelled out, for an archive that buries what you want: `x64/programz.exe` under the name `program.exe`. A path ending in `/` takes that whole folder, and one with `*` or `?` takes every file it matches. Alone, a folder's files land at the top of the vendor folder, and `./` takes the whole archive.",
       "oneOf": [
         { "type": "string", "minLength": 1 },
         {

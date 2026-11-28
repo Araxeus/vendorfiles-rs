@@ -746,6 +746,25 @@ programs:
         None
     }
 
+    /// Whether an archive holding `held` has `member`, or for a folder or pattern, any file of it.
+    ///
+    /// Resolved the way installation resolves it - `join_normalized` under the directory the
+    /// archive was unpacked into - rather than compared as raw spellings. That is what makes
+    /// `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on disk, so the gate
+    /// cannot fail an entry that installs perfectly well. A stand-in root is enough: both sides go
+    /// through the same one.
+    fn is_held(member: &str, tag: &str, held: &[String]) -> Result<bool, String> {
+        if let Some(selection) = crate::selection::Selection::of(member, None, tag) {
+            let selection = selection.map_err(|error| format!("{error:?}"))?;
+            return Ok(held.iter().any(|held| selection.matches(held)));
+        }
+        let root = std::path::Path::new("extracted");
+        let expected = crate::fsx::join_normalized(root, &[&replace_version(member, tag)]);
+        Ok(held
+            .iter()
+            .any(|held| crate::fsx::join_normalized(root, &[held]) == expected))
+    }
+
     /// One platform per entry, checked all the way into the archive.
     ///
     /// Verifying every host would mean downloading every asset for every platform - gigabytes. One
@@ -834,19 +853,16 @@ programs:
                     }
                 };
 
-                // Resolved the way installation resolves it - `join_normalized` under the directory
-                // the archive was unpacked into - rather than compared as raw spellings. That is what
-                // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
-                // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
-                // is enough: both sides go through the same one.
-                let root = std::path::Path::new("extracted");
-                let held_paths: Vec<_> = held
-                    .iter()
-                    .map(|held| crate::fsx::join_normalized(root, &[held]))
-                    .collect();
                 for member in wanted_members.keys() {
                     let expected = replace_version(member, &tag);
-                    if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
+                    let found = match is_held(member, &tag, &held) {
+                        Ok(found) => found,
+                        Err(error) => {
+                            problems.push(format!("{canonical} for {host}: {error}"));
+                            continue;
+                        }
+                    };
+                    if found {
                         checked += 1;
                     } else {
                         problems.push(format!(

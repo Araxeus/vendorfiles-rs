@@ -86,6 +86,30 @@ holds two builds of `OpenConsole.exe`. Without their folders, the two would over
         as: herdr
 ```
 
+## Programs that need a whole folder
+
+A toolchain or editor can need thousands of files beside its executable. End `member` with `/` to
+take a whole folder. Alone, the folder's files land at the top of your vendor folder, so the
+archive's versioned folder drops out, as it does for one file:
+
+```yaml
+  helix:
+    repository: https://github.com/helix-editor/helix
+    targets:
+      windows-x86_64:
+        asset: "{release}/helix-{version}-x86_64-windows.zip"
+        member: "helix-{version}-x86_64-windows/"
+```
+
+- `./` takes every file in the archive, for one that has no top folder.
+- A `*` or `?` takes every file that matches, like `"*.dll"`.
+- In a list, a folder or pattern keeps its path from the archive root.
+- In a map, a folder or pattern goes to a destination that ends in `/`, like `"include/": "include/"`.
+
+`vendor update` replaces the folder's files, and deletes the ones the new release no longer has.
+When the executable sits in a `bin/` folder, as go's and neovim's do, say so in a comment, because
+that folder is what goes on `PATH`.
+
 ## Renaming files and using several assets
 
 Give `member` a map to choose where each file goes. That's how a file buried deep in the archive
