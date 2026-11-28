@@ -2,12 +2,11 @@
 title: vendorfiles
 template: splash
 hero:
-  tagline: Pull files from GitHub, git hosts and any URL, and keep them up to date. Like a package manager, but for single files.
-  image:
-    file: ../../assets/hero-terminal.svg
+  title: Get the files and tools you need. <em>Keep them pinned and current.</em>
+  tagline: Name what you want from a GitHub repo, a release or any URL. vendor downloads it, writes a lockfile, and tells you when there's something newer.
   actions:
     - text: Get started
-      link: /vendorfiles-rs/getting-started/installation/
+      link: /vendorfiles-rs/getting-started/quick-start/
       icon: right-arrow
     - text: GitHub
       link: https://github.com/Araxeus/vendorfiles-rs
@@ -15,88 +14,71 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid, Icon, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Icon } from '@astrojs/starlight/components';
 
-<div class="install">
-<Tabs syncKey="os">
-<TabItem label="Linux and macOS">
+## Two ways to use it
 
-```bash frame="none"
-curl -fsSL https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.sh | bash
-```
-
-</TabItem>
-<TabItem label="Windows">
-
-```powershell frame="none"
-irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | iex
-```
-
-</TabItem>
-</Tabs>
+<div class="ways not-content">
+  <article class="way">
+    <h3><span class="ico"><Icon name="document" size="1.15rem" /></span>In a project</h3>
+    <p>Pull CSS libraries, scripts, fonts or configs into your repo. Commit the config and lockfile, and everyone gets the same bytes.</p>
+    <ul>
+      <li>Single files, whole folders or glob patterns</li>
+      <li>Pinned to a release, a tag or a commit</li>
+      <li>Config in TOML, YAML, JSON, JSON5 or <code>package.json</code></li>
+    </ul>
+    <a class="more" href="/vendorfiles-rs/getting-started/quick-start/">Project quick start →</a>
+  </article>
+  <article class="way">
+    <h3><span class="ico"><Icon name="laptop" size="1.15rem" /></span>On your machine</h3>
+    <p>Install command-line tools and apps by name, on Windows, macOS and Linux. One config file lists everything you installed.</p>
+    <ul>
+      <li><code>vendor add rg fd</code>, with no asset names to look up</li>
+      <li>Windows installers that run silently and uninstall cleanly</li>
+      <li><code>vendor outdated</code> across every program at once</li>
+    </ul>
+    <a class="more" href="/vendorfiles-rs/getting-started/global-programs/">Global programs guide →</a>
+  </article>
 </div>
 
-## What it does
+## What it can fetch
 
-<div class="features not-content">
-  <div class="feature">
-    <p class="feature-title"><Icon name="document" size="1.25rem" />Any file, any source</p>
-    <p class="feature-text">Download single files from any GitHub repository or any URL.</p>
-  </div>
-  <div class="feature">
-    <p class="feature-title"><Icon name="download" size="1.25rem" />Release assets</p>
-    <p class="feature-text">Unpack only the files you need from zip, tar, tar.gz and crx archives.</p>
-  </div>
-  <div class="feature">
-    <p class="feature-title"><Icon name="random" size="1.25rem" />Releases, tags or commits</p>
-    <p class="feature-text">Track a dependency by release, git tag, commit or a version URL.</p>
-  </div>
-  <div class="feature">
-    <p class="feature-title"><Icon name="setting" size="1.25rem" />Your config format</p>
-    <p class="feature-text">Write the config in TOML, YAML, JSON, JSON5 or <code>package.json</code>.</p>
-  </div>
-  <div class="feature">
-    <p class="feature-title"><Icon name="rocket" size="1.25rem" />Fast</p>
-    <p class="feature-text">Downloads run in parallel and stream straight to disk.</p>
-  </div>
-  <div class="feature">
-    <p class="feature-title"><Icon name="laptop" size="1.25rem" />One binary</p>
-    <p class="feature-text">A single static binary, with nothing else to set up.</p>
-  </div>
-</div>
-
-## Next steps
-
-<div class="steps-grid">
-<CardGrid>
-  <Card title="Write a config" icon="document">
-    List the files you want in `vendor.json`, `vendor.yml` or `vendor.toml`. See [config files](/vendorfiles-rs/configuration/config-files/).
-  </Card>
-  <Card title="Sync your files" icon="rocket">
-    `vendor sync` downloads them, and `vendor update` keeps them current. Try the [quick start](/vendorfiles-rs/getting-started/quick-start/).
-  </Card>
-  <Card title="Install tools by name" icon="magnifier">
-    `vendor add rg fd` installs programs from the [program registry](/vendorfiles-rs/getting-started/program-registry/).
-  </Card>
-</CardGrid>
+<div class="feats not-content">
+  <a class="feat" href="/vendorfiles-rs/configuration/folders-and-globs/">
+    <span class="ico"><Icon name="document" size="1.15rem" /></span>
+    <span><b>Files, folders and globs</b>One file, a whole folder, or every file a pattern matches, from any repository.</span>
+  </a>
+  <a class="feat" href="/vendorfiles-rs/configuration/versions/">
+    <span class="ico"><Icon name="cloud-download" size="1.15rem" /></span>
+    <span><b>Release assets and archives</b>Name an asset once with <code>{'{version}'}</code>, and take only the files you need from zip, tar, 7z or crx.</span>
+  </a>
+  <a class="feat" href="/vendorfiles-rs/configuration/other-sites/">
+    <span class="ico"><Icon name="external" size="1.15rem" /></span>
+    <span><b>Any URL</b>Download from any site, and read its latest version from a page, a redirect or JSON.</span>
+  </a>
+  <a class="feat" href="/vendorfiles-rs/getting-started/program-registry/">
+    <span class="ico"><Icon name="magnifier" size="1.15rem" /></span>
+    <span><b>Programs by name</b>The registry knows each tool's assets on every platform, and <code>vendor search</code> finds them.</span>
+  </a>
+  <a class="feat" href="/vendorfiles-rs/configuration/installers/">
+    <span class="ico"><Icon name="window" size="1.15rem" /></span>
+    <span><b>Windows installers</b>Run NSIS, Inno, MSI and MSIX setups silently, and uninstall them later.</span>
+  </a>
+  <a class="feat" href="/vendorfiles-rs/reference/lockfile/">
+    <span class="ico"><Icon name="rocket" size="1.15rem" /></span>
+    <span><b>Fast, incremental updates</b>Downloads run in parallel and stream to disk, and updates reuse files that didn't change.</span>
+  </a>
 </div>
 
 <style>{`
   html, body { overflow-x: clip; }
+  html[data-has-hero] { --sl-content-width: 76rem; }
+  .sl-markdown-content h2 { font-size: clamp(1.75rem, 1.2rem + 1.4vw, 2.25rem); letter-spacing: -0.025em; }
+  .ways, .feats { font-size: 1.075rem; }
 
   /* One gap between every section, and a hero that doesn't grow with the screen. */
   @media (min-width: 50rem) {
-    .hero { padding-block: clamp(1.5rem, 4vmin, 4rem) 1rem; }
-  }
-  @media (min-width: 50rem) {
-    .sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper { margin-top: 2.5em; }
-  }
-
-  .hero { position: relative; }
-  .hero::before {
-    content: ""; position: absolute; top: 0; right: -8rem; width: 34rem; height: 24rem; z-index: -1;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--sl-color-accent) 35%, transparent), transparent);
-    filter: blur(20px);
+    .sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper { margin-top: 3em; }
   }
 
   /* Each section heading trails a hairline that fades out to the right. */
@@ -104,22 +86,23 @@ irm https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main/install.ps1 | 
   .sl-markdown-content .sl-heading-wrapper:has(h2)::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--sl-color-gray-5), transparent); }
   .sl-markdown-content .sl-heading-wrapper:has(h2) .sl-anchor-link { display: none; }
 
-  .install { max-width: 100%; }
-  .install pre { white-space: pre; }
+  .ico { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.1rem; height: 2.1rem; border-radius: 0.55rem; border: 1px solid var(--sl-color-gray-5); background: var(--sl-color-accent-low); color: var(--sl-color-text-accent); }
+  :is(.ways, .feats) code { font-size: 0.85em; padding: 0.1em 0.35em; border-radius: 4px; background: var(--sl-color-gray-6); }
 
-  .features { display: grid; grid-template-columns: 1fr; gap: 1.25rem 2.5rem; margin-top: 1rem; }
-  @media (min-width: 40rem) { .features { grid-template-columns: repeat(2, 1fr); } }
-  @media (min-width: 64rem) { .features { grid-template-columns: repeat(3, 1fr); } }
-  .feature-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--sl-color-white); margin: 0 0 0.25rem; }
-  .feature-title svg { color: var(--sl-color-accent); flex-shrink: 0; }
-  .feature-text { color: var(--sl-color-gray-2); margin: 0; line-height: 1.55; }
-  .feature-text code { font-size: 0.85em; padding: 0.1em 0.3em; border-radius: 4px; background: var(--sl-color-gray-6); }
+  .ways { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 1.25rem; }
+  @media (min-width: 50rem) { .ways { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .way { display: flex; flex-direction: column; gap: 1rem; padding: 2rem; border: 1px solid var(--sl-color-gray-5); border-radius: 1.1rem; background: var(--sl-color-black); }
+  .way h3 { display: flex; align-items: center; gap: 0.85rem; margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; color: var(--sl-color-white); }
+  .way p { margin: 0; color: var(--sl-color-gray-2); line-height: 1.6; }
+  .way ul { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; color: var(--sl-color-gray-2); }
+  .way li { position: relative; padding-left: 1.1rem; }
+  .way li::before { content: ''; position: absolute; left: 0; top: 0.65em; width: 6px; height: 6px; border-radius: 50%; background: var(--sl-color-text-accent); }
+  .way .more { margin-top: auto; padding-top: 0.25rem; color: var(--sl-color-text-accent); font-weight: 600; text-decoration: none; }
 
-  .steps-grid { margin-top: 1rem; }
-  @media (min-width: 64rem) { .steps-grid .card-grid { grid-template-columns: repeat(3, 1fr); } }
-  .steps-grid .card { border-radius: 0.75rem; padding: 1.1rem 1.25rem; }
-  .steps-grid .card .icon { padding: 0.3rem; border-radius: 0.5rem; border: 1px solid currentColor; }
-  .steps-grid .card:nth-of-type(1) .icon { color: #4ade80; background: #4ade8022; }
-  .steps-grid .card:nth-of-type(2) .icon { color: #c084fc; background: #c084fc22; }
-  .steps-grid .card:nth-of-type(3) .icon { color: #fb7185; background: #fb718522; }
+  .feats { display: grid; grid-template-columns: 1fr; gap: 0.5rem 1.5rem; margin-top: 1rem; }
+  @media (min-width: 40rem) { .feats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 64rem) { .feats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .feat { display: flex; gap: 0.9rem; padding: 0.9rem; margin-inline: -0.9rem; border-radius: 0.75rem; color: var(--sl-color-gray-2); text-decoration: none; line-height: 1.55; }
+  .feat:hover { background: var(--sl-color-gray-6); }
+  .feat b { display: block; margin-bottom: 0.25rem; color: var(--sl-color-white); font-size: 1.1rem; font-weight: 600; }
 `}</style>

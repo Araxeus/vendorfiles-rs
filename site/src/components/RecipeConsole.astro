@@ -1,0 +1,334 @@
+---
+// The home page console. Pick how you use vendor, then an example, and see its config and output.
+import { terminal, yaml } from './highlight';
+import { GROUPS, RECIPES, type Group } from './recipes';
+
+const groups = Object.keys(GROUPS) as Group[];
+const first = (g: Group) => RECIPES.find((r) => r.group === g)!.id;
+---
+
+<div class="console not-content" data-console>
+  <div class="seg" role="tablist" aria-label="How you use vendor">
+    {groups.map((g, i) => (
+      <button type="button" role="tab" data-group={g} data-first={first(g)} aria-selected={i === 0 ? 'true' : 'false'}>
+        {GROUPS[g].label}
+      </button>
+    ))}
+  </div>
+
+  {groups.map((g, i) => (
+    <div class="chips" role="tablist" aria-label={`${GROUPS[g].label} examples`} data-chips={g} hidden={i !== 0}>
+      {RECIPES.filter((r) => r.group === g).map((r) => (
+        <button
+          type="button"
+          role="tab"
+          id={`recipe-tab-${r.id}`}
+          aria-controls={`recipe-${r.id}`}
+          data-pick={r.id}
+          aria-selected={r.id === RECIPES[0].id ? 'true' : 'false'}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  ))}
+
+  <div class="stage">
+    {RECIPES.map((r, i) => (
+      <div
+        class="recipe"
+        role="tabpanel"
+        id={`recipe-${r.id}`}
+        aria-labelledby={`recipe-tab-${r.id}`}
+        data-recipe={r.id}
+        data-active={i === 0 ? '' : undefined}
+        inert={i !== 0}
+      >
+        <div class="win">
+          <div class="bar">
+            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="file">{GROUPS[r.group].file}</span>
+          </div>
+          <pre class="code cfg" set:html={yaml(r.config)} />
+          <div class="bar">terminal</div>
+          <pre class="code term" set:html={terminal(r.run)} />
+        </div>
+        <p class="why">
+          {r.why} <a href={r.link}>Read more →</a>
+        </p>
+      </div>
+    ))}
+  </div>
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-console]')) {
+    const show = (id: string) => {
+      root.toggleAttribute('data-switched', true);
+      for (const panel of root.querySelectorAll<HTMLElement>('[data-recipe]')) {
+        const on = panel.dataset.recipe === id;
+        panel.toggleAttribute('data-active', on);
+        panel.inert = !on;
+      }
+      for (const chip of root.querySelectorAll<HTMLElement>('[data-pick]')) {
+        chip.setAttribute('aria-selected', String(chip.dataset.pick === id));
+      }
+    };
+
+    root.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement;
+      const group = target.closest<HTMLElement>('[data-group]');
+      if (group) {
+        for (const tab of root.querySelectorAll<HTMLElement>('[data-group]')) {
+          tab.setAttribute('aria-selected', String(tab === group));
+        }
+        for (const list of root.querySelectorAll<HTMLElement>('[data-chips]')) {
+          list.hidden = list.dataset.chips !== group.dataset.group;
+        }
+        show(group.dataset.first!);
+        return;
+      }
+      const chip = target.closest<HTMLElement>('[data-pick]');
+      if (chip) show(chip.dataset.pick!);
+    });
+  }
+</script>
+
+<style>
+  .console {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    min-width: 0;
+  }
+
+  .seg {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem;
+    padding: 0.3rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.85rem;
+    background: var(--sl-color-gray-6);
+  }
+
+  .seg button {
+    min-height: 2.5rem;
+    border: 0;
+    border-radius: 0.6rem;
+    background: transparent;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .seg button[aria-selected='true'] {
+    background: var(--sl-color-black);
+    color: var(--sl-color-white);
+    box-shadow: 0 0 0 1px var(--sl-color-gray-5);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .chips[hidden] {
+    display: none;
+  }
+
+  .chips button {
+    min-height: 2.15rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+
+  .chips button:hover {
+    color: var(--sl-color-white);
+  }
+
+  .chips button[aria-selected='true'] {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-accent-low);
+    color: var(--sl-color-accent-high);
+  }
+
+  .seg button:focus-visible,
+  .chips button:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Every example sits in the same cell, so the tallest sets the height and switching never moves the page. */
+
+  .stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A soft accent glow behind the window, spilling out mostly to the right and below. */
+
+  .stage::before {
+    content: '';
+    position: absolute;
+    inset: 2.5rem -3.5rem -1.5rem 2rem;
+    z-index: -1;
+    border-radius: 2rem;
+    background: color-mix(in srgb, var(--sl-color-accent) 15%, transparent);
+    filter: blur(45px);
+    pointer-events: none;
+  }
+
+  .recipe {
+    grid-area: 1 / 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+    visibility: hidden;
+  }
+
+  .recipe[data-active] {
+    visibility: visible;
+  }
+
+  [data-switched] .recipe[data-active] {
+    animation: rise 0.2s ease both;
+  }
+
+  /* The window stays dark in both themes, like a real terminal. */
+
+  .win {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 2px solid #2f2f2f;
+    border-radius: 1rem;
+    background: #0e0e0e;
+    color: #ffffff;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1.25rem 0.1rem;
+    color: #828282;
+    font-family: var(--sl-font-mono);
+    font-size: 0.8rem;
+  }
+
+  .code + .bar {
+    margin-inline: 1.25rem;
+    padding: 0.45rem 0 0;
+    border-top: 1px dashed #2f2f2f;
+  }
+
+  .dots {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .dots i {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background: #ff5f57;
+  }
+
+  .dots i:nth-child(2) {
+    background: #febc2e;
+  }
+
+  .dots i:nth-child(3) {
+    background: #28c840;
+  }
+
+  .code {
+    margin: 0;
+    padding: 0.5rem 1.25rem 0.75rem;
+    overflow-x: auto;
+    background: transparent;
+    border: 0;
+    font-family: var(--sl-font-mono);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre;
+  }
+
+  /* Long output wraps like a real terminal instead of scrolling. */
+
+  .term {
+    flex: 1;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .code :global(.k),
+  .code :global(.p) {
+    color: #8aa7f7;
+  }
+
+  .code :global(.s) {
+    color: #ffffff;
+  }
+
+  .code :global(.c),
+  .code :global(.d) {
+    color: #828282;
+  }
+
+  .code :global(.cmd) {
+    color: #ffffff;
+  }
+
+  .code :global(.cy) {
+    color: #67d4e8;
+  }
+
+  .code :global(.ok) {
+    color: #4ade80;
+  }
+
+  .code :global(.er) {
+    color: #f87171;
+  }
+
+  .why {
+    margin: 0;
+    color: var(--sl-color-gray-2);
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+
+  .why a {
+    color: var(--sl-color-text-accent);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0.4;
+      transform: translateY(3px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-switched] .recipe[data-active] {
+      animation: none;
+    }
+  }
+</style>

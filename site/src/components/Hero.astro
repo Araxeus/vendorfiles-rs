@@ -1,0 +1,137 @@
+---
+// The home page hero: the pitch and actions beside the example console, with the install command below.
+import { Code, LinkButton, TabItem, Tabs } from '@astrojs/starlight/components';
+import RecipeConsole from './RecipeConsole.astro';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+
+const installUrl = 'https://raw.githubusercontent.com/Araxeus/vendorfiles-rs/main';
+---
+
+<div class="hero">
+  <div class="copy">
+    <p class="eyebrow">One static binary for Windows, macOS and Linux</p>
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="tagline" set:html={tagline} />}
+
+    {actions.length > 0 && (
+      <div class="actions">
+        {actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+          <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+            {text}
+          </LinkButton>
+        ))}
+      </div>
+    )}
+  </div>
+
+  <RecipeConsole />
+
+  <div class="install">
+    <Tabs syncKey="os">
+      <TabItem label="Linux and macOS">
+        <Code code={`curl -fsSL ${installUrl}/install.sh | bash`} lang="bash" frame="none" />
+      </TabItem>
+      <TabItem label="Windows">
+        <Code code={`irm ${installUrl}/install.ps1 | iex`} lang="powershell" frame="none" />
+      </TabItem>
+    </Tabs>
+  </div>
+</div>
+
+<style>
+  .hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3rem;
+    align-items: center;
+    padding-block: 1.5rem 1rem;
+  }
+
+  .copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+  }
+
+  .eyebrow {
+    margin: 0;
+    width: fit-content;
+    padding: 0.3rem 0.9rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    background: var(--sl-color-black);
+    color: var(--sl-color-gray-2);
+    font-size: 0.9rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(2.4rem, 1rem + 3.8vw, 3.9rem);
+    font-weight: 700;
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    color: var(--sl-color-white);
+    text-wrap: balance;
+  }
+
+  h1 :global(em) {
+    font-style: normal;
+    color: var(--sl-color-text-accent);
+  }
+
+  .tagline {
+    margin: 0;
+    max-width: 32em;
+    font-size: clamp(1.1rem, 0.9rem + 0.6vw, 1.3rem);
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+    text-wrap: pretty;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    align-items: center;
+  }
+
+  .actions :global(.sl-link-button) {
+    font-size: 1.05rem;
+  }
+
+  .install {
+    min-width: 0;
+  }
+
+  .install :global(pre) {
+    white-space: pre;
+  }
+
+  /* Outside the Markdown body, so the code block needs the spacing and size it gets on other pages. */
+
+  .install :global([role='tabpanel']) {
+    margin-top: 0.9rem;
+  }
+
+  .install :global(.expressive-code) {
+    --ec-codeFontSize: 0.95rem;
+    --ec-codePadBlk: 0.75rem;
+    --ec-codePadInl: 1.1rem;
+  }
+
+  @media (min-width: 60rem) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+      gap: 1.75rem 4rem;
+      padding-block: clamp(0.75rem, 3vmin, 2rem) 0.5rem;
+    }
+
+    .install {
+      grid-column: 1 / -1;
+    }
+  }
+</style>
