@@ -1869,14 +1869,17 @@ programs:
       linux-x86_64: linux-x64
       linux-aarch64: linux-arm64
 
-  # Standalone CPython builds, the ones uv installs. Tags are build dates, and every release holds
-  # each Python line, so the pattern pins the line: 3.15. Each archive holds a python/ folder,
-  # which comes out whole. On macOS and Linux, put its bin/ on PATH.
+  # Standalone CPython builds, the ones uv installs. Each release holds every Python line, so
+  # the version is the newest stable one among its asset names, like `3.15.2+20261124`. Each
+  # archive holds a python/ folder, which comes out whole. On macOS and Linux, put its bin/ on PATH.
   python:
-    description: "Python 3.15 interpreter with pip, a portable standalone build"
+    description: "Python interpreter with pip, the latest stable, as a portable build"
     aliases: [python3, cpython]
-    repository: https://github.com/astral-sh/python-build-standalone
-    asset: "{release}/cpython-3.15.*+{version}-{target}-install_only.tar.gz"
+    url: https://github.com/astral-sh/python-build-standalone/releases/latest/download
+    versionUrl: https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest
+    versionJsonPointer: assets/*/name
+    versionRegex: '^cpython-(\d+\.\d+\.\d+\+\d+)-x86_64-pc-windows-msvc-install_only\.tar\.gz$'
+    asset: "{url}/cpython-{tag}-{target}-install_only.tar.gz"
     member: "python/"
     targets:
       windows-x86_64: x86_64-pc-windows-msvc
@@ -1886,27 +1889,27 @@ programs:
       linux-x86_64: x86_64-unknown-linux-gnu
       linux-aarch64: aarch64-unknown-linux-gnu
 
-  # Eclipse Temurin, the OpenJDK 25 LTS build. Each Java line has its own repository. A tag like
-  # `jdk-25.0.5.1+2` names the archive's folder, and the asset spells it 25.0.5.1_2. Put its
-  # bin/ on PATH and point JAVA_HOME at the folder. No windows-aarch64.
+  # Eclipse Temurin, the newest LTS OpenJDK. Adoptium's API names the latest LTS release, like
+  # `jdk-25.0.5.1+2`, which is also the archive's folder, and redirects to its GitHub asset. Put
+  # its bin/ on PATH and point JAVA_HOME at the folder. No windows-aarch64.
   temurin:
-    description: "Eclipse Temurin OpenJDK 25 LTS: java, javac and the JDK tools"
+    description: "Eclipse Temurin OpenJDK, the latest LTS: java, javac and the JDK tools"
     aliases: [java, jdk, openjdk]
-    repository: https://github.com/adoptium/temurin25-binaries
-    asset: "{release}/OpenJDK25U-jdk_{target}_hotspot_{version}_*.tar.gz"
+    url: https://api.adoptium.net/v3/binary/version/{tag}
+    versionUrl: https://api.adoptium.net/v3/info/release_names?release_type=ga&lts=true&sort_order=DESC&page_size=1&image_type=jdk
+    versionJsonPointer: releases/0
+    asset: "{url}/{target}/jdk/hotspot/normal/eclipse"
     member: "{tag}/"
     targets:
-      windows-x86_64:
-        asset: "{release}/OpenJDK25U-jdk_x64_windows_hotspot_{version}_*.zip"
-        member: "{tag}/"
+      windows-x86_64: windows/x64
       macos-x86_64:
-        asset: "{release}/OpenJDK25U-jdk_x64_mac_hotspot_{version}_*.tar.gz"
+        asset: "{url}/mac/x64/jdk/hotspot/normal/eclipse"
         member: "{tag}/Contents/Home/"
       macos-aarch64:
-        asset: "{release}/OpenJDK25U-jdk_aarch64_mac_hotspot_{version}_*.tar.gz"
+        asset: "{url}/mac/aarch64/jdk/hotspot/normal/eclipse"
         member: "{tag}/Contents/Home/"
-      linux-x86_64: x64_linux
-      linux-aarch64: aarch64_linux
+      linux-x86_64: linux/x64
+      linux-aarch64: linux/aarch64
 
   # The whole toolchain, which is large: 900 MB for Windows, 2 GB for Linux. The regex skips
   # release candidates. Put its bin/ on PATH. No macOS build.
