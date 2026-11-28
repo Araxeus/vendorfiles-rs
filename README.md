@@ -1816,10 +1816,12 @@ list is out of date.
 
 <!-- registry -->
 <details>
-<summary>Programs you can add by name (63)</summary>
+<summary>Programs you can add by name (67)</summary>
 
 | Program | Aliases | Description | Platforms |
 | --- | --- | --- | --- |
+| [7z](https://github.com/ip7z/7zip) | `7zz`, `7za` | Command-line archiver for 7z, zip, tar, xz and rar files | All |
+| [7zip](https://github.com/ip7z/7zip) | `7-zip` | File archiver with a file manager and Explorer menu for 7z and zip | Windows (installer) |
 | [actionlint](https://github.com/rhysd/actionlint) |  | Linter for GitHub Actions workflow YAML/YML files and CI pipelines | All |
 | [ansi2txt](https://github.com/gabe565/ansi2txt) | `ansi2text` | Strips ANSI color and escape codes from text, leaving plain text | All |
 | [atuin](https://github.com/atuinsh/atuin) |  | Searchable shell and command history, synced across machines | Windows x64, macOS, Linux |
@@ -1860,6 +1862,7 @@ list is out of date.
 | [micro](https://github.com/zyedidia/micro) |  | Terminal text editor with familiar keys and mouse support, a modern nano | All |
 | [nushell](https://github.com/nushell/nushell) | `nu` | Cross-platform shell that treats command output as structured data | All |
 | [ov](https://github.com/noborus/ov) |  | Feature-rich terminal pager and text viewer, a modern take on less | All |
+| [peazip](https://github.com/peazip/PeaZip) |  | Archiver for 200+ formats, with encryption, split archives and a GUI | Windows x64 (installer) |
 | [pinact](https://github.com/suzuki-shunsuke/pinact) |  | Pin GitHub Actions and workflows to commit SHAs and update versions | All |
 | [psmux](https://github.com/psmux/psmux) | `pmux` | Native tmux for Windows, a terminal multiplexer for PowerShell and cmd | Windows |
 | [qbittorrent](https://github.com/qbittorrent/qBittorrent) |  | BitTorrent client with a built-in search engine and no ads | Windows x64 (installer) |
@@ -1877,6 +1880,7 @@ list is out of date.
 | [vault](https://releases.hashicorp.com/) |  | HashiCorp secrets manager CLI and server for keys, tokens and passwords | Windows x64, macOS, Linux |
 | [winkey-startmenu-disabler](https://github.com/Araxeus/winkey-startmenu-disabler) |  | Stop the Windows key opening Start while keeping Win key shortcuts | Windows x64 (installer) |
 | [winmerge](https://github.com/WinMerge/winmerge) |  | Visual diff and merge tool that compares files and folders | Windows x64 (installer) |
+| [winrar](https://www.rarlab.com/) |  | Archiver that creates RAR and extracts zip, 7z, tar and more | Windows x64 (installer) |
 | [wiztree](https://diskanalyzer.com/) |  | Disk space analyzer that finds what fills a drive, fast | Windows x64 (installer) |
 | [wsl-notify-send](https://github.com/stuartleeks/wsl-notify-send) |  | Sends Windows desktop notifications from inside WSL, like notify-send | Windows x64 |
 | [yamlfmt](https://github.com/google/yamlfmt) |  | YAML file formatter | All |

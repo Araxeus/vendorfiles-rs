@@ -1004,6 +1004,38 @@ programs:
       windows-x86_64: win64
       windows-aarch64: win64a
 
+  # Windows takes the standalone 7za.exe from the "extra" archive. Each host saves the command as
+  # `7z`, the name people type. `7zip` is the Windows installer.
+  7z:
+    description: "Command-line archiver for 7z, zip, tar, xz and rar files"
+    repository: https://github.com/ip7z/7zip
+    aliases: [7zz, 7za]
+    targets:
+      windows-x86_64:
+        asset: "{release}/7z{version:}-extra.7z"
+        member: x64/7za.exe
+        as: 7z.exe
+      windows-aarch64:
+        asset: "{release}/7z{version:}-extra.7z"
+        member: arm64/7za.exe
+        as: 7z.exe
+      macos-x86_64:
+        asset: "{release}/7z{version:}-mac-x64.tar.xz"
+        member: 7zz
+        as: 7z
+      macos-aarch64:
+        asset: "{release}/7z{version:}-mac.tar.xz"
+        member: 7zz
+        as: 7z
+      linux-x86_64:
+        asset: "{release}/7z{version:}-linux-x64.tar.xz"
+        member: 7zz
+        as: 7z
+      linux-aarch64:
+        asset: "{release}/7z{version:}-linux-arm64.tar.xz"
+        member: 7zz
+        as: 7z
+
   # Installers. `installer: true` runs the one asset silently instead of keeping it, and vendor
   # tracks the program through its Apps & Features entry. Windows only, and only programs that
   # do not update themselves, so the version vendor records stays true.
@@ -1063,3 +1095,36 @@ programs:
       windows-x86_64:
         asset: "{url}"
         as: wiztree_setup.exe
+
+  # The setup is 7-Zip's own, which takes NSIS's /S. `7z` is the portable command line.
+  7zip:
+    description: "File archiver with a file manager and Explorer menu for 7z and zip"
+    repository: https://github.com/ip7z/7zip
+    aliases: [7-zip]
+    installer: nsis
+    targets:
+      windows-x86_64:
+        asset: "{release}/7z{version:}-x64.exe"
+      windows-aarch64:
+        asset: "{release}/7z{version:}-arm64.exe"
+
+  # Not on GitHub. The setup is WinRAR's own, which takes NSIS's /S. The regex skips betas like
+  # 730b2 and localized builds like 723ar. No stable arm64 build yet.
+  winrar:
+    description: "Archiver that creates RAR and extracts zip, 7z, tar and more"
+    url: https://www.rarlab.com/rar/winrar-x64-{version}.exe
+    versionUrl: https://www.rarlab.com/download.htm
+    versionRegex: 'winrar-x64-(\d+)\.exe'
+    installer: nsis
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: winrar-setup.exe
+
+  peazip:
+    description: "Archiver for 200+ formats, with encryption, split archives and a GUI"
+    repository: https://github.com/peazip/PeaZip
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/peazip-{version}.WIN64.exe"
