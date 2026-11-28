@@ -219,6 +219,21 @@ pub enum VendorError {
     )]
     InstallersNotAllowed { name: String, path: String },
 
+    #[error("vendorDependencies.{name}.bin: '{entry}' {reason}")]
+    InvalidBin {
+        name: String,
+        entry: String,
+        reason: String,
+    },
+
+    #[error("{name} lists '{target}' in bin, but did not install it")]
+    BinTargetMissing { name: String, target: String },
+
+    #[error(
+        "{name} would link a command at {path}, but another file is in the way. Remove it, or take the command out of bin"
+    )]
+    BinInTheWay { name: String, path: PathBuf },
+
     #[error("Running installers is only supported on Windows for now")]
     InstallersUnsupported,
 

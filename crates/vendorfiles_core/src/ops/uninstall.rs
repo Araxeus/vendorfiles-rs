@@ -137,10 +137,16 @@ impl Owned {
         let declared = if matches!(dependency.installer(name), Ok(Some(_))) {
             Vec::new()
         } else {
-            flat_files(&config_files_to_lock_files(
+            let mut declared = flat_files(&config_files_to_lock_files(
                 dependency.files.as_deref().unwrap_or_default(),
                 dependency.version.as_deref().unwrap_or_default(),
-            ))
+            ));
+            declared.extend(
+                crate::bin_links::links(dependency.bin.as_deref().unwrap_or_default())
+                    .into_iter()
+                    .map(|link| link.file),
+            );
+            declared
         };
         Self {
             locked_folder,

@@ -62,6 +62,7 @@ vendorfiles-rs is a Rust rewrite of [vendorfiles](https://github.com/Araxeus/ven
   - [Downloading from other sites](#downloading-from-other-sites)
   - [Locking a dependency](#locking-a-dependency)
   - [Aliases](#aliases)
+  - [Commands inside a folder](#commands-inside-a-folder)
   - [Installers](#installers)
   - [Default options](#default-options)
 - [Commands](#commands)
@@ -354,6 +355,7 @@ files = ['cooltipz.min.css', 'LICENSE']
 | `locked` | Keep `vendor update` away from this dependency ([details](#locking-a-dependency)) |
 | `alias` | Other names for the dependency, usable in any command ([details](#aliases)) |
 | `installer` | Run the downloaded file as an installer instead of keeping it ([details](#installers)) |
+| `bin` | Installed files to run as commands from the top of the folder ([details](#commands-inside-a-folder)) |
 | `url` | Where a dependency that isn't on GitHub downloads from ([details](#downloading-from-other-sites)) |
 | `versionUrl` | `url` dependencies only. Where the latest version comes from |
 | `versionRegex` | `url` dependencies only. Picks the version out of what `versionUrl` returns |
@@ -1383,6 +1385,88 @@ alias = ['k8s', 'kc']
   `kubectl`.
 - Each name and alias belongs to one dependency. A config where two share one doesn't load.
 
+### Commands inside a folder
+
+A toolchain like Go needs its whole folder, with its commands in `bin/`. In a folder on your
+`PATH`, that tree would put `src/` and `lib/` beside your other programs, and its commands would
+still sit one folder too deep. `bin` names the files to run as commands, and each one gets a link
+at the top of the dependency folder:
+
+<!-- formats -->
+<details open>
+<summary>JSON</summary>
+
+```json
+{
+    "vendorDependencies": {
+        "go": {
+            "version": "1.27.4",
+            "url": "https://dl.google.com/go",
+            "versionUrl": "https://go.dev/VERSION?m=text",
+            "versionRegex": "^go(\\d+\\.\\d+\\.\\d+)",
+            "files": [
+                {
+                    "{url}/go{version}.linux-amd64.tar.gz": {
+                        "go/": "libexec/go/"
+                    }
+                }
+            ],
+            "bin": ["libexec/go/bin/go", "libexec/go/bin/gofmt"]
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>YAML</summary>
+
+```yml
+vendorDependencies:
+  go:
+    version: 1.27.4
+    url: https://dl.google.com/go
+    versionUrl: https://go.dev/VERSION?m=text
+    versionRegex: ^go(\d+\.\d+\.\d+)
+    files:
+      - '{url}/go{version}.linux-amd64.tar.gz':
+          go/: libexec/go/
+    bin:
+      - libexec/go/bin/go
+      - libexec/go/bin/gofmt
+```
+
+</details>
+
+<details>
+<summary>TOML</summary>
+
+```toml
+[vendorDependencies.go]
+version = '1.27.4'
+url = 'https://dl.google.com/go'
+versionUrl = 'https://go.dev/VERSION?m=text'
+versionRegex = '^go(\d+\.\d+\.\d+)'
+files = [{ '{url}/go{version}.linux-amd64.tar.gz' = { 'go/' = 'libexec/go/' } }]
+bin = ['libexec/go/bin/go', 'libexec/go/bin/gofmt']
+```
+
+</details>
+<!-- /formats -->
+
+- On Linux and macOS, each link is a relative symlink, so the program still finds the rest of its
+  folder.
+- On Windows, each command gets a `.cmd` launcher for cmd and PowerShell, and an extensionless
+  `sh` launcher for Git Bash, as npm writes them. `go.exe` runs as `go`.
+- A link never replaces a file that is already there, and a dependency that sets `installer` has
+  nothing to link.
+- `vendor update` and `vendor uninstall` remove the links with the files. A missing link counts as
+  a missing file, so the next `vendor sync` puts it back.
+
+Programs from the [registry](#program-registry) that need their folder, like go and neovim, set
+`bin` for you, and keep the folder in `libexec/<name>/`.
+
 ### Installers
 
 On Windows, vendor can run an installer instead of keeping the file. Set `installer: true` on a
@@ -2068,11 +2152,14 @@ A binary older than this format can't read a lockfile that holds an archive entr
 `blobs` records the git blob of each repository file a folder or pattern selected, which is what
 lets an update skip the files that did not change.
 
+`bin` records the links a [`bin`](#commands-inside-a-folder) dependency wrote, so an update or
+uninstall removes them with its files.
+
 `vendor sync` downloads a dependency again when any of these is true:
 
 - Its version changed.
-- A recorded file is missing.
-- Its `files` list changed.
+- A recorded file or link is missing.
+- Its `files` or `bin` list changed.
 
 ### One lockfile for everything
 

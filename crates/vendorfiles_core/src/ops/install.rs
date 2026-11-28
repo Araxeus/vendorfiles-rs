@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::archive;
+use crate::bin_links;
 use crate::error::{Result, VendorError};
 use crate::fsx::{self, anchor, delete_file_and_empty_folders, join_normalized, stream_to_file};
 use crate::github::GitHubClient;
@@ -301,6 +302,7 @@ impl Session {
                     (None, None) => config_files_to_lock_files(&dependency.files, &version),
                 },
                 blobs: plan.map(Planned::into_blobs).unwrap_or_default(),
+                bin: link_files(&dependency, installed.is_some()),
                 installed,
                 save_path,
                 pending: false,
@@ -436,6 +438,7 @@ fn new_entry(dependency: &Dependency, version: &str) -> RawDependency {
     let entry = RawDependency {
         version: Some(version.to_owned()),
         files: Some(dependency.files.clone()),
+        bin: (!dependency.bin.is_empty()).then(|| dependency.bin.clone()),
         hash_version_file: dependency.hash_version_file.clone(),
         vendor_folder: dependency.vendor_folder.clone(),
         release_regex: dependency.release_regex.clone(),
@@ -476,6 +479,18 @@ fn outdated_line(dependency: &Dependency, new_version: &str) -> String {
     }
 }
 
+/// The link files `bin` writes for `dependency`, relative to its folder. An installer keeps none.
+fn link_files(dependency: &Dependency, installer: bool) -> Vec<String> {
+    if installer {
+        return Vec::new();
+    }
+    dependency
+        .links()
+        .into_iter()
+        .map(|link| link.file)
+        .collect()
+}
+
 /// Fetches everything a prepared dependency needs, returning it with its pending log lines.
 ///
 /// Deliberately a free function taking an `Arc`: it borrows nothing from the session, so `sync`
@@ -508,8 +523,27 @@ pub async fn download(github: Arc<GitHubClient>, mut prepared: Prepared) -> Resu
             Err(error) => return Err(blame(&prepared.progress, error.into())),
         }
     }
+    // Before anything downloads, so a refused link leaves no tree behind.
+    if prepared.dependency.installer.is_none()
+        && let Err(error) = bin_links::check_free(
+            &prepared.dependency.name,
+            &prepared.folder,
+            &prepared.dependency.links(),
+        )
+        .await
+    {
+        return Err(blame(&prepared.progress, error));
+    }
     if let Err(error) = fetch_all(&github, &prepared).await {
         return Err(blame(&prepared.progress, error));
+    }
+    // Links go last, once the files they run are in place.
+    if prepared.dependency.installer.is_none() {
+        let dependency = &prepared.dependency;
+        match bin_links::create(&dependency.name, &prepared.folder, &dependency.links()).await {
+            Ok(written) => record(&prepared.progress, written.iter()),
+            Err(error) => return Err(blame(&prepared.progress, error)),
+        }
     }
     // Committing waits its turn behind earlier dependencies; there is nothing to animate in
     // the meantime, and the writes themselves are local and immediate.
@@ -558,7 +592,17 @@ pub async fn clear_previous(prepared: &mut Prepared) -> Result<()> {
         .as_ref()
         .map(Planned::kept_outputs)
         .unwrap_or_default();
-    let marked = mark_pending(&prepared.dependency.name, &prepared.lockfile_path, incoming).await;
+    let links = link_files(
+        &prepared.dependency,
+        prepared.dependency.installer.is_some(),
+    );
+    let marked = mark_pending(
+        &prepared.dependency.name,
+        &prepared.lockfile_path,
+        incoming,
+        &links,
+    )
+    .await;
     let cleared = match marked {
         Ok(()) => {
             remove_previously_installed(
@@ -702,7 +746,8 @@ async fn remove_previously_installed(
             continue;
         }
         let path = anchor(&old_folder, file.as_str());
-        if !path.exists() {
+        // `symlink_metadata`, so a link whose target is gone is still removed.
+        if tokio::fs::symlink_metadata(&path).await.is_err() {
             continue;
         }
         // The running binary cannot be deleted while it runs - on Windows the attempt fails
@@ -1335,6 +1380,19 @@ mod tests {
         std::fs::write(folder.join("vendor-lock.json"), lock).unwrap();
     }
 
+    async fn stale_at(session: &Session, dependency: Dependency, version: &str) -> bool {
+        let progress = Arc::new(session.progress.dependency(&dependency.name));
+        session
+            .prepare(
+                dependency,
+                InstallOptions::default(),
+                version.to_owned(),
+                progress,
+            )
+            .await
+            .needs_update
+    }
+
     async fn stale(session: &Session, dependency: Dependency) -> bool {
         let progress = Arc::new(session.progress.dependency(&dependency.name));
         session
@@ -1492,6 +1550,23 @@ mod tests {
 
         let saved = Workspace::load(dir.path().to_str()).await.unwrap();
         assert_eq!(saved.dependencies["second"].version.as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn a_new_entry_keeps_its_bin() {
+        // Without it, the next sync reads no `bin` and takes the links away again.
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path(), r#"{"vendorDependencies":{}}"#).await;
+        let mut dependency = dependency("tree", "v1", "LICENSE");
+        dependency.bin = vec!["libexec/tree/bin/tree".to_owned()];
+
+        commit(&mut session, dependency, "v1").await;
+
+        let saved = Workspace::load(dir.path().to_str()).await.unwrap();
+        assert_eq!(
+            saved.dependencies["tree"].bin.as_deref(),
+            Some(&["libexec/tree/bin/tree".to_owned()][..])
+        );
     }
 
     #[tokio::test]
@@ -1761,6 +1836,81 @@ mod tests {
         let folder = dir.path().join("vendor/tool");
         assert_eq!(std::fs::read(folder.join("tool")).unwrap(), b"tool bytes");
         assert!(!folder.join("README").exists());
+    }
+
+    #[tokio::test]
+    async fn bin_links_a_command_out_of_its_tree_and_uninstall_removes_both() {
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        let command = format!("tree/bin/tool{exe}");
+        let archive = zip_bytes(&[
+            (command.as_str(), b"tool bytes"),
+            ("tree/lib/data", b"data"),
+        ]);
+        let base = serve(vec![Route {
+            path: "/a.zip",
+            status: 200,
+            headers: "",
+            body: archive,
+        }]);
+        let dir = tempfile::tempdir().unwrap();
+        let config = tool_config(&json!({
+            "url": base, "version": "1",
+            "files": [{ "{url}/a.zip": { "tree/": "libexec/tool/" } }],
+            "bin": [format!("libexec/tool/bin/tool{exe}")],
+        }));
+        let mut session = session(dir.path(), &config).await;
+        sync(&mut session, false, false).await.unwrap();
+
+        let folder = dir.path().join("vendor/tool");
+        assert_eq!(
+            std::fs::read(folder.join(format!("libexec/tool/bin/tool{exe}"))).unwrap(),
+            b"tool bytes"
+        );
+        let links: Vec<String> = if cfg!(windows) {
+            vec!["tool.cmd".to_owned(), "tool".to_owned()]
+        } else {
+            vec!["tool".to_owned()]
+        };
+        for link in &links {
+            assert!(
+                std::fs::symlink_metadata(folder.join(link)).is_ok(),
+                "{link} was written"
+            );
+        }
+        let lock = read_lockfile(&folder.join("vendor-lock.json"))
+            .await
+            .unwrap();
+        assert_eq!(lock["tool"].bin, links);
+
+        // A link removed by hand makes the dependency stale, and the next sync puts it back.
+        let dependency = RawDependency {
+            url: Some(base.clone()),
+            version: Some("1".to_owned()),
+            files: serde_json::from_value(json!([{ "{url}/a.zip": { "tree/": "libexec/tool/" } }]))
+                .unwrap(),
+            bin: Some(vec![format!("libexec/tool/bin/tool{exe}")]),
+            ..RawDependency::default()
+        }
+        .resolve("tool")
+        .unwrap();
+        assert!(!stale_at(&session, dependency.clone(), "1").await);
+        std::fs::remove_file(folder.join(&links[0])).unwrap();
+        assert!(stale_at(&session, dependency, "1").await);
+        sync(&mut session, false, false).await.unwrap();
+        assert!(std::fs::symlink_metadata(folder.join(&links[0])).is_ok());
+
+        let mut session = super::tests::session(dir.path(), &config).await;
+        session.uninstall("tool", false).await.unwrap();
+        for link in &links {
+            assert!(
+                std::fs::symlink_metadata(folder.join(link)).is_err(),
+                "{link}"
+            );
+        }
+        assert!(
+            !folder.join("libexec").exists(),
+            "the emptied tree folder goes too"
+        );
     }
 
     #[tokio::test]

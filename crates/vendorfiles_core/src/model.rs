@@ -389,6 +389,13 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub files: Option<Vec<FileEntry>>,
+    /// Installed files to expose as commands at the top of the dependency folder.
+    #[serde(
+        default,
+        deserialize_with = "de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bin: Option<Vec<String>>,
     #[serde(
         rename = "hashVersionFile",
         default,
@@ -482,6 +489,25 @@ impl RawDependency {
             .map_err(|_| VendorError::InvalidInstallerKey {
                 name: name.to_owned(),
             })
+    }
+
+    /// Checks that `bin` names files to link without replacing any the dependency writes.
+    fn validate_bin(&self, name: &str) -> Result<()> {
+        let Some(bin) = self.bin.as_deref().filter(|bin| !bin.is_empty()) else {
+            return Ok(());
+        };
+        if self.installer(name)?.is_some() {
+            return Err(VendorError::InvalidBin {
+                name: name.to_owned(),
+                entry: bin[0].clone(),
+                reason: "has nothing to link, because an installer keeps no files".to_owned(),
+            });
+        }
+        let outputs = flat_files(&config_files_to_lock_files(
+            self.files.as_deref().unwrap_or_default(),
+            "",
+        ));
+        crate::bin_links::check(name, bin, &outputs)
     }
 
     /// Checks that an installer entry downloads exactly one file, the one that runs.
@@ -587,6 +613,7 @@ impl RawDependency {
     ///
     /// Returns the `Invalid*Key` variant naming the offending config key.
     pub fn validate(&self, name: &str) -> Result<()> {
+        self.validate_bin(name)?;
         if let Some(url) = &self.url {
             if self.repository.is_some() {
                 return Err(VendorError::RepositoryAndUrl {
@@ -865,6 +892,7 @@ impl RawDependency {
             locked: self.locked.unwrap_or(false),
             installer,
             aliases: self.alias.clone().unwrap_or_default().0,
+            bin: self.bin.clone().unwrap_or_default(),
         })
     }
 }
@@ -895,9 +923,17 @@ pub struct Dependency {
     pub installer: Option<InstallerOptions>,
     /// Other names a command accepts for this dependency.
     pub aliases: Vec<String>,
+    /// Installed files to expose as commands at the top of the dependency folder.
+    pub bin: Vec<String>,
 }
 
 impl Dependency {
+    /// The links `bin` writes into the dependency folder on this platform.
+    #[must_use]
+    pub fn links(&self) -> Vec<crate::bin_links::Link> {
+        crate::bin_links::links(&self.bin)
+    }
+
     /// Where a person can look the dependency up: its repository, or its `url`'s site while the
     /// `url` still holds a placeholder.
     #[must_use]

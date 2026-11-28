@@ -175,10 +175,15 @@ impl Session {
         ) else {
             return true;
         };
+        let links = dependency.links();
         files != locked.files
             || flat_files(&files)
                 .iter()
                 .any(|file| !anchor(folder, file.as_str()).exists())
+            || links.iter().map(|link| &link.file).ne(locked.bin.iter())
+            || links
+                .iter()
+                .any(|link| !crate::bin_links::is_in_place(folder, link))
     }
 }
 
