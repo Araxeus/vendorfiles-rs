@@ -62,10 +62,15 @@
 # explains each key. A `url` program needs `version: 3` below, so older builds say to update rather
 # than fail on a key they don't know.
 #
+# `installer` runs the one asset silently on Windows instead of keeping it. `true` detects the
+# type, a name sets it (nsis, inno, msi, msix, exe), and `{ type, args, scope }` adds arguments. Each host must
+# download exactly one file. List only programs that do not update themselves, since vendor tracks
+# the version it installed. Needs `version: 3`.
+#
 # An entry says *what* to download. It cannot say where files land - there is no `vendorFolder`
 # here, and unknown keys are refused.
 
-version: 2
+version: 3
 
 programs:
   # Most Rust projects name assets by target triple and ship the binary inside a directory of
@@ -693,15 +698,16 @@ programs:
         asset: "{release}/wsl-notify-send_windows_amd64.zip"
         member: "wsl-notify-send.exe"
 
-  # File Pilot ships only from its own website. fpilot-scraper mirrors each beta build as a GitHub
-  # release, an x64 Windows binary under tags like `Beta-v0.8.5`.
+  # File Pilot ships only from its own website. `/download/latest` redirects to a file named after
+  # the newest version.
   file-pilot:
     description: "Fast, lightweight file manager and Explorer replacement for Windows"
     aliases: [fpilot, filepilot]
-    repository: https://github.com/Araxeus/fpilot-scraper
+    url: https://filepilot.tech/download/v{version}
+    versionUrl: https://filepilot.tech/download/latest
+    versionRegex: 'v(\d+\.\d+\.\d+)'
     targets:
-      windows-x86_64:
-        asset: "{release}/FPilot.exe"
+      windows-x86_64: { asset: "{url}", as: FPilot.exe }
 
   # Flat on Windows, nested on Unix, and the Unix builds are `.tar.xz` - so every host is
   # spelled out.
@@ -897,3 +903,2183 @@ programs:
       macos-aarch64: darwin_arm64
       linux-x86_64: linux_amd64
       linux-aarch64: linux_arm64
+
+  # Asset names carry no version. fnm-macos.zip is a universal binary, and fnm-arm64.zip is
+  # Linux arm64. No windows-aarch64.
+  fnm:
+    description: "Fast Node.js version manager that switches node per project, like nvm"
+    repository: https://github.com/Schniz/fnm
+    targets:
+      windows-x86_64:
+        asset: "{release}/fnm-windows.zip"
+        member: fnm.exe
+      macos-x86_64:
+        asset: "{release}/fnm-macos.zip"
+        member: fnm
+      macos-aarch64:
+        asset: "{release}/fnm-macos.zip"
+        member: fnm
+      linux-x86_64:
+        asset: "{release}/fnm-linux.zip"
+        member: fnm
+      linux-aarch64:
+        asset: "{release}/fnm-arm64.zip"
+        member: fnm
+
+  # cmake needs its share/ folder beside bin/, so the whole tree comes out. Put its bin/ on PATH.
+  # macOS ships one universal app bundle.
+  cmake:
+    description: "C and C++ build system generator for make, ninja, MSBuild and Xcode"
+    repository: https://github.com/Kitware/CMake
+    asset: "{release}/cmake-{version}-{target}{ext}"
+    member: "cmake-{version}-{target}/"
+    targets:
+      windows-x86_64: windows-x86_64
+      windows-aarch64: windows-arm64
+      macos-x86_64:
+        asset: "{release}/cmake-{version}-macos-universal.tar.gz"
+        member: "cmake-{version}-macos-universal/CMake.app/Contents/"
+      macos-aarch64:
+        asset: "{release}/cmake-{version}-macos-universal.tar.gz"
+        member: "cmake-{version}-macos-universal/CMake.app/Contents/"
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # ninja-mac.zip is universal, and ninja-linux.zip is x86_64.
+  ninja:
+    description: "Small, fast build system focused on speed, used by CMake and Meson"
+    repository: https://github.com/ninja-build/ninja
+    targets:
+      windows-x86_64:
+        asset: "{release}/ninja-win.zip"
+        member: ninja.exe
+      windows-aarch64:
+        asset: "{release}/ninja-winarm64.zip"
+        member: ninja.exe
+      macos-x86_64:
+        asset: "{release}/ninja-mac.zip"
+        member: ninja
+      macos-aarch64:
+        asset: "{release}/ninja-mac.zip"
+        member: ninja
+      linux-x86_64:
+        asset: "{release}/ninja-linux.zip"
+        member: ninja
+      linux-aarch64:
+        asset: "{release}/ninja-linux-aarch64.zip"
+        member: ninja
+
+  zls:
+    description: "Zig language server for editor completion, diagnostics and navigation"
+    repository: https://github.com/zigtools/zls
+    targets:
+      windows-x86_64:
+        asset: "{release}/zls-x86_64-windows.zip"
+        member: zls.exe
+      windows-aarch64:
+        asset: "{release}/zls-aarch64-windows.zip"
+        member: zls.exe
+      macos-x86_64:
+        asset: "{release}/zls-x86_64-macos.tar.xz"
+        member: zls
+      macos-aarch64:
+        asset: "{release}/zls-aarch64-macos.tar.xz"
+        member: zls
+      linux-x86_64:
+        asset: "{release}/zls-x86_64-linux.tar.xz"
+        member: zls
+      linux-aarch64:
+        asset: "{release}/zls-aarch64-linux.tar.xz"
+        member: zls
+
+  task:
+    description: "Task runner and build tool driven by a Taskfile.yml, a simpler make"
+    aliases: [go-task]
+    repository: https://github.com/go-task/task
+    asset: "{release}/task_{target}{ext}"
+    member: "task{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  watchexec:
+    description: "Runs a command when files change, for rebuilds, tests and reloads"
+    repository: https://github.com/watchexec/watchexec
+    targets:
+      windows-x86_64:
+        asset: "{release}/watchexec-{version}-x86_64-pc-windows-msvc.zip"
+        member: "watchexec-{version}-x86_64-pc-windows-msvc/watchexec.exe"
+      windows-aarch64:
+        asset: "{release}/watchexec-{version}-aarch64-pc-windows-msvc.zip"
+        member: "watchexec-{version}-aarch64-pc-windows-msvc/watchexec.exe"
+      macos-x86_64:
+        asset: "{release}/watchexec-{version}-x86_64-apple-darwin.tar.xz"
+        member: "watchexec-{version}-x86_64-apple-darwin/watchexec"
+      macos-aarch64:
+        asset: "{release}/watchexec-{version}-aarch64-apple-darwin.tar.xz"
+        member: "watchexec-{version}-aarch64-apple-darwin/watchexec"
+      linux-x86_64:
+        asset: "{release}/watchexec-{version}-x86_64-unknown-linux-gnu.tar.xz"
+        member: "watchexec-{version}-x86_64-unknown-linux-gnu/watchexec"
+      linux-aarch64:
+        asset: "{release}/watchexec-{version}-aarch64-unknown-linux-gnu.tar.xz"
+        member: "watchexec-{version}-aarch64-unknown-linux-gnu/watchexec"
+
+  # Linux is musl only.
+  sccache:
+    description: "Compiler cache for Rust, C and C++ builds, like ccache, local or cloud"
+    repository: https://github.com/mozilla/sccache
+    asset: "{release}/sccache-v{version}-{target}{ext}"
+    member: "sccache-v{version}-{target}/sccache{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # Needs Docker to run the workflows.
+  act:
+    description: "Run GitHub Actions workflows locally in Docker to test CI before pushing"
+    repository: https://github.com/nektos/act
+    asset: "{release}/act_{target}{ext}"
+    member: "act{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  # Bare binaries.
+  lefthook:
+    description: "Fast git hooks manager for pre-commit and pre-push checks"
+    repository: https://github.com/evilmartians/lefthook
+    asset: "{release}/lefthook_{version}_{target}{exe}"
+    as: "lefthook{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: MacOS_x86_64
+      macos-aarch64: MacOS_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  git-cliff:
+    description: "Changelog generator from git history and conventional commits"
+    repository: https://github.com/orhun/git-cliff
+    asset: "{release}/git-cliff-{version}-{target}{ext}"
+    member: "git-cliff-{version}/git-cliff{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Linux is musl only.
+  jj:
+    description: "Jujutsu, a Git-compatible version control system with undo and no index"
+    aliases: [jujutsu]
+    repository: https://github.com/jj-vcs/jj
+    asset: "{release}/jj-v{version}-{target}{ext}"
+    member: "jj{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  lazydocker:
+    description: "Terminal UI for Docker and Compose containers, images, logs and stats"
+    repository: https://github.com/jesseduffield/lazydocker
+    asset: "{release}/lazydocker_{version}_{target}{ext}"
+    member: "lazydocker{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  # The command is `difft`. Tags carry no leading `v`.
+  difftastic:
+    description: "Structural diff that compares files by syntax tree, not line by line"
+    aliases: [difft]
+    repository: https://github.com/Wilfred/difftastic
+    asset: "{release}/difft-{version}-{target}{ext}"
+    member: "difft{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  k9s:
+    description: "Terminal UI for Kubernetes clusters, pods, logs and resources"
+    repository: https://github.com/derailed/k9s
+    asset: "{release}/k9s_{target}{ext}"
+    member: "k9s{exe}"
+    targets:
+      windows-x86_64: Windows_amd64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_amd64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_amd64
+      linux-aarch64: Linux_arm64
+
+  # Bare binaries. The Windows one has no `.exe`, so `as` adds it. Needs Docker or Podman.
+  kind:
+    description: "Kubernetes in Docker: local clusters for development and CI testing"
+    repository: https://github.com/kubernetes-sigs/kind
+    asset: "{release}/kind-{target}"
+    as: "kind{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # kubectx and kubens are released as separate archives, so each host takes both.
+  kubectx:
+    description: "Switch Kubernetes contexts and namespaces fast, with kubens included"
+    aliases: [kubens]
+    repository: https://github.com/ahmetb/kubectx
+    targets:
+      windows-x86_64:
+        - asset: "{release}/kubectx_v{version}_windows_x86_64.zip"
+          member: kubectx.exe
+        - asset: "{release}/kubens_v{version}_windows_x86_64.zip"
+          member: kubens.exe
+      windows-aarch64:
+        - asset: "{release}/kubectx_v{version}_windows_arm64.zip"
+          member: kubectx.exe
+        - asset: "{release}/kubens_v{version}_windows_arm64.zip"
+          member: kubens.exe
+      macos-x86_64:
+        - asset: "{release}/kubectx_v{version}_darwin_x86_64.tar.gz"
+          member: kubectx
+        - asset: "{release}/kubens_v{version}_darwin_x86_64.tar.gz"
+          member: kubens
+      macos-aarch64:
+        - asset: "{release}/kubectx_v{version}_darwin_arm64.tar.gz"
+          member: kubectx
+        - asset: "{release}/kubens_v{version}_darwin_arm64.tar.gz"
+          member: kubens
+      linux-x86_64:
+        - asset: "{release}/kubectx_v{version}_linux_x86_64.tar.gz"
+          member: kubectx
+        - asset: "{release}/kubens_v{version}_linux_x86_64.tar.gz"
+          member: kubens
+      linux-aarch64:
+        - asset: "{release}/kubectx_v{version}_linux_arm64.tar.gz"
+          member: kubectx
+        - asset: "{release}/kubens_v{version}_linux_arm64.tar.gz"
+          member: kubens
+
+  # Bare binaries. No windows-aarch64.
+  skaffold:
+    description: "Continuous development for Kubernetes: build, push and deploy on change"
+    repository: https://github.com/GoogleContainerTools/skaffold
+    asset: "{release}/skaffold-{target}{exe}"
+    as: "skaffold{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  dive:
+    description: "Explore Docker and OCI image layers and find wasted space"
+    repository: https://github.com/wagoodman/dive
+    asset: "{release}/dive_{version}_{target}{ext}"
+    member: "dive{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries. It runs standalone as `docker-compose`, or as `docker compose` from
+  # ~/.docker/cli-plugins.
+  docker-compose:
+    description: "Define and run multi-container Docker apps from a compose.yaml file"
+    aliases: [compose]
+    repository: https://github.com/docker/compose
+    asset: "{release}/docker-compose-{target}{exe}"
+    as: "docker-compose{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      windows-aarch64: windows-aarch64
+      macos-x86_64: darwin-x86_64
+      macos-aarch64: darwin-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # Bare binaries. No windows-aarch64.
+  k3d:
+    description: "Run k3s Kubernetes clusters in Docker for local development"
+    repository: https://github.com/k3d-io/k3d
+    asset: "{release}/k3d-{target}{exe}"
+    as: "k3d{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # No windows-aarch64.
+  trivy:
+    description: "Scanner for vulnerabilities, secrets and misconfig in images and code"
+    repository: https://github.com/aquasecurity/trivy
+    asset: "{release}/trivy_{version}_{target}{ext}"
+    member: "trivy{exe}"
+    targets:
+      windows-x86_64: windows-64bit
+      macos-x86_64: macOS-64bit
+      macos-aarch64: macOS-ARM64
+      linux-x86_64: Linux-64bit
+      linux-aarch64: Linux-ARM64
+
+  syft:
+    description: "Generate an SBOM from container images and filesystems"
+    repository: https://github.com/anchore/syft
+    asset: "{release}/syft_{version}_{target}{ext}"
+    member: "syft{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # No windows-aarch64.
+  grype:
+    description: "Vulnerability scanner for container images, filesystems and SBOMs"
+    repository: https://github.com/anchore/grype
+    asset: "{release}/grype_{version}_{target}{ext}"
+    member: "grype{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries. No windows-aarch64.
+  hadolint:
+    description: "Dockerfile linter that checks best practices and shell with ShellCheck"
+    repository: https://github.com/hadolint/hadolint
+    asset: "{release}/hadolint-{target}{exe}"
+    as: "hadolint{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-arm64
+
+  gitleaks:
+    description: "Find secrets like passwords, API keys and tokens in git repos and files"
+    repository: https://github.com/gitleaks/gitleaks
+    asset: "{release}/gitleaks_{version}_{target}{ext}"
+    member: "gitleaks{exe}"
+    targets:
+      windows-x86_64: windows_x64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_x64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_x64
+      linux-aarch64: linux_arm64
+
+  betterleaks:
+    description: "Secrets scanner for git repos, files and CI, from the gitleaks author"
+    repository: https://github.com/betterleaks/betterleaks
+    asset: "{release}/betterleaks_{version}_{target}{ext}"
+    member: "betterleaks{exe}"
+    targets:
+      windows-x86_64: windows_x64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_x64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_x64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries, named sops-v3.13.3.amd64.exe on Windows and sops-v3.13.3.linux.amd64
+  # elsewhere.
+  sops:
+    description: "Encrypt secrets in YAML, JSON and ENV files with age, PGP or cloud KMS"
+    repository: https://github.com/getsops/sops
+    asset: "{release}/sops-v{version}.{target}{exe}"
+    as: "sops{exe}"
+    targets:
+      windows-x86_64: amd64
+      windows-aarch64: arm64
+      macos-x86_64: darwin.amd64
+      macos-aarch64: darwin.arm64
+      linux-x86_64: linux.amd64
+      linux-aarch64: linux.arm64
+
+  # The archive's age/ folder holds age, age-keygen and the bundled plugins.
+  age:
+    description: "Simple, modern file encryption with small keys and no config"
+    repository: https://github.com/FiloSottile/age
+    asset: "{release}/age-v{version}-{target}{ext}"
+    member: "age/"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # Bare binaries.
+  mkcert:
+    description: "Make locally trusted HTTPS certificates for development, no config"
+    repository: https://github.com/FiloSottile/mkcert
+    asset: "{release}/mkcert-v{version}-{target}{exe}"
+    as: "mkcert{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # Bare binaries. No windows-aarch64.
+  cosign:
+    description: "Sign and verify container images and blobs with Sigstore"
+    repository: https://github.com/sigstore/cosign
+    asset: "{release}/cosign-{target}{exe}"
+    as: "cosign{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # Zips on every platform. No windows-aarch64.
+  tflint:
+    description: "Terraform linter that finds errors and enforces best practices in HCL"
+    repository: https://github.com/terraform-linters/tflint
+    asset: "{release}/tflint_{target}.zip"
+    member: "tflint{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries. No windows-aarch64.
+  terragrunt:
+    description: "Terraform and OpenTofu wrapper that keeps configs DRY across modules"
+    repository: https://github.com/gruntwork-io/terragrunt
+    asset: "{release}/terragrunt_{target}{exe}"
+    as: "terragrunt{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # The command is `tofu`. Zips on every platform.
+  opentofu:
+    description: "Open-source Terraform fork for infrastructure as code in HCL"
+    aliases: [tofu]
+    repository: https://github.com/opentofu/opentofu
+    asset: "{release}/tofu_{version}_{target}.zip"
+    member: "tofu{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # pulumi runs its language plugins from beside itself, so the whole folder comes out.
+  pulumi:
+    description: "Infrastructure as code in TypeScript, Python, Go or C# for any cloud"
+    repository: https://github.com/pulumi/pulumi
+    asset: "{release}/pulumi-v{version}-{target}{ext}"
+    member: "pulumi/"
+    targets:
+      windows-x86_64:
+        asset: "{release}/pulumi-v{version}-windows-x64.zip"
+        member: "pulumi/bin/"
+      windows-aarch64:
+        asset: "{release}/pulumi-v{version}-windows-arm64.zip"
+        member: "pulumi/bin/"
+      macos-x86_64: darwin-x64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-x64
+      linux-aarch64: linux-arm64
+
+  # The repository is flux2, and the command is `flux`.
+  flux:
+    description: "GitOps for Kubernetes that syncs clusters from git, Helm and Kustomize"
+    aliases: [flux2, fluxcd]
+    repository: https://github.com/fluxcd/flux2
+    asset: "{release}/flux_{version}_{target}{ext}"
+    member: "flux{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # The Windows zip holds hurl and hurlfmt with the DLLs they load, at its root. Elsewhere both
+  # sit in a bin/ folder, and the Linux build links the system's libcurl and libxml2.
+  hurl:
+    description: "Run and test HTTP requests from plain text files, for APIs and CI"
+    repository: https://github.com/Orange-OpenSource/hurl
+    asset: "{release}/hurl-{version}-{target}.tar.gz"
+    member: "hurl-{version}-{target}/bin/"
+    targets:
+      windows-x86_64:
+        asset: "{release}/hurl-{version}-x86_64-pc-windows-msvc.zip"
+        member: [hurl.exe, hurlfmt.exe, "*.dll"]
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Linux is musl only. No windows-aarch64.
+  xh:
+    description: "Friendly, fast tool for sending HTTP requests, like HTTPie or curl"
+    repository: https://github.com/ducaale/xh
+    asset: "{release}/xh-v{version}-{target}{ext}"
+    member: "xh-v{version}-{target}/xh{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  grpcurl:
+    description: "Like curl, but for gRPC: call and inspect gRPC servers"
+    repository: https://github.com/fullstorydev/grpcurl
+    asset: "{release}/grpcurl_{version}_{target}{ext}"
+    member: "grpcurl{exe}"
+    targets:
+      windows-x86_64: windows_x86_64
+      windows-aarch64: windows_arm64
+      macos-x86_64: osx_x86_64
+      macos-aarch64: osx_arm64
+      linux-x86_64: linux_x86_64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries.
+  buf:
+    description: "Protobuf toolkit to lint, format, check breaking changes and generate"
+    repository: https://github.com/bufbuild/buf
+    asset: "{release}/buf-{target}{exe}"
+    as: "buf{exe}"
+    targets:
+      windows-x86_64: Windows-x86_64
+      windows-aarch64: Windows-arm64
+      macos-x86_64: Darwin-x86_64
+      macos-aarch64: Darwin-arm64
+      linux-x86_64: Linux-x86_64
+      linux-aarch64: Linux-aarch64
+
+  # macOS ships zips, not tarballs. No windows-aarch64.
+  k6:
+    description: "Load testing tool scripted in JavaScript for APIs, sites and performance"
+    repository: https://github.com/grafana/k6
+    asset: "{release}/k6-v{version}-{target}{ext}"
+    member: "k6-v{version}-{target}/k6{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64:
+        asset: "{release}/k6-v{version}-macos-amd64.zip"
+        member: "k6-v{version}-macos-amd64/k6"
+      macos-aarch64:
+        asset: "{release}/k6-v{version}-macos-arm64.zip"
+        member: "k6-v{version}-macos-arm64/k6"
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  vegeta:
+    description: "HTTP load testing tool and library at a constant request rate"
+    repository: https://github.com/tsenart/vegeta
+    asset: "{release}/vegeta_{version}_{target}{ext}"
+    member: "vegeta{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # Bare binaries.
+  bombardier:
+    description: "Fast HTTP benchmarking and load testing tool"
+    repository: https://github.com/codesenberg/bombardier
+    asset: "{release}/bombardier-{target}{exe}"
+    as: "bombardier{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  duckdb:
+    description: "In-process SQL database for analytics on CSV, Parquet and JSON files"
+    repository: https://github.com/duckdb/duckdb
+    asset: "{release}/duckdb-cli-{target}{ext}"
+    member: "duckdb{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: osx-amd64
+      macos-aarch64: osx-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  lazysql:
+    description: "Terminal UI SQL client for MySQL, PostgreSQL, SQLite and MSSQL"
+    repository: https://github.com/jorgerojas26/lazysql
+    asset: "{release}/lazysql_{target}{ext}"
+    member: "lazysql{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      windows-aarch64: Windows_arm64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  litestream:
+    description: "Streams SQLite database changes to S3 and other storage for backup"
+    repository: https://github.com/benbjohnson/litestream
+    asset: "{release}/litestream-{version}-{target}{ext}"
+    member: "litestream{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-x86_64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-arm64
+
+  golangci-lint:
+    description: "Fast Go linters runner that runs many linters in parallel, with caching"
+    repository: https://github.com/golangci/golangci-lint
+    asset: "{release}/golangci-lint-{version}-{target}{ext}"
+    member: "golangci-lint-{version}-{target}/golangci-lint{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # The Windows zip names no platform and holds the binary at its root. No windows-aarch64.
+  shellcheck:
+    description: "Linter for bash and sh shell scripts that finds bugs and pitfalls"
+    repository: https://github.com/koalaman/shellcheck
+    asset: "{release}/shellcheck-v{version}.{target}.tar.gz"
+    member: "shellcheck-v{version}/shellcheck"
+    targets:
+      windows-x86_64:
+        asset: "{release}/shellcheck-v{version}.zip"
+        member: shellcheck.exe
+      macos-x86_64: darwin.x86_64
+      macos-aarch64: darwin.aarch64
+      linux-x86_64: linux.x86_64
+      linux-aarch64: linux.aarch64
+
+  # Zips on every platform. No windows-aarch64.
+  stylua:
+    description: "Opinionated Lua and Luau code formatter, like prettier for Lua"
+    repository: https://github.com/JohnnyMorganz/StyLua
+    asset: "{release}/stylua-{target}.zip"
+    member: "stylua{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # Linux is musl only.
+  typos:
+    description: "Source code spell checker that finds and fixes typos, fast enough for CI"
+    repository: https://github.com/crate-ci/typos
+    asset: "{release}/typos-v{version}-{target}{ext}"
+    member: "typos{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # Windows gets zips. Elsewhere each asset is the binary, gzipped.
+  taplo:
+    description: "TOML toolkit: formatter, linter and language server for TOML files"
+    repository: https://github.com/tamasfe/taplo
+    asset: "{release}/taplo-{target}.gz"
+    member: "taplo-{target}"
+    as: taplo
+    targets:
+      windows-x86_64:
+        asset: "{release}/taplo-windows-x86_64.zip"
+        member: taplo.exe
+      windows-aarch64:
+        asset: "{release}/taplo-windows-aarch64.zip"
+        member: taplo.exe
+      macos-x86_64: darwin-x86_64
+      macos-aarch64: darwin-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # Linux aarch64 is musl only. No windows-aarch64.
+  mdbook:
+    description: "Create books and documentation sites from Markdown files"
+    repository: https://github.com/rust-lang/mdBook
+    asset: "{release}/mdbook-v{version}-{target}{ext}"
+    member: "mdbook{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # The extended build, which adds Sass and WebP that most themes need. macOS ships only a
+  # .pkg, and there is no extended windows-aarch64 build.
+  hugo:
+    description: "Fast static site generator for blogs and docs sites from Markdown"
+    repository: https://github.com/gohugoio/hugo
+    asset: "{release}/hugo_extended_{version}_{target}{ext}"
+    member: "hugo{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # No windows-aarch64.
+  glow:
+    description: "Render Markdown in the terminal, with a TUI to browse files"
+    repository: https://github.com/charmbracelet/glow
+    asset: "{release}/glow_{version}_{target}{ext}"
+    member: "glow_{version}_{target}/glow{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  # Needs ttyd and ffmpeg on PATH to record. No windows-aarch64.
+  vhs:
+    description: "Record terminal sessions to GIF and video from a script, for demos"
+    repository: https://github.com/charmbracelet/vhs
+    asset: "{release}/vhs_{version}_{target}{ext}"
+    member: "vhs_{version}_{target}/vhs{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  # Each platform nests the binary differently. No windows-aarch64.
+  pandoc:
+    description: "Document converter for Markdown, HTML, Word docx, PDF, EPUB and LaTeX"
+    repository: https://github.com/jgm/pandoc
+    targets:
+      windows-x86_64:
+        asset: "{release}/pandoc-{version}-windows-x86_64.zip"
+        member: "pandoc-{version}/pandoc.exe"
+      macos-x86_64:
+        asset: "{release}/pandoc-{version}-x86_64-macOS.zip"
+        member: "pandoc-{version}-x86_64/bin/pandoc"
+      macos-aarch64:
+        asset: "{release}/pandoc-{version}-arm64-macOS.zip"
+        member: "pandoc-{version}-arm64/bin/pandoc"
+      linux-x86_64:
+        asset: "{release}/pandoc-{version}-linux-amd64.tar.gz"
+        member: "pandoc-{version}/bin/pandoc"
+      linux-aarch64:
+        asset: "{release}/pandoc-{version}-linux-arm64.tar.gz"
+        member: "pandoc-{version}/bin/pandoc"
+
+  # hx loads grammars and themes from the runtime/ folder beside it, so the whole folder comes
+  # out. No windows-aarch64.
+  helix:
+    description: "Modal terminal text editor, like Vim or Kakoune, with LSP built in"
+    aliases: [hx]
+    repository: https://github.com/helix-editor/helix
+    targets:
+      windows-x86_64:
+        asset: "{release}/helix-{version}-x86_64-windows.zip"
+        member: "helix-{version}-x86_64-windows/"
+      macos-x86_64:
+        asset: "{release}/helix-{version}-x86_64-macos.tar.xz"
+        member: "helix-{version}-x86_64-macos/"
+      macos-aarch64:
+        asset: "{release}/helix-{version}-aarch64-macos.tar.xz"
+        member: "helix-{version}-aarch64-macos/"
+      linux-x86_64:
+        asset: "{release}/helix-{version}-x86_64-linux.tar.xz"
+        member: "helix-{version}-x86_64-linux/"
+      linux-aarch64:
+        asset: "{release}/helix-{version}-aarch64-linux.tar.xz"
+        member: "helix-{version}-aarch64-linux/"
+
+  # nvim needs the lib/ and share/ folders beside bin/, so the whole tree comes out. Put its bin/
+  # on PATH. The regex skips the rolling `stable` release, which is not marked pre-release.
+  neovim:
+    description: "Vim-based text editor with Lua plugins, LSP and tree-sitter"
+    aliases: [nvim]
+    repository: https://github.com/neovim/neovim
+    releaseRegex: '^v\d+\.\d+\.\d+$'
+    targets:
+      windows-x86_64:
+        asset: "{release}/nvim-win64.zip"
+        member: "nvim-win64/"
+      windows-aarch64:
+        asset: "{release}/nvim-win-arm64.zip"
+        member: "nvim-win-arm64/"
+      macos-x86_64:
+        asset: "{release}/nvim-macos-x86_64.tar.gz"
+        member: "nvim-macos-x86_64/"
+      macos-aarch64:
+        asset: "{release}/nvim-macos-arm64.tar.gz"
+        member: "nvim-macos-arm64/"
+      linux-x86_64:
+        asset: "{release}/nvim-linux-x86_64.tar.gz"
+        member: "nvim-linux-x86_64/"
+      linux-aarch64:
+        asset: "{release}/nvim-linux-arm64.tar.gz"
+        member: "nvim-linux-arm64/"
+
+  # No windows-aarch64.
+  zellij:
+    description: "Terminal multiplexer with panes, tabs, layouts and plugins, like tmux"
+    repository: https://github.com/zellij-org/zellij
+    asset: "{release}/zellij-{target}{ext}"
+    member: "zellij{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Bare binaries. Needs a hook in the shell's rc file.
+  direnv:
+    description: "Load and unload environment variables per directory from .envrc files"
+    repository: https://github.com/direnv/direnv
+    asset: "{release}/direnv.{target}{exe}"
+    as: "direnv{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # macOS ships zips. Run `git lfs install` once to set up the git hooks.
+  git-lfs:
+    description: "Git extension that stores large files like media outside the repo"
+    repository: https://github.com/git-lfs/git-lfs
+    asset: "{release}/git-lfs-{target}-v{version}{ext}"
+    member: "git-lfs-{version}/git-lfs{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64:
+        asset: "{release}/git-lfs-darwin-amd64-v{version}.zip"
+        member: "git-lfs-{version}/git-lfs"
+      macos-aarch64:
+        asset: "{release}/git-lfs-darwin-arm64-v{version}.zip"
+        member: "git-lfs-{version}/git-lfs"
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # protoc looks for the well-known types in an include/ folder beside itself. Zips on every
+  # platform. No windows-aarch64.
+  protoc:
+    description: "Protocol Buffers compiler that generates code from .proto files"
+    aliases: [protobuf]
+    repository: https://github.com/protocolbuffers/protobuf
+    asset: "{release}/protoc-{version}-{target}.zip"
+    member:
+      "bin/protoc{exe}": "protoc{exe}"
+      "include/": "include/"
+    targets:
+      windows-x86_64: win64
+      macos-x86_64: osx-x86_64
+      macos-aarch64: osx-aarch_64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch_64
+
+  # The portable build. Each archive holds the whole runtime at its root, and Linux needs the
+  # system's libicu. `powershell` is the Windows installer.
+  pwsh:
+    description: "PowerShell 7, the cross-platform shell and scripting language, portable"
+    repository: https://github.com/PowerShell/PowerShell
+    asset: "{release}/powershell-{version}-{target}.tar.gz"
+    member: "./"
+    targets:
+      windows-x86_64:
+        asset: "{release}/PowerShell-{version}-win-x64.zip"
+        member: "./"
+      windows-aarch64:
+        asset: "{release}/PowerShell-{version}-win-arm64.zip"
+        member: "./"
+      macos-x86_64: osx-x64
+      macos-aarch64: osx-arm64
+      linux-x86_64: linux-x64
+      linux-aarch64: linux-arm64
+
+  # Standalone CPython builds, the ones uv installs. Each release holds every Python line, so
+  # the version is the newest stable one among its asset names, like `3.15.2+20261124`. Each
+  # archive holds a python/ folder, which comes out whole. On macOS and Linux, put its bin/ on PATH.
+  python:
+    description: "Python interpreter with pip, the latest stable, as a portable build"
+    aliases: [python3, cpython]
+    url: https://github.com/astral-sh/python-build-standalone/releases/latest/download
+    versionUrl: https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest
+    versionJsonPointer: assets/*/name
+    versionRegex: '^cpython-(\d+\.\d+\.\d+\+\d+)-x86_64-pc-windows-msvc-install_only\.tar\.gz$'
+    asset: "{url}/cpython-{tag}-{target}-install_only.tar.gz"
+    member: "python/"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Eclipse Temurin, the newest LTS OpenJDK. Adoptium's API names the latest LTS release, like
+  # `jdk-25.0.5.1+2`, which is also the archive's folder, and redirects to its GitHub asset. Put
+  # its bin/ on PATH and point JAVA_HOME at the folder. No windows-aarch64.
+  temurin:
+    description: "Eclipse Temurin OpenJDK, the latest LTS: java, javac and the JDK tools"
+    aliases: [java, jdk, openjdk]
+    url: https://api.adoptium.net/v3/binary/version/{tag}
+    versionUrl: https://api.adoptium.net/v3/info/release_names?release_type=ga&lts=true&sort_order=DESC&page_size=1&image_type=jdk
+    versionJsonPointer: releases/0
+    asset: "{url}/{target}/jdk/hotspot/normal/eclipse"
+    member: "{tag}/"
+    targets:
+      windows-x86_64: windows/x64
+      macos-x86_64:
+        asset: "{url}/mac/x64/jdk/hotspot/normal/eclipse"
+        member: "{tag}/Contents/Home/"
+      macos-aarch64:
+        asset: "{url}/mac/aarch64/jdk/hotspot/normal/eclipse"
+        member: "{tag}/Contents/Home/"
+      linux-x86_64: linux/x64
+      linux-aarch64: linux/aarch64
+
+  # The whole toolchain, which is large: 900 MB for Windows, 2 GB for Linux. The regex skips
+  # release candidates. Put its bin/ on PATH. No macOS build.
+  # ci: skip-archive-check
+  llvm:
+    description: "LLVM and Clang C and C++ toolchain: clang, clangd, lld and clang-format"
+    aliases: [clang, clangd, clang-format]
+    repository: https://github.com/llvm/llvm-project
+    releaseRegex: '^llvmorg-\d+\.\d+\.\d+$'
+    targets:
+      windows-x86_64:
+        asset: "{release}/clang+llvm-{version}-x86_64-pc-windows-msvc.tar.xz"
+        member: "clang+llvm-{version}-x86_64-pc-windows-msvc/"
+      windows-aarch64:
+        asset: "{release}/clang+llvm-{version}-aarch64-pc-windows-msvc.tar.xz"
+        member: "clang+llvm-{version}-aarch64-pc-windows-msvc/"
+      linux-x86_64:
+        asset: "{release}/LLVM-{version}-Linux-X64.tar.xz"
+        member: "LLVM-{version}-Linux-X64/"
+      linux-aarch64:
+        asset: "{release}/LLVM-{version}-Linux-ARM64.tar.xz"
+        member: "LLVM-{version}-Linux-ARM64/"
+
+  # Zips on every platform. `ya` is yazi's package manager for plugins and flavors.
+  yazi:
+    description: "Fast terminal file manager with image previews, tabs and plugins"
+    aliases: [ya]
+    repository: https://github.com/sxyazi/yazi
+    asset: "{release}/yazi-{target}.zip"
+    member:
+      "yazi-{target}/yazi{exe}": "yazi{exe}"
+      "yazi-{target}/ya{exe}": "ya{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Tags are `r` and a number, like `r42`. No windows-aarch64.
+  lf:
+    description: "Terminal file manager inspired by ranger, fast and in a single binary"
+    repository: https://github.com/gokcehan/lf
+    asset: "{release}/lf-{target}{ext}"
+    member: "lf{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # The command is `spf`.
+  superfile:
+    description: "Modern terminal file manager with panels, previews and a fancy UI"
+    aliases: [spf]
+    repository: https://github.com/yorukot/superfile
+    targets:
+      windows-x86_64:
+        asset: "{release}/superfile-windows-v{version}-amd64.zip"
+        member: "dist/superfile-windows-v{version}-amd64/spf.exe"
+      windows-aarch64:
+        asset: "{release}/superfile-windows-v{version}-arm64.zip"
+        member: "dist/superfile-windows-v{version}-arm64/spf.exe"
+      macos-x86_64:
+        asset: "{release}/superfile-darwin-v{version}-amd64.tar.gz"
+        member: "dist/superfile-darwin-v{version}-amd64/spf"
+      macos-aarch64:
+        asset: "{release}/superfile-darwin-v{version}-arm64.tar.gz"
+        member: "dist/superfile-darwin-v{version}-arm64/spf"
+      linux-x86_64:
+        asset: "{release}/superfile-linux-v{version}-amd64.tar.gz"
+        member: "dist/superfile-linux-v{version}-amd64/spf"
+      linux-aarch64:
+        asset: "{release}/superfile-linux-v{version}-arm64.tar.gz"
+        member: "dist/superfile-linux-v{version}-arm64/spf"
+
+  # No windows-aarch64.
+  hexyl:
+    description: "Hex viewer for the terminal that colors bytes by kind"
+    repository: https://github.com/sharkdp/hexyl
+    asset: "{release}/hexyl-v{version}-{target}{ext}"
+    member: "hexyl-v{version}-{target}/hexyl{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Linux is musl only.
+  dua:
+    description: "Disk usage analyzer with a TUI to find and delete big folders"
+    aliases: [dua-cli]
+    repository: https://github.com/Byron/dua-cli
+    asset: "{release}/dua-v{version}-{target}{ext}"
+    member: "dua-v{version}-{target}/dua{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  duf:
+    description: "Disk usage and free space of mounted drives in tables, a better df"
+    repository: https://github.com/muesli/duf
+    asset: "{release}/duf_{version}_{target}{ext}"
+    member: "duf{exe}"
+    targets:
+      windows-x86_64: windows_x86_64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_x86_64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_x86_64
+      linux-aarch64: linux_arm64
+
+  # Formerly mprocs. Linux is musl only. No windows-aarch64.
+  dekit:
+    description: "Run and watch several processes at once in a TUI, for dev servers"
+    aliases: [mprocs]
+    repository: https://github.com/pvolok/dekit
+    asset: "{release}/dekit-{target}{ext}"
+    member: "dekit{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # Tags carry no leading `v`.
+  ouch:
+    description: "Compress and extract zip, tar, gz, xz, zst, 7z and rar with one command"
+    repository: https://github.com/ouch-org/ouch
+    asset: "{release}/ouch-{target}{ext}"
+    member: "ouch-{target}/ouch{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Windows only: the other platforms get a bare binary in .bz2, which vendor cannot unpack.
+  # `restic self-update` replaces this copy, so update it through vendor instead.
+  restic:
+    description: "Fast, encrypted, deduplicating backups to local disk, S3, SFTP and more"
+    repository: https://github.com/restic/restic
+    targets:
+      windows-x86_64:
+        asset: "{release}/restic_{version}_windows_amd64.zip"
+        member: "restic_{version}_windows_amd64.exe"
+        as: restic.exe
+
+  # The CLI alone. KopiaUI ships separately.
+  kopia:
+    description: "Fast, encrypted, deduplicating backups with snapshots to cloud or disk"
+    repository: https://github.com/kopia/kopia
+    asset: "{release}/kopia-{version}-{target}{ext}"
+    member: "kopia-{version}-{target}/kopia{exe}"
+    targets:
+      windows-x86_64: windows-x64
+      macos-x86_64: macOS-x64
+      macos-aarch64: macOS-arm64
+      linux-x86_64: linux-x64
+      linux-aarch64: linux-arm64
+
+  croc:
+    description: "Send files and folders between computers securely with a code phrase"
+    repository: https://github.com/schollz/croc
+    asset: "{release}/croc_v{version}_{target}{ext}"
+    member: "croc{exe}"
+    targets:
+      windows-x86_64: Windows-64bit
+      windows-aarch64: Windows-ARM64
+      macos-x86_64: macOS-64bit
+      macos-aarch64: macOS-ARM64
+      linux-x86_64: Linux-64bit
+      linux-aarch64: Linux-ARM64
+
+  # Linux is musl only.
+  dufs:
+    description: "File server for static serving, uploads, search and WebDAV over HTTP"
+    repository: https://github.com/sigoden/dufs
+    asset: "{release}/dufs-v{version}-{target}{ext}"
+    member: "dufs{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # Bare binaries. No windows-aarch64.
+  miniserve:
+    description: "Serve files and folders over HTTP from the command line, with uploads"
+    repository: https://github.com/svenstaro/miniserve
+    asset: "{release}/miniserve-{version}-{target}{exe}"
+    as: "miniserve{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Tags are like `gping-v1.21.0`, and asset names carry no version. No windows-aarch64.
+  gping:
+    description: "Ping with a live graph in the terminal, for several hosts at once"
+    repository: https://github.com/orf/gping
+    asset: "{release}/gping-{target}{ext}"
+    member: "gping{exe}"
+    targets:
+      windows-x86_64: Windows-msvc-x86_64
+      macos-x86_64: macOS-x86_64
+      macos-aarch64: macOS-arm64
+      linux-x86_64: Linux-gnu-x86_64
+      linux-aarch64: Linux-gnu-arm64
+
+  # The command is `trip`. Tracing needs admin or root. Tags carry no leading `v`.
+  trippy:
+    description: "Network diagnostic tool combining traceroute and ping in a TUI"
+    aliases: [trip]
+    repository: https://github.com/fujiapple852/trippy
+    asset: "{release}/trippy-{version}-{target}{ext}"
+    member: "trippy-{version}-{target}/trip{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Asset names carry no version. No windows-aarch64.
+  doggo:
+    description: "Command-line DNS client, like dig, with DoH, DoT and JSON output"
+    repository: https://github.com/mr-karan/doggo
+    asset: "{release}/doggo-{target}{ext}"
+    member: "doggo{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      macos-x86_64: darwin-x86_64
+      macos-aarch64: darwin-aarch64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-aarch64
+
+  # Needs admin or root. Windows also needs Npcap. No windows-aarch64.
+  bandwhich:
+    description: "Terminal bandwidth monitor showing network use by process and connection"
+    repository: https://github.com/imsnif/bandwhich
+    asset: "{release}/bandwhich-v{version}-{target}{ext}"
+    member: "bandwhich{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Only two hosts ship a plain zip. The others zip a tarball, which vendor cannot unpack twice.
+  rustscan:
+    description: "Fast port scanner that finds open ports, then hands them to nmap"
+    repository: https://github.com/bee-san/RustScan
+    targets:
+      windows-x86_64:
+        asset: "{release}/x86_64-windows-rustscan.exe.zip"
+        member: rustscan.exe
+      linux-aarch64:
+        asset: "{release}/aarch64-linux-rustscan.zip"
+        member: rustscan
+
+  # No windows-aarch64.
+  presenterm:
+    description: "Terminal slideshow tool for Markdown presentations, with images and code"
+    repository: https://github.com/mfontanini/presenterm
+    asset: "{release}/presenterm-{version}-{target}{ext}"
+    member: "presenterm-{version}/presenterm{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Zips on every platform. Tags carry no leading `v`. No macos-x86_64.
+  qsv:
+    description: "Fast CSV toolkit to slice, join, sort, query, validate and convert data"
+    repository: https://github.com/dathere/qsv
+    asset: "{release}/qsv-{version}-{target}.zip"
+    member: "qsv{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Linux aarch64 is musl only. No windows-aarch64.
+  sd:
+    description: "Find and replace text with regex, an intuitive sed alternative"
+    repository: https://github.com/chmln/sd
+    asset: "{release}/sd-v{version}-{target}{ext}"
+    member: "sd-v{version}-{target}/sd{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # The command is `rga`, which runs `rga-preproc` beside it. Needs ripgrep on PATH. No Windows
+  # build, and Linux x86_64 is musl only.
+  ripgrep-all:
+    description: "ripgrep that also searches PDFs, ebooks, Office docs, zip and sqlite"
+    aliases: [rga]
+    repository: https://github.com/phiresky/ripgrep-all
+    asset: "{release}/ripgrep_all-v{version}-{target}.tar.gz"
+    member:
+      "ripgrep_all-v{version}-{target}/rga": rga
+      "ripgrep_all-v{version}-{target}/rga-preproc": rga-preproc
+    targets:
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Windows zips hold the binary at their root. Elsewhere it sits in a folder, in a tar.xz.
+  csvlens:
+    description: "Command-line CSV file viewer, like less but for tables"
+    repository: https://github.com/YS-L/csvlens
+    targets:
+      windows-x86_64:
+        asset: "{release}/csvlens-x86_64-pc-windows-msvc.zip"
+        member: csvlens.exe
+      windows-aarch64:
+        asset: "{release}/csvlens-aarch64-pc-windows-msvc.zip"
+        member: csvlens.exe
+      macos-x86_64:
+        asset: "{release}/csvlens-x86_64-apple-darwin.tar.xz"
+        member: "csvlens-x86_64-apple-darwin/csvlens"
+      macos-aarch64:
+        asset: "{release}/csvlens-aarch64-apple-darwin.tar.xz"
+        member: "csvlens-aarch64-apple-darwin/csvlens"
+      linux-x86_64:
+        asset: "{release}/csvlens-x86_64-unknown-linux-gnu.tar.xz"
+        member: "csvlens-x86_64-unknown-linux-gnu/csvlens"
+      linux-aarch64:
+        asset: "{release}/csvlens-aarch64-unknown-linux-gnu.tar.xz"
+        member: "csvlens-aarch64-unknown-linux-gnu/csvlens"
+
+  # Bare binaries named posh-<os>-<arch>. Themes ship separately in themes.zip.
+  # `oh-my-posh upgrade` replaces this copy, so update it through vendor instead.
+  oh-my-posh:
+    description: "Prompt theme engine for any shell: PowerShell, bash, zsh, fish, cmd"
+    aliases: [posh]
+    repository: https://github.com/JanDeDobbeleer/oh-my-posh
+    asset: "{release}/posh-{target}{exe}"
+    as: "oh-my-posh{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # Tarballs on every platform. No windows-aarch64.
+  viddy:
+    description: "Modern watch command that reruns a command and shows diffs and history"
+    repository: https://github.com/sachaos/viddy
+    asset: "{release}/viddy-v{version}-{target}.tar.gz"
+    member: "viddy{exe}"
+    targets:
+      windows-x86_64: windows-x86_64
+      macos-x86_64: macos-x86_64
+      macos-aarch64: macos-arm64
+      linux-x86_64: linux-x86_64
+      linux-aarch64: linux-arm64
+
+  resvg:
+    description: "Fast SVG renderer that converts SVG files to PNG images"
+    repository: https://github.com/linebender/resvg
+    asset: "{release}/resvg-{target}"
+    member: "resvg{exe}"
+    targets:
+      windows-x86_64: win-x86_64.zip
+      windows-aarch64: win-aarch64.zip
+      macos-x86_64: macos-x86_64.zip
+      macos-aarch64: macos-aarch64.zip
+      linux-x86_64: linux-x86_64.tar.gz
+      linux-aarch64: linux-aarch64.tar.gz
+
+  # No windows-aarch64.
+  freeze:
+    description: "Generate images of code and terminal output as PNG, SVG or WebP"
+    repository: https://github.com/charmbracelet/freeze
+    asset: "{release}/freeze_{version}_{target}{ext}"
+    member: "freeze_{version}_{target}/freeze{exe}"
+    targets:
+      windows-x86_64: Windows_x86_64
+      macos-x86_64: Darwin_x86_64
+      macos-aarch64: Darwin_arm64
+      linux-x86_64: Linux_x86_64
+      linux-aarch64: Linux_arm64
+
+  # Bare binaries. No Windows build.
+  asciinema:
+    description: "Record and share terminal sessions as lightweight text casts"
+    repository: https://github.com/asciinema/asciinema
+    asset: "{release}/asciinema-{target}"
+    as: asciinema
+    targets:
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Bare PyInstaller builds, one per OS: x64 Windows, arm64 macOS and x86_64 Linux. Needs
+  # ffmpeg on PATH.
+  spotdl:
+    description: "Download Spotify playlists and songs with album art, via YouTube"
+    repository: https://github.com/spotDL/spotify-downloader
+    targets:
+      windows-x86_64:
+        asset: "{release}/spotdl-{version}-win32.exe"
+        as: spotdl.exe
+      macos-aarch64:
+        asset: "{release}/spotdl-{version}-darwin"
+        as: spotdl
+      linux-x86_64:
+        asset: "{release}/spotdl-{version}-linux"
+        as: spotdl
+
+  # The command is `spotify_player`. Needs Spotify Premium. No windows-aarch64.
+  spotify-player:
+    description: "Spotify client for the terminal with search, playlists and lyrics"
+    aliases: [spotify_player]
+    repository: https://github.com/aome510/spotify-player
+    asset: "{release}/spotify_player-{target}{ext}"
+    member: "spotify_player{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # Linux is musl only.
+  termscp:
+    description: "Terminal file transfer and explorer for SCP, SFTP, FTP, S3 and WebDAV"
+    repository: https://github.com/veeso/termscp
+    asset: "{release}/termscp-v{version}-{target}{ext}"
+    member: "termscp{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      macos-x86_64: x86_64-apple-darwin
+      macos-aarch64: aarch64-apple-darwin
+      linux-x86_64: x86_64-unknown-linux-musl
+      linux-aarch64: aarch64-unknown-linux-musl
+
+  # Zips on every platform. Windows lnav needs the msys DLL beside it. Linux is musl only, and
+  # there is no macos-x86_64.
+  lnav:
+    description: "Log file viewer that merges, filters and queries logs with SQL"
+    repository: https://github.com/tstack/lnav
+    targets:
+      windows-x86_64:
+        asset: "{release}/lnav-{version}-windows-x86_64.zip"
+        member:
+          "lnav-{version}/bin/lnav.exe": lnav.exe
+          "lnav-{version}/bin/msys-2.0.dll": msys-2.0.dll
+      windows-aarch64:
+        asset: "{release}/lnav-{version}-windows-arm64.zip"
+        member:
+          "lnav-{version}/bin/lnav.exe": lnav.exe
+          "lnav-{version}/bin/msys-2.0.dll": msys-2.0.dll
+      macos-aarch64:
+        asset: "{release}/lnav-{version}-aarch64-macos.zip"
+        member: "lnav-{version}/lnav"
+      linux-x86_64:
+        asset: "{release}/lnav-{version}-linux-musl-x86_64.zip"
+        member: "lnav-{version}/lnav"
+      linux-aarch64:
+        asset: "{release}/lnav-{version}-linux-musl-arm64.zip"
+        member: "lnav-{version}/lnav"
+
+  # Linux is musl only. `typst update` replaces this copy, so update it through vendor instead.
+  typst:
+    description: "Markup typesetting for papers and documents, a LaTeX alternative"
+    repository: https://github.com/typst/typst
+    targets:
+      windows-x86_64:
+        asset: "{release}/typst-x86_64-pc-windows-msvc.zip"
+        member: "typst-x86_64-pc-windows-msvc/typst.exe"
+      windows-aarch64:
+        asset: "{release}/typst-aarch64-pc-windows-msvc.zip"
+        member: "typst-aarch64-pc-windows-msvc/typst.exe"
+      macos-x86_64:
+        asset: "{release}/typst-x86_64-apple-darwin.tar.xz"
+        member: "typst-x86_64-apple-darwin/typst"
+      macos-aarch64:
+        asset: "{release}/typst-aarch64-apple-darwin.tar.xz"
+        member: "typst-aarch64-apple-darwin/typst"
+      linux-x86_64:
+        asset: "{release}/typst-x86_64-unknown-linux-musl.tar.xz"
+        member: "typst-x86_64-unknown-linux-musl/typst"
+      linux-aarch64:
+        asset: "{release}/typst-aarch64-unknown-linux-musl.tar.xz"
+        member: "typst-aarch64-unknown-linux-musl/typst"
+
+  # uutils' Rust rewrite. One multicall binary, run as `coreutils ls`. The Windows zip also holds
+  # a copy per command, left out so they don't shadow Windows commands like sort. No macOS.
+  coreutils:
+    description: "Rust rewrite of GNU coreutils: ls, cp, mv, cat, sort and more"
+    aliases: [uutils]
+    repository: https://github.com/uutils/coreutils
+    asset: "{release}/coreutils-{version}-{target}{ext}"
+    member: "coreutils-{version}-{target}/coreutils{exe}"
+    targets:
+      windows-x86_64: x86_64-pc-windows-msvc
+      windows-aarch64: aarch64-pc-windows-msvc
+      linux-x86_64: x86_64-unknown-linux-gnu
+      linux-aarch64: aarch64-unknown-linux-gnu
+
+  # uutils' Rust rewrite. One multicall binary, run as `diffutils diff`. The Windows zip holds it
+  # at its root. No windows-aarch64.
+  diffutils:
+    description: "Cross-platform Rust rewrite of GNU diffutils: diff, cmp and more"
+    repository: https://github.com/uutils/diffutils
+    targets:
+      windows-x86_64:
+        asset: "{release}/diffutils-x86_64-pc-windows-msvc.zip"
+        member: diffutils.exe
+      macos-x86_64:
+        asset: "{release}/diffutils-x86_64-apple-darwin.tar.xz"
+        member: "diffutils-x86_64-apple-darwin/diffutils"
+      macos-aarch64:
+        asset: "{release}/diffutils-aarch64-apple-darwin.tar.xz"
+        member: "diffutils-aarch64-apple-darwin/diffutils"
+      linux-x86_64:
+        asset: "{release}/diffutils-x86_64-unknown-linux-gnu.tar.xz"
+        member: "diffutils-x86_64-unknown-linux-gnu/diffutils"
+      linux-aarch64:
+        asset: "{release}/diffutils-aarch64-unknown-linux-gnu.tar.xz"
+        member: "diffutils-aarch64-unknown-linux-gnu/diffutils"
+
+  # Microsoft's port, newer than the one Windows ships. Every release is tagged Preview but
+  # marked latest. The tools load libcrypto.dll beside them, so the whole folder comes out.
+  openssh:
+    description: "OpenSSH for Windows: ssh, scp, sftp, ssh-keygen, ssh-agent and sshd"
+    aliases: [ssh, win32-openssh]
+    repository: https://github.com/PowerShell/Win32-OpenSSH
+    targets:
+      windows-x86_64:
+        asset: "{release}/OpenSSH-Win64.zip"
+        member: "OpenSSH-Win64/"
+      windows-aarch64:
+        asset: "{release}/OpenSSH-ARM64.zip"
+        member: "OpenSSH-ARM64/"
+
+  # A native library from NuGet. Each host has its own runtime package, and a .nupkg is a zip.
+  # No macos-x86_64: its package stopped at 18.1.3.
+  libclang:
+    description: "Clang's C API as a shared library, for bindings and code analysis tools"
+    url: https://www.nuget.org/api/v2/package
+    versionUrl: https://api.nuget.org/v3-flatcontainer/libclang.runtime.win-x64/index.json
+    versionJsonPointer: versions
+    targets:
+      windows-x86_64:
+        asset: "{url}/libclang.runtime.win-x64/{tag}"
+        member: "runtimes/win-x64/native/libclang.dll"
+      windows-aarch64:
+        asset: "{url}/libclang.runtime.win-arm64/{tag}"
+        member: "runtimes/win-arm64/native/libclang.dll"
+      macos-aarch64:
+        asset: "{url}/libclang.runtime.osx-arm64/{tag}"
+        member: "runtimes/osx-arm64/native/libclang.dylib"
+      linux-x86_64:
+        asset: "{url}/libclang.runtime.linux-x64/{tag}"
+        member: "runtimes/linux-x64/native/libclang.so"
+      linux-aarch64:
+        asset: "{url}/libclang.runtime.linux-arm64/{tag}"
+        member: "runtimes/linux-arm64/native/libclang.so"
+
+  # stable.txt holds only the tag, like `v1.37.2`. Bare binaries, one folder per host.
+  kubectl:
+    description: "Kubernetes CLI for deploying apps and managing clusters, pods and logs"
+    aliases: [k8s]
+    url: https://dl.k8s.io/release/{tag}/bin
+    versionUrl: https://dl.k8s.io/release/stable.txt
+    asset: "{url}/{target}/kubectl{exe}"
+    targets:
+      windows-x86_64: windows/amd64
+      windows-aarch64: windows/arm64
+      macos-x86_64: darwin/amd64
+      macos-aarch64: darwin/arm64
+      linux-x86_64: linux/amd64
+      linux-aarch64: linux/arm64
+
+  # helm-latest-version holds only the tag, like `v4.3.2`.
+  helm:
+    description: "Package manager for Kubernetes that installs and upgrades charts"
+    url: https://get.helm.sh
+    versionUrl: https://get.helm.sh/helm-latest-version
+    asset: "{url}/helm-{tag}-{target}{ext}"
+    member: "{target}/helm{exe}"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # HashiCorp's checkpoint API names the current version. Each zip holds the binary at its root.
+  terraform:
+    description: "Infrastructure as code that plans and applies cloud resources from HCL"
+    aliases: [tf]
+    url: https://releases.hashicorp.com/terraform/{version}
+    versionUrl: https://checkpoint-api.hashicorp.com/v1/check/terraform
+    versionJsonPointer: current_version
+    asset: "{url}/terraform_{version}_{target}.zip"
+    member: "terraform{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      windows-aarch64: windows_arm64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # Same layout as terraform. No windows-aarch64: HashiCorp builds no Windows arm64 vault.
+  vault:
+    description: "HashiCorp secrets manager CLI and server for keys, tokens and passwords"
+    url: https://releases.hashicorp.com/vault/{version}
+    versionUrl: https://checkpoint-api.hashicorp.com/v1/check/vault
+    versionJsonPointer: current_version
+    asset: "{url}/vault_{version}_{target}.zip"
+    member: "vault{exe}"
+    targets:
+      windows-x86_64: windows_amd64
+      macos-x86_64: darwin_amd64
+      macos-aarch64: darwin_arm64
+      linux-x86_64: linux_amd64
+      linux-aarch64: linux_arm64
+
+  # curl for Windows. latest.cgi redirects to the newest build, and `versionRegex` reads the tag,
+  # like `8.23.0_10`, from that redirect. The trailing number counts rebuilds of one curl release.
+  # curl.exe runs alone, with no DLL or CA bundle beside it.
+  curl:
+    description: "Transfer data over HTTP, HTTPS, FTP and more; official Windows build"
+    url: https://curl.se/windows/dl-{tag}
+    versionUrl: https://curl.se/windows/latest.cgi?p=win64-mingw.zip
+    versionRegex: 'dl-(\d+\.\d+\.\d+_\d+)/'
+    asset: "{url}/curl-{tag}-{target}-mingw.zip"
+    member: "curl-{tag}-{target}-mingw/bin/curl.exe"
+    targets:
+      windows-x86_64: win64
+      windows-aarch64: win64a
+
+  # go.dev/VERSION holds the tag, like `go1.27.4`, then a date line. go needs its whole tree,
+  # so the archive's go/ folder comes out. Put its bin/ on PATH.
+  go:
+    description: "Go programming language toolchain: compiler, go build, go test, gofmt"
+    aliases: [golang]
+    url: https://dl.google.com/go
+    versionUrl: https://go.dev/VERSION?m=text
+    versionRegex: '^go(\d+\.\d+\.\d+)'
+    asset: "{url}/go{version}.{target}{ext}"
+    member: "go/"
+    targets:
+      windows-x86_64: windows-amd64
+      windows-aarch64: windows-arm64
+      macos-x86_64: darwin-amd64
+      macos-aarch64: darwin-arm64
+      linux-x86_64: linux-amd64
+      linux-aarch64: linux-arm64
+
+  # index.json lists master first, then releases newest first. zig needs the lib/ folder beside
+  # it, so the whole folder comes out.
+  zig:
+    description: "Zig compiler and toolchain, also a drop-in C and C++ cross compiler"
+    url: https://ziglang.org/download/{version}
+    versionUrl: https://ziglang.org/download/index.json
+    versionRegex: '"(\d+\.\d+\.\d+)": \{'
+    targets:
+      windows-x86_64:
+        asset: "{url}/zig-x86_64-windows-{version}.zip"
+        member: "zig-x86_64-windows-{version}/"
+      windows-aarch64:
+        asset: "{url}/zig-aarch64-windows-{version}.zip"
+        member: "zig-aarch64-windows-{version}/"
+      macos-x86_64:
+        asset: "{url}/zig-x86_64-macos-{version}.tar.xz"
+        member: "zig-x86_64-macos-{version}/"
+      macos-aarch64:
+        asset: "{url}/zig-aarch64-macos-{version}.tar.xz"
+        member: "zig-aarch64-macos-{version}/"
+      linux-x86_64:
+        asset: "{url}/zig-x86_64-linux-{version}.tar.xz"
+        member: "zig-x86_64-linux-{version}/"
+      linux-aarch64:
+        asset: "{url}/zig-aarch64-linux-{version}.tar.xz"
+        member: "zig-aarch64-linux-{version}/"
+
+  # The newest LTS release. index.tab lists releases newest first, and its tenth column names
+  # the LTS line, or holds `-`. npm and npx live in node_modules/, so the whole folder comes out.
+  # On macOS and Linux, put its bin/ on PATH.
+  node:
+    description: "Node.js JavaScript runtime with npm and npx, the LTS release"
+    aliases: [nodejs, npm]
+    url: https://nodejs.org/dist/v{version}
+    versionUrl: https://nodejs.org/dist/index.tab
+    versionRegex: '\nv(\d+\.\d+\.\d+)\t(?:[^\t\n]*\t){8}[A-Za-z]'
+    targets:
+      windows-x86_64:
+        asset: "{url}/node-v{version}-win-x64.zip"
+        member: "node-v{version}-win-x64/"
+      windows-aarch64:
+        asset: "{url}/node-v{version}-win-arm64.zip"
+        member: "node-v{version}-win-arm64/"
+      macos-x86_64:
+        asset: "{url}/node-v{version}-darwin-x64.tar.gz"
+        member: "node-v{version}-darwin-x64/"
+      macos-aarch64:
+        asset: "{url}/node-v{version}-darwin-arm64.tar.gz"
+        member: "node-v{version}-darwin-arm64/"
+      linux-x86_64:
+        asset: "{url}/node-v{version}-linux-x64.tar.xz"
+        member: "node-v{version}-linux-x64/"
+      linux-aarch64:
+        asset: "{url}/node-v{version}-linux-arm64.tar.xz"
+        member: "node-v{version}-linux-arm64/"
+
+  # The newest LTS SDK. latest.version holds only the version. Each archive holds the whole SDK
+  # at its root. Point DOTNET_ROOT at the folder.
+  dotnet:
+    description: ".NET SDK for C#, F# and ASP.NET apps: dotnet build, run, test, publish"
+    aliases: [dotnet-sdk]
+    url: https://builds.dotnet.microsoft.com/dotnet/Sdk/{version}
+    versionUrl: https://builds.dotnet.microsoft.com/dotnet/Sdk/LTS/latest.version
+    asset: "{url}/dotnet-sdk-{version}-{target}"
+    member: "./"
+    targets:
+      windows-x86_64: win-x64.zip
+      windows-aarch64: win-arm64.zip
+      macos-x86_64: osx-x64.tar.gz
+      macos-aarch64: osx-arm64.tar.gz
+      linux-x86_64: linux-x64.tar.gz
+      linux-aarch64: linux-arm64.tar.gz
+
+  # Windows takes the standalone 7za.exe from the "extra" archive. Each host saves the command as
+  # `7z`, the name people type. `7zip` is the Windows installer.
+  7z:
+    description: "Command-line archiver for 7z, zip, tar, xz and rar files"
+    repository: https://github.com/ip7z/7zip
+    aliases: [7zz, 7za]
+    targets:
+      windows-x86_64:
+        asset: "{release}/7z{version:}-extra.7z"
+        member: x64/7za.exe
+        as: 7z.exe
+      windows-aarch64:
+        asset: "{release}/7z{version:}-extra.7z"
+        member: arm64/7za.exe
+        as: 7z.exe
+      macos-x86_64:
+        asset: "{release}/7z{version:}-mac-x64.tar.xz"
+        member: 7zz
+        as: 7z
+      macos-aarch64:
+        asset: "{release}/7z{version:}-mac.tar.xz"
+        member: 7zz
+        as: 7z
+      linux-x86_64:
+        asset: "{release}/7z{version:}-linux-x64.tar.xz"
+        member: 7zz
+        as: 7z
+      linux-aarch64:
+        asset: "{release}/7z{version:}-linux-arm64.tar.xz"
+        member: 7zz
+        as: 7z
+
+  # Installers. `installer: true` runs the one asset silently instead of keeping it, and vendor
+  # tracks the program through its Apps & Features entry. Windows only, and only programs that
+  # do not update themselves, so the version vendor records stays true.
+  audio-bartender:
+    description: "Tray volume control with per-app volume, level meters and media keys"
+    repository: https://github.com/Araxeus/Audio-Bartender
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/AudioBartender-setup.exe"
+
+  winkey-startmenu-disabler:
+    description: "Stop the Windows key opening Start while keeping Win key shortcuts"
+    repository: https://github.com/Araxeus/winkey-startmenu-disabler
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/winkey-startmenu-disabler-setup.exe"
+
+  qbittorrent:
+    description: "BitTorrent client with a built-in search engine and no ads"
+    repository: https://github.com/qbittorrent/qBittorrent
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/qbittorrent_{version}_x64_setup.exe"
+
+  imageglass:
+    description: "Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC"
+    repository: https://github.com/d2phap/ImageGlass
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ImageGlass_{version}_win-x64.msix"
+      windows-aarch64:
+        asset: "{release}/ImageGlass_{version}_win-arm64.msix"
+
+  # The per-user setup installs without admin.
+  winmerge:
+    description: "Visual diff and merge tool that compares files and folders"
+    repository: https://github.com/WinMerge/winmerge
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/WinMerge-{version}-x64-PerUser-Setup.exe"
+
+  # Not on GitHub. The download page links the setup as wiztree_4_34_setup.exe, so the version
+  # is that underscored pair.
+  wiztree:
+    description: "Disk space analyzer that finds what fills a drive, fast"
+    url: https://diskanalyzer.com/files/wiztree_{version}_setup.exe
+    versionUrl: https://diskanalyzer.com/download
+    versionRegex: 'wiztree_(\d+_\d+)_setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: wiztree_setup.exe
+
+  # The setup is 7-Zip's own, which takes NSIS's /S. `7z` is the portable command line.
+  7zip:
+    description: "File archiver with a file manager and Explorer menu for 7z and zip"
+    repository: https://github.com/ip7z/7zip
+    aliases: [7-zip]
+    installer: nsis
+    targets:
+      windows-x86_64:
+        asset: "{release}/7z{version:}-x64.exe"
+      windows-aarch64:
+        asset: "{release}/7z{version:}-arm64.exe"
+
+  # Not on GitHub. The setup is WinRAR's own, which takes NSIS's /S. The regex skips betas like
+  # 730b2 and localized builds like 723ar. No stable arm64 build yet.
+  winrar:
+    description: "Archiver that creates RAR and extracts zip, 7z, tar and more"
+    url: https://www.rarlab.com/rar/winrar-x64-{version}.exe
+    versionUrl: https://www.rarlab.com/download.htm
+    versionRegex: 'winrar-x64-(\d+)\.exe'
+    installer: nsis
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: winrar-setup.exe
+
+  peazip:
+    description: "Archiver for 200+ formats, with encryption, split archives and a GUI"
+    repository: https://github.com/peazip/PeaZip
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/peazip-{version}.WIN64.exe"
+
+  # A rebuild of one Git release is tagged like `v2.56.0.windows.4` and named
+  # Git-2.56.0.4-64-bit.exe, so the asset is matched by pattern. `git update-git-for-windows`
+  # installs over this, so update it through vendor instead.
+  git:
+    description: "Git for Windows: git, Git Bash and Git GUI, with credential manager"
+    aliases: [git-for-windows]
+    repository: https://github.com/git-for-windows/git
+    installer: true
+    as: git-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/Git-*-64-bit.exe"
+      windows-aarch64:
+        asset: "{release}/Git-*-arm64.exe"
+
+  # No arm64 setup.
+  localsend:
+    description: "Share files to nearby devices over the local network, like AirDrop"
+    repository: https://github.com/localsend/localsend
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/LocalSend-{version}-windows-x86-64.exe"
+
+  shotcut:
+    description: "Free video editor with a timeline, filters and wide format support"
+    repository: https://github.com/mltframework/shotcut
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/shotcut-win64-{version}.exe"
+      windows-aarch64:
+        asset: "{release}/shotcut-win_ARM-{version}.exe"
+
+  openshot:
+    description: "Video editor with a timeline, titles, transitions and animation"
+    repository: https://github.com/OpenShot/openshot-qt
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/OpenShot-v{version}-x86_64.exe"
+
+  # The GUI. HandBrake needs the .NET desktop runtime.
+  handbrake:
+    description: "Video transcoder that converts video to MP4 and MKV with H.265 and AV1"
+    repository: https://github.com/HandBrake/HandBrake
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/HandBrake-{version}-x86_64-Win_GUI.exe"
+      windows-aarch64:
+        asset: "{release}/HandBrake-{version}-arm64-Win_GUI.exe"
+
+  # The setup's name carries the bundled Python's version, like py311, so it is matched by
+  # pattern.
+  freecad:
+    description: "Parametric 3D CAD modeler for product design and 3D printing"
+    repository: https://github.com/FreeCAD/FreeCAD
+    installer: true
+    as: freecad-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/FreeCAD_{version}-Windows-x86_64-py*-installer.exe"
+
+  librecad:
+    description: "2D CAD drafting app for technical drawings, with DXF and DWG support"
+    repository: https://github.com/LibreCAD/LibreCAD
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/LibreCAD-v{version}-win64-msvc.exe"
+
+  bleachbit:
+    description: "Disk cleaner that frees space and removes caches, cookies and history"
+    repository: https://github.com/bleachbit/bleachbit
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/BleachBit-{version}-setup.exe"
+
+  # The maintained fork of Media Player Classic.
+  mpc-hc:
+    description: "Lightweight media player for video and audio, Media Player Classic"
+    repository: https://github.com/clsid2/mpc-hc
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/MPC-HC.{version}.x64.exe"
+
+  # The setup ships inside a zip, so this takes the portable build.
+  mpc-be:
+    description: "Media player for video and audio, based on Media Player Classic"
+    repository: https://github.com/Aleksoid1978/MPC-BE
+    targets:
+      windows-x86_64:
+        asset: "{release}/MPC-BE.{version}.x64.7z"
+        member: "MPC-BE.{version}.x64/"
+
+  mpv-net:
+    description: "Media player built on mpv, with a context menu and settings GUI"
+    aliases: [mpv.net]
+    repository: https://github.com/mpvnet-player/mpv.net
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/mpv.net-v{version}-setup-x64.exe"
+
+  angry-ip-scanner:
+    description: "Network scanner that finds hosts and open ports on a LAN"
+    aliases: [ipscan]
+    repository: https://github.com/angryip/ipscan
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ipscan-{version}-setup.exe"
+
+  # Tags carry a build number the setup's name leaves out, so the asset is matched by pattern.
+  rainmeter:
+    description: "Desktop customization with skins for widgets, clocks and system meters"
+    repository: https://github.com/rainmeter/rainmeter
+    installer: true
+    as: rainmeter-setup.exe
+    targets:
+      windows-x86_64:
+        asset: "{release}/Rainmeter-*.exe"
+
+  ditto:
+    description: "Clipboard manager that keeps history of copied text and images"
+    repository: https://github.com/sabrogden/Ditto
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/DittoSetup_{version:_}.exe"
+
+  copyq:
+    description: "Clipboard manager with searchable, editable history and scripting"
+    repository: https://github.com/hluk/CopyQ
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/copyq-{version}-setup.exe"
+
+  # One bundle for every architecture. Windows 11 already includes it.
+  windows-terminal:
+    description: "Microsoft's terminal app with tabs, panes and profiles for every shell"
+    aliases: [wt]
+    repository: https://github.com/microsoft/terminal
+    installer: msix
+    targets:
+      windows-x86_64:
+        asset: "{release}/Microsoft.WindowsTerminal_{version}_8wekyb3d8bbwe.msixbundle"
+      windows-aarch64:
+        asset: "{release}/Microsoft.WindowsTerminal_{version}_8wekyb3d8bbwe.msixbundle"
+
+  # One bundle for every architecture. `pwsh` is the portable build.
+  powershell:
+    description: "PowerShell 7, the cross-platform shell and scripting language"
+    repository: https://github.com/PowerShell/PowerShell
+    installer: msix
+    targets:
+      windows-x86_64:
+        asset: "{release}/PowerShell-{version}.msixbundle"
+      windows-aarch64:
+        asset: "{release}/PowerShell-{version}.msixbundle"
+
+  # Its own setup, which installs for the current user with /silent.
+  autohotkey:
+    description: "Scripting language for Windows hotkeys, macros and automation"
+    aliases: [ahk]
+    repository: https://github.com/AutoHotkey/AutoHotkey
+    installer:
+      type: exe
+      args: [/silent]
+    targets:
+      windows-x86_64:
+        asset: "{release}/AutoHotkey_{version}_setup.exe"
+
+  # Its own setup, which raises a UAC prompt. The switches are the ones winget uses.
+  system-informer:
+    description: "Process monitor and task manager replacement, formerly Process Hacker"
+    aliases: [systeminformer, process-hacker]
+    repository: https://github.com/winsiderss/systeminformer
+    installer:
+      type: exe
+      args: [-install, -silent]
+    targets:
+      windows-x86_64:
+        asset: "{release}/systeminformer-{version}-release-setup.exe"
+      windows-aarch64:
+        asset: "{release}/systeminformer-{version}-release-setup.exe"
+
+  # A bootstrapper around an MSI, which takes msiexec's switches. They are the ones winget uses.
+  open-shell:
+    description: "Classic Start menu and Explorer tweaks for Windows 10 and 11"
+    aliases: [classic-shell]
+    repository: https://github.com/Open-Shell/Open-Shell-Menu
+    installer:
+      type: exe
+      args: [/quiet, /norestart]
+    targets:
+      windows-x86_64:
+        asset: "{release}/OpenShellSetup_{version:_}.exe"
+
+  # Portable, with no setup.
+  rufus:
+    description: "Create bootable USB drives from ISO images for Windows and Linux"
+    repository: https://github.com/pbatard/rufus
+    targets:
+      windows-x86_64:
+        asset: "{release}/rufus-{version}.exe"
+        as: rufus.exe
+      windows-aarch64:
+        asset: "{release}/rufus-{version}_arm64.exe"
+        as: rufus.exe
+
+  # Ventoy2Disk runs from its folder, beside the boot images it writes.
+  ventoy:
+    description: "Make a bootable USB drive once, then copy ISO files onto it to boot them"
+    repository: https://github.com/ventoy/Ventoy
+    targets:
+      windows-x86_64:
+        asset: "{release}/ventoy-{version}-windows.zip"
+        member: "ventoy-{version}/"
+      linux-x86_64:
+        asset: "{release}/ventoy-{version}-linux.tar.gz"
+        member: "ventoy-{version}/"
+      linux-aarch64:
+        asset: "{release}/ventoy-{version}-linux.tar.gz"
+        member: "ventoy-{version}/"
+
+  # Not on GitHub. The download page links the setup by its full version, like 1.4.1.1032.
+  everything:
+    description: "Instant file search for Windows that finds files by name as you type"
+    url: https://www.voidtools.com/Everything-{version}.x64-Setup.exe
+    versionUrl: https://www.voidtools.com/downloads/
+    versionRegex: 'Everything-(\d+\.\d+\.\d+\.\d+)\.x64-Setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}"
+        as: everything-setup.exe
+
+  # Not on GitHub. winscp.net hands downloads out through expiring links, so this takes the
+  # SourceForge copy. WinSCP checks for updates weekly unless turned off in Preferences.
+  winscp:
+    description: "SFTP, SCP, FTP, WebDAV and S3 client with a two-pane file manager"
+    url: https://sourceforge.net/projects/winscp/files/WinSCP/{version}
+    versionUrl: https://winscp.net/eng/downloads.php
+    versionRegex: 'WinSCP-(\d+\.\d+\.\d+)-Setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/WinSCP-{version}-Setup.exe/download"
+        as: winscp-setup.exe
+
+  # Not on GitHub. latest.html names the current release, like `latest release (0.85)`.
+  putty:
+    description: "SSH and telnet client with PuTTYgen, Pageant, psftp and plink"
+    url: https://the.earth.li/~sgtatham/putty/{version}
+    versionUrl: https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html
+    versionRegex: 'latest release \((\d+\.\d+)\)'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/w64/putty-64bit-{version}-installer.msi"
+      windows-aarch64:
+        asset: "{url}/wa64/putty-arm64-{version}-installer.msi"
+
+  # Not on GitHub. This takes KDE's CDN, because download.kde.org redirects to mirrors that can
+  # time out.
+  krita:
+    description: "Digital painting app for illustration, concept art, comics and animation"
+    url: https://cdn.download.kde.org/stable/krita/{version}
+    versionUrl: https://krita.org/en/download/
+    versionRegex: 'krita-x64-(\d+\.\d+\.\d+)-setup\.exe'
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/krita-x64-{version}-setup.exe"
+
+  # The Q16 HDRI build with DLLs. Tags are like `7.1.2-36`, and the setup carries the whole tag.
+  imagemagick:
+    description: "Create, edit, convert and resize images in 200+ formats with magick"
+    aliases: [magick]
+    repository: https://github.com/ImageMagick/ImageMagick
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ImageMagick-{tag}-Q16-HDRI-x64-dll.exe"
+      windows-aarch64:
+        asset: "{release}/ImageMagick-{tag}-Q16-HDRI-arm64-dll.exe"
