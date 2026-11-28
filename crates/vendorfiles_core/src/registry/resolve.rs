@@ -62,6 +62,8 @@ pub struct Entry {
     pub hash_version_file: Option<bool>,
     /// How to run the download as an installer, for a program that ships one.
     pub installer: Option<InstallerKey>,
+    /// The installed files to expose as commands, relative to the dependency folder.
+    pub bin: Vec<String>,
 }
 
 /// Resolves `program` for the given host key.
@@ -74,6 +76,13 @@ pub struct Entry {
 pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
     check_source(name, program)?;
     if let Some(path) = program.path.as_ref() {
+        if !program.bin.is_empty() {
+            return Err(VendorError::RegistryInvalidEntry {
+                name: name.to_owned(),
+                reason: "'path' vendors one repository file, so it has no tree for 'bin'"
+                    .to_owned(),
+            });
+        }
         if !program.targets.is_empty() || program.asset.is_some() || program.member.is_some() {
             return Err(VendorError::RegistryInvalidEntry {
                 name: name.to_owned(),
@@ -162,13 +171,90 @@ pub fn for_host(name: &str, program: &Program, host: &str) -> Result<Entry> {
             },
         )
         .collect::<Result<Vec<_>>>()?;
+    finish(name, program, host, files)
+}
+
+/// The entry for one host's files: an installer on Windows, else the files, in a tree for `bin`.
+fn finish(name: &str, program: &Program, host: &str, files: Vec<FileEntry>) -> Result<Entry> {
+    // Installers run on Windows only. Elsewhere the same entry keeps its files.
+    let installer = program.installer.clone().filter(|_| is_windows(host));
+    let runs_installer = installer.as_ref().and_then(InstallerKey::options).is_some();
+    let (files, bin) = if program.bin.is_empty() || runs_installer {
+        (files, Vec::new())
+    } else {
+        into_tree(name, host, files, &program.bin)?
+    };
     no_file_written_twice(name, host, &files)?;
-    one_file_for_an_installer(name, host, program, &files)?;
+    if runs_installer {
+        one_file_for_an_installer(name, host, &files)?;
+    }
     if program.url.is_some() {
         every_asset_is_a_url(name, &files)?;
     }
 
-    Ok(entry(name, program, files))
+    let mut entry = entry(name, program, files);
+    entry.installer = installer;
+    entry.bin = bin;
+    Ok(entry)
+}
+
+/// The folder a program with `bin` keeps its tree in, inside the dependency folder.
+fn tree_folder(name: &str) -> String {
+    format!("libexec/{name}/")
+}
+
+/// Moves every output under the program's tree folder, and expands `bin` to match.
+///
+/// A folder on `PATH` would otherwise collect the tree's `src/` and `lib/` beside everyone else's
+/// commands, and on Unix the tree's own folder could take the name a link needs.
+fn into_tree(
+    name: &str,
+    host: &str,
+    files: Vec<FileEntry>,
+    bin: &[String],
+) -> Result<(Vec<FileEntry>, Vec<String>)> {
+    let tree = tree_folder(name);
+    let under = |output: &str| {
+        if output == "./" {
+            tree.clone()
+        } else {
+            format!("{tree}{output}")
+        }
+    };
+    let files: Vec<FileEntry> = files
+        .into_iter()
+        .map(|file| match file {
+            FileEntry::Mapped(map) => FileEntry::Mapped(
+                map.into_iter()
+                    .map(|(asset, target)| {
+                        let target = match target {
+                            FileTarget::Rename(output) => FileTarget::Rename(under(&output)),
+                            FileTarget::ExtractMap(members) => FileTarget::ExtractMap(
+                                members
+                                    .into_iter()
+                                    .map(|(input, output)| (input, under(&output)))
+                                    .collect(),
+                            ),
+                            other => other,
+                        };
+                        (asset, target)
+                    })
+                    .collect(),
+            ),
+            simple @ FileEntry::Simple(_) => simple,
+        })
+        .collect();
+    let bin = bin
+        .iter()
+        .map(|command| {
+            let command = command.replace("{exe}", executable_suffix(host));
+            member_path(name, &command).map(|path| under(&path))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let outputs =
+        crate::lockfile::flat_files(&crate::lockfile::config_files_to_lock_files(&files, ""));
+    crate::bin_links::check_for(name, &bin, &outputs, is_windows(host))?;
+    Ok((files, bin))
 }
 
 /// The entry for `program`, with its source copied as written.
@@ -188,24 +274,12 @@ fn entry(name: &str, program: &Program, files: Vec<FileEntry>) -> Entry {
         release_regex: program.release_regex.clone(),
         hash_version_file: program.hash_version_file,
         installer: program.installer.clone(),
+        bin: Vec::new(),
     }
 }
 
 /// Refuses an installer program whose host downloads anything but the one file it runs.
-fn one_file_for_an_installer(
-    name: &str,
-    host: &str,
-    program: &Program,
-    files: &[FileEntry],
-) -> Result<()> {
-    if program
-        .installer
-        .as_ref()
-        .and_then(InstallerKey::options)
-        .is_none()
-    {
-        return Ok(());
-    }
+fn one_file_for_an_installer(name: &str, host: &str, files: &[FileEntry]) -> Result<()> {
     let count =
         crate::lockfile::flat_files(&crate::lockfile::config_files_to_lock_files(files, "")).len();
     if count == 1 {
@@ -1266,6 +1340,76 @@ programs:
              member: {member}\n"
         ));
         for_host("tree", &document.programs["tree"], "linux-x86_64")
+    }
+
+    const TOOLCHAIN: &str = r#"
+version: 3
+programs:
+  go:
+    url: https://dl.example/go
+    versionUrl: https://example/VERSION
+    asset: "{url}/go{version}.{target}"
+    member: "go/"
+    bin: ["bin/go{exe}", "bin/gofmt{exe}"]
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{url}/go{version}.windows-amd64.msi"
+      linux-x86_64: linux-amd64.tar.gz
+"#;
+
+    #[test]
+    fn bin_moves_the_tree_into_its_own_folder() {
+        let document = program(TOOLCHAIN);
+        let entry = for_host("go", &document.programs["go"], "linux-x86_64").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [("go/".to_owned(), "libexec/go/".to_owned())]
+        );
+        assert_eq!(entry.bin, ["libexec/go/bin/go", "libexec/go/bin/gofmt"]);
+        assert_eq!(entry.installer, None, "installers run on Windows only");
+    }
+
+    #[test]
+    fn a_windows_installer_takes_the_place_of_the_tree() {
+        let document = program(TOOLCHAIN);
+        let entry = for_host("go", &document.programs["go"], "windows-x86_64").unwrap();
+        assert!(entry.installer.is_some());
+        assert_eq!(entry.bin, Vec::<String>::new());
+        let [FileEntry::Mapped(files)] = entry.files.as_slice() else {
+            panic!("one asset");
+        };
+        assert_eq!(
+            files.values().next(),
+            Some(&FileTarget::Rename(
+                "go{version}.windows-amd64.msi".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_bin_entry_is_checked_for_each_host() {
+        let refused = |bin: &str| {
+            let document = program(&format!(
+                "version: 3\nprograms:\n  t:\n    repository: https://github.com/e/t\n    \
+                 asset: '{{release}}/t.zip'\n    member: 't/'\n    bin: [{bin}]\n    \
+                 targets:\n      windows-x86_64: x\n"
+            ));
+            for_host("t", &document.programs["t"], "windows-x86_64").expect_err(bin)
+        };
+        refused("'../t.exe'");
+        let error = refused("'a/T.exe', 'b/t.exe'");
+        assert!(error.to_string().contains("twice"), "{error}");
+    }
+
+    #[test]
+    fn a_repository_file_has_no_tree_for_bin() {
+        let document = program(
+            "version: 3\nprograms:\n  t:\n    repository: https://github.com/e/t\n    \
+             path: t.sh\n    bin: [t.sh]\n",
+        );
+        let error = for_host("t", &document.programs["t"], "linux-x86_64").expect_err("bin");
+        assert!(error.to_string().contains("'bin'"), "{error}");
     }
 
     #[test]

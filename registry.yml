@@ -57,6 +57,11 @@
 # the top of the vendor folder, which drops the archive's versioned folder; `./` takes the whole
 # archive. In a list, a folder keeps its path. In a map, a folder's destination ends in `/`.
 #
+# `bin` lists the commands inside such a tree, like `bin/go{exe}`. The tree then lands in
+# `libexec/<name>/`, and each command gets a link at the top of the vendor folder, so a folder on
+# PATH holds `go` and not go's `src/` and `lib/`. A Windows host that runs the installer takes no
+# links, since the installer puts the program on PATH itself.
+#
 # A host may name *several assets* instead of one, as a list of `asset`/`member` blocks, for a
 # release that splits what one host needs across an archive and a loose file beside it.
 #

@@ -97,7 +97,14 @@
           "additionalProperties": { "$ref": "#/$defs/target" },
           "minProperties": 1
         },
-        "installer": { "$ref": "#/$defs/installer" }
+        "installer": { "$ref": "#/$defs/installer" },
+        "bin": {
+          "description": "For a program that needs its whole tree, like go or neovim: the files inside it to expose as commands, relative to the tree, like `bin/go{exe}`. The tree then lands in `libexec/<name>/`, and each command gets a link at the top of the dependency folder. Ignored on a Windows host that runs the installer.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
       },
       "oneOf": [
         {

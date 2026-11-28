@@ -91,9 +91,13 @@ pub struct Program {
     /// What to fetch per host, keyed `{os}-{arch}`. Absent for a repository file.
     #[serde(default)]
     pub targets: IndexMap<String, Target>,
-    /// Run the one downloaded file as an installer rather than keep it.
+    /// Run the one downloaded file as an installer rather than keep it, on Windows hosts.
     #[serde(default)]
     pub installer: Option<crate::installer::InstallerKey>,
+    /// For a program that needs its whole tree: the files inside it to expose as commands. The
+    /// tree then lands in `libexec/<name>/` instead of the top of the dependency folder.
+    #[serde(default)]
+    pub bin: Vec<String>,
 }
 
 impl Program {
@@ -115,6 +119,12 @@ impl Program {
             .as_ref()
             .and_then(crate::installer::InstallerKey::options)
             .is_some()
+    }
+
+    /// Whether adding it on `host` runs an installer. Installers run on Windows only.
+    #[must_use]
+    pub fn is_installer_on(&self, host: &str) -> bool {
+        self.is_installer() && host.starts_with("windows")
     }
 
     /// Whether it can be installed on `host`. A repository file is the same everywhere.

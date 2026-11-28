@@ -28,7 +28,7 @@ pub(super) async fn search(query: &str, refresh: bool) -> Result<()> {
                 program.aliases.join(", ")
             };
             let mut tags = Vec::new();
-            if program.is_installer() {
+            if program.is_installer_on(&host) {
                 tags.push("installer".to_owned());
             }
             if !program.covers(&host) {
