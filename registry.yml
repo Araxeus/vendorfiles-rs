@@ -22,6 +22,8 @@
 # Placeholders
 #   {release}  marks a release asset (config syntax, left as-is in the entry that gets written)
 #   {version}  the dotted numbers in the tag: `v10.4.2` gives `10.4.2`, `v2.16.60.2` gives `2.16.60.2`
+#   {version:_} the version's parts joined with `_`, or any joiner: `{version:}` turns `26.06`
+#              into `2606`
 #   {target}   the triple this host maps to under `targets`
 #   {ext}      `.zip` on Windows, `.tar.gz` elsewhere
 #   {exe}      `.exe` on Windows, empty elsewhere

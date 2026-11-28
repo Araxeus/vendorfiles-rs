@@ -642,7 +642,7 @@ Any other destination is a file name, built from these placeholders:
 | `{stem}` | `a.tar` |
 | `{ext}` | `gz` |
 | `{parent}` | `pdf` |
-| `{version}`, `{tag}` | The version, as for [renamed files](#renaming-files) |
+| `{version}`, `{version:<joiner>}`, `{tag}` | The version, as for [release assets](#release-assets) |
 
 `{ext}` is empty for names like `Makefile` and `.bashrc`.
 
@@ -806,6 +806,16 @@ files = [
 
 `{version}` stays as written in your config, so the same paths keep working after
 `vendor update`. `{tag}` works the same way but expands to the whole tag, like `v0.38.0`.
+
+`{version:<joiner>}` splits the version into its parts and joins them again with `<joiner>`.
+A part is a run of letters or digits, so `.`, `-` and `_` all separate parts:
+
+| Version | Template | Result |
+| --- | --- | --- |
+| `10-1-0-26` | `{version:_}` | `10_1_0_26` |
+| `26.06` | `7z{version:}-x64.exe` | `7z2606-x64.exe` |
+| `1.86.0` | `boost_{version:_}.tar.gz` | `boost_1_86_0.tar.gz` |
+| `3.12` | `python{version:}.zip` | `python312.zip` |
 
 #### Extracting files from archives
 
@@ -1078,8 +1088,8 @@ files = 'FPilot.exe'
   file expands to the `url` value.
 - Map a URL to a list to extract members under their own paths, like
   `"files": { "{url}": ["bin/tool.exe"] }`.
-- `{version}` is the version's dotted numbers, as for releases. `{tag}` is the version exactly as found,
-  like `v1.2.3`.
+- `{version}` and `{version:<joiner>}` work as for releases. `{tag}` is the version exactly as
+  found, like `v1.2.3`.
 - `vendor` never sends your GitHub token to these sites.
 
 #### Finding the latest version

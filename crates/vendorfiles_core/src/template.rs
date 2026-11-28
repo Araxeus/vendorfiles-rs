@@ -1,6 +1,6 @@
 //! String templating and URL helpers.
 //!
-//! `{version}`, `{tag}` and `{url}` substitution replaces every occurrence. `{vendorFolder}` and
+//! `{version}`, `{version:<joiner>}`, `{tag}` and `{url}` substitution replaces every occurrence. `{vendorFolder}` and
 //! `{release}/` replace the **first** occurrence only, because the reference implementation uses
 //! JavaScript's `String.prototype.replace` with a string pattern.
 
@@ -26,6 +26,10 @@ static REPO_PATH: LazyLock<Regex> =
 
 static DOTTED_NUMBERS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d+(?:\.\d+)+").expect("valid regex"));
+
+/// `{version}`, or `{version:<joiner>}` with the joiner captured.
+static VERSION_PLACEHOLDER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{version(?::([^{}]*))?\}").expect("valid regex"));
 
 static OWNER_REPO_SHORTHAND: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[^/]+/[^/]+$").expect("valid regex"));
@@ -90,11 +94,31 @@ pub fn version_token(version: &str) -> &str {
         .map_or_else(|| trim_start_matches_str(version, "v"), |m| m.as_str())
 }
 
-/// Replaces every `{version}` placeholder in `path` with the version's numbers, and every `{tag}`
-/// with the version unchanged.
+/// The value substituted for `{version:<joiner>}`: the parts of [`version_token`] joined with
+/// `joiner`.
+///
+/// A part is a run of letters or digits, so `.`, `-` and `_` all separate parts. `26.06` with
+/// an empty joiner gives `2606`, and `1.86.0` with `_` gives `1_86_0`.
+#[must_use]
+pub fn joined_version(version: &str, joiner: &str) -> String {
+    version_token(version)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(joiner)
+}
+
+/// Replaces every `{version}` placeholder in `path` with the version's numbers, every
+/// `{version:<joiner>}` with them rejoined, and every `{tag}` with the version unchanged.
 #[must_use]
 pub fn replace_version(path: &str, version: &str) -> String {
-    path.replace("{version}", version_token(version))
+    VERSION_PLACEHOLDER
+        .replace_all(path, |caps: &regex::Captures<'_>| {
+            caps.get(1).map_or_else(
+                || version_token(version).to_owned(),
+                |joiner| joined_version(version, joiner.as_str()),
+            )
+        })
         .replace("{tag}", version)
 }
 
@@ -122,10 +146,10 @@ pub fn browsable_url(url: &str) -> Cow<'_, str> {
     })
 }
 
-/// Whether `s` holds a `{version}` or `{tag}` placeholder.
+/// Whether `s` holds a `{version}`, `{version:<joiner>}` or `{tag}` placeholder.
 #[must_use]
 pub fn uses_version(s: &str) -> bool {
-    s.contains("{version}") || s.contains("{tag}")
+    VERSION_PLACEHOLDER.is_match(s) || s.contains("{tag}")
 }
 
 /// Replaces the first `{vendorFolder}` placeholder in `path`.
@@ -159,8 +183,8 @@ pub fn basename(path: &str) -> String {
 mod tests {
     use super::{
         basename, browsable_url, expand_url, is_github_url, is_http_url, is_owner_repo_shorthand,
-        owner_and_name_from_repo_url, replace_version, strip_release_prefix, trim_end_matches_str,
-        trim_start_matches_str, uses_version, version_token,
+        joined_version, owner_and_name_from_repo_url, replace_version, strip_release_prefix,
+        trim_end_matches_str, trim_start_matches_str, uses_version, version_token,
     };
 
     #[test]
@@ -238,6 +262,24 @@ mod tests {
         assert_eq!(version_token("curl-8_10_0"), "curl-8_10_0");
         assert_eq!(version_token("vvnightly"), "nightly");
         assert_eq!(version_token(""), "");
+    }
+
+    #[test]
+    fn a_joiner_rejoins_the_version_parts() {
+        assert_eq!(joined_version("10-1-0-26", "_"), "10_1_0_26");
+        assert_eq!(joined_version("26.06", ""), "2606");
+        assert_eq!(joined_version("v1.86.0", "_"), "1_86_0");
+        assert_eq!(joined_version("3.12", ""), "312");
+        assert_eq!(
+            replace_version("7z{version:}-x64.exe", "26.06"),
+            "7z2606-x64.exe"
+        );
+        assert_eq!(
+            replace_version("boost_{version:_}.tar.gz/{version}", "boost-1.86.0"),
+            "boost_1_86_0.tar.gz/1.86.0"
+        );
+        assert!(uses_version("python{version:}.zip"));
+        assert!(!uses_version("{versions}"));
     }
 
     #[test]

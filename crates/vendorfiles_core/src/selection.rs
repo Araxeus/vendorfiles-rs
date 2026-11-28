@@ -8,7 +8,7 @@ use globset::{GlobBuilder, GlobMatcher};
 
 use crate::error::VendorError;
 use crate::model::{FileEntry, FileTarget};
-use crate::template::{is_release_path, replace_version, version_token};
+use crate::template::{is_release_path, joined_version, replace_version, version_token};
 
 /// Characters that end the literal part of a glob pattern.
 const GLOB_META: &[char] = &['*', '?', '[', '{', '\\'];
@@ -381,6 +381,9 @@ fn expand(template: &str, source: &str, relative: &str, version: &str) -> Result
                 format!("selects '{source}', which has no parent folder for {{parent}}")
             })?),
             "version" => out.push_str(version_token(version)),
+            joined if joined.starts_with("version:") => {
+                out.push_str(&joined_version(version, &joined["version:".len()..]));
+            }
             "tag" => out.push_str(version),
             other => return Err(format!("uses an unknown placeholder {{{other}}}")),
         }
@@ -488,6 +491,16 @@ mod tests {
         assert_eq!(
             render("{version}/{tag}/{filename}").unwrap(),
             "1.2.3/v1.2.3/a.tar.gz"
+        );
+    }
+
+    #[test]
+    #[expect(clippy::literal_string_with_formatting_args, reason = "placeholders")]
+    fn a_version_joiner_rejoins_the_parts() {
+        let selection = glob("skills/**", "{version:_}-{version:}");
+        assert_eq!(
+            selection.output("skills/a.md", "v1.2.3").unwrap(),
+            "1_2_3-123"
         );
     }
 

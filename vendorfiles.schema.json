@@ -251,7 +251,7 @@
       "oneOf": [
         {
           "type": "string",
-          "description": "Simple file path to download. A path ending in / takes a whole folder, and a path with * or ? is a glob pattern. Use {release}/ prefix for release assets, {version} for semver substitution and {tag} for the whole version. For a url dependency, a name that is not a URL is where its url download is saved",
+          "description": "Simple file path to download. A path ending in / takes a whole folder, and a path with * or ? is a glob pattern. Use {release}/ prefix for release assets, {version} for the version's numbers, {version:_} for them joined with _ (any joiner, or none) and {tag} for the whole version. For a url dependency, a name that is not a URL is where its url download is saved",
           "examples": [
             "dist/coloris.min.js",
             "LICENSE",
@@ -263,7 +263,7 @@
         },
         {
           "type": "object",
-          "description": "File mapping object for renaming, moving, or extracting from archives. A folder or pattern maps to a destination: one ending in / keeps paths below the folder, anything else is a file name built from {path}, {filename}, {stem}, {ext}, {parent}, {version} and {tag}. A url dependency maps each URL, often {url}, to its output name. With no URL key, it maps members of the url download to names",
+          "description": "File mapping object for renaming, moving, or extracting from archives. A folder or pattern maps to a destination: one ending in / keeps paths below the folder, anything else is a file name built from {path}, {filename}, {stem}, {ext}, {parent}, {version}, {version:<joiner>} and {tag}. A url dependency maps each URL, often {url}, to its output name. With no URL key, it maps members of the url download to names",
           "additionalProperties": {
             "$ref": "#/definitions/fileMapping"
           },
