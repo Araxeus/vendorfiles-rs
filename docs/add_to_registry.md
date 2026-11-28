@@ -114,6 +114,16 @@ A few rules apply to `member` and `as`:
 - A single `member` lands under its file name, so the archive's versioned folder doesn't end up in
   your vendor folder.
 
+An `asset` with `*` or `?` is a glob pattern, for projects whose asset names don't follow the tag.
+It must match exactly one asset, and CI fails when it matches several. A pattern with no `member`
+needs `as`, because the name it matches changes every release:
+
+```yaml
+      windows-x86_64:
+        asset: "{release}/WinMerge-*-x64-PerUser-Setup.exe"
+        as: WinMerge-Setup.exe
+```
+
 ## Repositories with more than one kind of release
 
 Some repositories publish releases for several programs. `releaseRegex` says which tags belong to

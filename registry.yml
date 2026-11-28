@@ -21,7 +21,9 @@
 #
 # Placeholders
 #   {release}  marks a release asset (config syntax, left as-is in the entry that gets written)
-#   {version}  the semver core of the tag: `v10.4.2` and `10.4.2` both give `10.4.2`
+#   {version}  the dotted numbers in the tag: `v10.4.2` gives `10.4.2`, `v2.16.60.2` gives `2.16.60.2`
+#   {version:_} the version's parts joined with `_`, or any joiner: `{version:}` turns `26.06`
+#              into `2606`
 #   {target}   the triple this host maps to under `targets`
 #   {ext}      `.zip` on Windows, `.tar.gz` elsewhere
 #   {exe}      `.exe` on Windows, empty elsewhere
@@ -30,6 +32,9 @@
 #
 # Host keys are `{os}-{arch}` exactly as Rust reports them: windows-x86_64, macos-aarch64,
 # linux-x86_64, linux-aarch64, and so on. List only the hosts upstream actually publishes.
+#
+# An asset name with `*` or `?` is a glob pattern that must match exactly one asset in the release.
+# A pattern with no `member` needs `as`, since the name it matches changes every release.
 #
 # `member` is the path inside the asset. Leave it out when the asset *is* the executable, and add
 # `as` when its name is not the command you would type (`ox-macos` -> `ox`). An asset that names a

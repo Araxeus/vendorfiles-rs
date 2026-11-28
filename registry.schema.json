@@ -80,7 +80,7 @@
           "type": "boolean"
         },
         "asset": {
-          "description": "The asset pattern shared by every target, for projects naming assets by target triple. Placeholders: {release}, {version}, {tag}, {url}, {target}, {ext}, {exe}. A `url` program's asset is a URL, usually `{url}` or `{url}/...`.",
+          "description": "The asset pattern shared by every target, for projects naming assets by target triple. Placeholders: {release}, {version}, {version:<joiner>}, {tag}, {url}, {target}, {ext}, {exe}. `*` and `?` make it a glob pattern that must match exactly one asset. A `url` program's asset is a URL, usually `{url}` or `{url}/...`.",
           "type": "string",
           "minLength": 1
         },
@@ -200,7 +200,7 @@
       "additionalProperties": false,
       "properties": {
         "asset": {
-          "description": "The release asset, including the `{release}/` prefix. A `url` program names a URL instead, usually `{url}` or `{url}/...`.",
+          "description": "The release asset, including the `{release}/` prefix. `*` and `?` make it a glob pattern that must match exactly one asset, and a pattern with no `member` needs `as`. A `url` program names a URL instead, usually `{url}` or `{url}/...`.",
           "type": "string",
           "minLength": 1
         },

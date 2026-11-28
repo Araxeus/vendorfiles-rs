@@ -893,6 +893,9 @@ async fn download_release_file(
     progress: &progress::Dependency,
 ) -> Result<Vec<PathBuf>> {
     let asset = strip_release_prefix(&replace_version(&spec.input, version));
+    let asset = github
+        .release_asset_name(repo, &asset, version, dependency.release_regex.as_deref())
+        .await?;
 
     let Some(pairs) = spec.output.extraction_pairs() else {
         let FileTarget::Rename(output) = &spec.output else {

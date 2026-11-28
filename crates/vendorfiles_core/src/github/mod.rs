@@ -19,6 +19,7 @@ use serde::Deserialize;
 use crate::error::{Result, VendorError, is_rate_limited, one_line};
 use crate::model::Repository;
 use crate::remote_zip::HttpRangeSource;
+use crate::selection::{is_asset_pattern, pick_asset};
 use crate::ui;
 
 pub use auth::Token;
@@ -454,7 +455,7 @@ impl GitHubClient {
         version: &str,
         release_regex: Option<&str>,
     ) -> Result<reqwest::Response> {
-        let (url, release_url, _) = self
+        let (url, release_url, _, _) = self
             .release_asset_url(repo, asset_name, version, release_regex)
             .await?;
         self.send(url, "application/octet-stream")
@@ -467,7 +468,34 @@ impl GitHubClient {
             })
     }
 
-    /// The API endpoint for a named release asset, the release it belongs to, and its size.
+    /// The name of the release asset `asset_name` refers to: itself, or the one asset a pattern
+    /// matches.
+    ///
+    /// A plain name costs nothing. A pattern costs the release lookup that the download reuses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VendorError::ReleaseNotFound`], [`VendorError::ReleaseAssetsMissing`],
+    /// [`VendorError::ReleaseAssetNotFound`] or [`VendorError::ReleaseAssetAmbiguous`] for a
+    /// pattern that does not match exactly one asset.
+    pub async fn release_asset_name(
+        &self,
+        repo: &Repository,
+        asset_name: &str,
+        version: &str,
+        release_regex: Option<&str>,
+    ) -> Result<String> {
+        if !is_asset_pattern(asset_name) {
+            return Ok(asset_name.to_owned());
+        }
+        let (_, _, _, name) = self
+            .release_asset_url(repo, asset_name, version, release_regex)
+            .await?;
+        Ok(name)
+    }
+
+    /// The API endpoint for a named release asset, the release it belongs to, its size and its
+    /// name.
     ///
     /// Split out so a download and a range probe agree on which asset they mean, and so
     /// resolving one costs a single release lookup either way. The size comes from the release
@@ -476,15 +504,16 @@ impl GitHubClient {
     ///
     /// # Errors
     ///
-    /// Returns [`VendorError::ReleaseNotFound`], [`VendorError::ReleaseAssetsMissing`] or
-    /// [`VendorError::ReleaseAssetNotFound`] depending on which step fails.
+    /// Returns [`VendorError::ReleaseNotFound`], [`VendorError::ReleaseAssetsMissing`],
+    /// [`VendorError::ReleaseAssetNotFound`] or [`VendorError::ReleaseAssetAmbiguous`] depending
+    /// on which step fails.
     async fn release_asset_url(
         &self,
         repo: &Repository,
         asset_name: &str,
         version: &str,
         release_regex: Option<&str>,
-    ) -> Result<(String, String, u64)> {
+    ) -> Result<(String, String, u64, String)> {
         let release = if version.is_empty() {
             self.latest_release(repo, release_regex).await?
         } else {
@@ -502,14 +531,22 @@ impl GitHubClient {
             return Err(VendorError::ReleaseAssetsMissing(release_url));
         }
 
-        let asset = release
-            .assets
-            .iter()
-            .find(|asset| asset.name == asset_name)
-            .ok_or_else(|| VendorError::ReleaseAssetNotFound {
-                asset: asset_name.to_owned(),
-                url: release_url.clone(),
-            })?;
+        let asset = pick_asset(&release.assets, |asset| asset.name.as_str(), asset_name).map_err(
+            |matches| {
+                if matches.is_empty() {
+                    VendorError::ReleaseAssetNotFound {
+                        asset: asset_name.to_owned(),
+                        url: release_url.clone(),
+                    }
+                } else {
+                    VendorError::ReleaseAssetAmbiguous {
+                        asset: asset_name.to_owned(),
+                        matches: matches.into_iter().map(str::to_owned).collect(),
+                        url: release_url.clone(),
+                    }
+                }
+            },
+        )?;
         let asset_id = asset.id;
 
         Ok((
@@ -519,6 +556,7 @@ impl GitHubClient {
             ),
             release_url,
             u64::try_from(asset.size).unwrap_or(0),
+            asset.name.clone(),
         ))
     }
 
@@ -555,7 +593,7 @@ impl GitHubClient {
         release_regex: Option<&str>,
         minimum: u64,
     ) -> Result<Option<AssetRange>> {
-        let (url, _, recorded) = self
+        let (url, _, recorded, _) = self
             .release_asset_url(repo, asset_name, version, release_regex)
             .await?;
         if recorded < minimum {

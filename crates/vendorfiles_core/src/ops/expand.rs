@@ -337,6 +337,9 @@ async fn fetch(
     let (response, name) = match &dependency.source {
         Source::GitHub(repo) => {
             let asset = strip_release_prefix(&replace_version(&archive.key, version));
+            let asset = github
+                .release_asset_name(repo, &asset, version, dependency.release_regex.as_deref())
+                .await?;
             let response = github
                 .download_release_asset(repo, &asset, version, dependency.release_regex.as_deref())
                 .await?;
