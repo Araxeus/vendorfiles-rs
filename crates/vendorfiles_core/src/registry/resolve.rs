@@ -253,7 +253,7 @@ fn into_tree(
         .collect::<Result<Vec<_>>>()?;
     let outputs =
         crate::lockfile::flat_files(&crate::lockfile::config_files_to_lock_files(&files, ""));
-    crate::bin_links::check_for(name, &bin, &outputs, is_windows(host))?;
+    crate::bin_links::check_for(name, &bin, &outputs, crate::bin_links::Os::of_host(host))?;
     Ok((files, bin))
 }
 

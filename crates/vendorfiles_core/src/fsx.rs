@@ -404,6 +404,21 @@ fn staged_beside(target: &Path) -> PathBuf {
     directory.join(format!(".{name}.vendorfiles-update"))
 }
 
+/// Removes a symlink at `path`, so a write replaces the link rather than the file it points to.
+///
+/// A `bin` link of one dependency can share a name with another's download in one folder, and
+/// writing through it would overwrite the first dependency's program.
+///
+/// # Errors
+///
+/// Returns the I/O error of a link that cannot be removed.
+pub async fn replace_symlink(path: &Path) -> std::io::Result<()> {
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(meta) if meta.file_type().is_symlink() => tokio::fs::remove_file(path).await,
+        _ => Ok(()),
+    }
+}
+
 async fn write_bytes(
     response: reqwest::Response,
     save_path: &Path,
@@ -416,6 +431,7 @@ async fn write_bytes(
     // simply ended.
     let promised = response.content_length();
     let mut written = 0_u64;
+    replace_symlink(save_path).await?;
     let mut file = tokio::fs::File::create(save_path).await?;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {

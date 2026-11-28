@@ -389,10 +389,11 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub files: Option<Vec<FileEntry>>,
-    /// Installed files to expose as commands at the top of the dependency folder.
+    /// Installed files to expose as commands at the top of the dependency folder. One path or a
+    /// list; anything else is an error, since a dropped `bin` would leave the commands unlinked.
     #[serde(
         default,
-        deserialize_with = "de_lenient",
+        deserialize_with = "de_one_or_many",
         skip_serializing_if = "Option::is_none"
     )]
     pub bin: Option<Vec<String>>,
@@ -440,6 +441,13 @@ pub struct RawDependency {
         skip_serializing_if = "Option::is_none"
     )]
     pub alias: Option<Aliases>,
+}
+
+/// One string or a list of them, as a list.
+fn de_one_or_many<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<String>>, D::Error> {
+    Ok(Option::<Aliases>::deserialize(deserializer)?.map(|many| many.0))
 }
 
 /// A dependency's other names, written as one string or a list of them.
@@ -1238,6 +1246,19 @@ mod tests {
         assert!(d.repository.is_none());
         assert!(d.files.is_none());
         assert!(d.locked.is_none());
+    }
+
+    #[test]
+    fn bin_takes_one_path_or_a_list_and_refuses_anything_else() {
+        let parse = |bin: &str| {
+            serde_json::from_str::<RawDependency>(&format!(r#"{{"bin":{bin}}}"#)).map(|d| d.bin)
+        };
+        assert_eq!(parse(r#""a/go""#).unwrap(), Some(vec!["a/go".to_owned()]));
+        assert_eq!(
+            parse(r#"["a/go","a/gofmt"]"#).unwrap(),
+            Some(vec!["a/go".to_owned(), "a/gofmt".to_owned()])
+        );
+        assert!(parse("true").is_err());
     }
 
     #[test]

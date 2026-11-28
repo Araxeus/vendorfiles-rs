@@ -1458,8 +1458,11 @@ bin = ['libexec/go/bin/go', 'libexec/go/bin/gofmt']
 - On Linux and macOS, each link is a relative symlink, so the program still finds the rest of its
   folder.
 - On Windows, each command gets a `.cmd` launcher for cmd and PowerShell, and an extensionless
-  `sh` launcher for Git Bash, as npm writes them. `go.exe` runs as `go`.
-- A link never replaces a file that is already there, and a dependency that sets `installer` has
+  `sh` launcher for Git Bash, as npm writes them. `go.exe` runs as `go`, and each entry must be an
+  `.exe`. A program that starts another one directly, without a shell, finds only `.exe` files, so
+  it won't find a launcher. Point such a program at the `.exe` itself.
+- `bin` takes one path or a list. A link never replaces a file vendor didn't write, and that's
+  checked before anything is removed or downloaded. A dependency that sets `installer` has
   nothing to link.
 - `vendor update` and `vendor uninstall` remove the links with the files. A missing link counts as
   a missing file, so the next `vendor sync` puts it back.

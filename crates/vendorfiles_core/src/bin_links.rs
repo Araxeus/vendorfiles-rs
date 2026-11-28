@@ -87,6 +87,13 @@ fn command_name(target: &str, windows: bool) -> &str {
 
 /// A `bin` entry as a relative path with `/` separators, or why it cannot be one.
 fn normalized(entry: &str) -> std::result::Result<String, String> {
+    // Written as is, so a placeholder or `~` would name a file that never exists.
+    if entry.contains(['{', '}']) {
+        return Err("holds a placeholder, which bin does not fill in".to_owned());
+    }
+    if entry.starts_with('~') {
+        return Err("is not a relative path".to_owned());
+    }
     let mut segments = Vec::new();
     for segment in entry.split(['/', '\\']) {
         match segment {
@@ -114,7 +121,39 @@ fn normalized(entry: &str) -> std::result::Result<String, String> {
 ///
 /// Returns [`VendorError::InvalidBin`] naming the first entry that cannot be exposed.
 pub fn check(name: &str, bin: &[String], outputs: &[String]) -> Result<()> {
-    check_for(name, bin, outputs, cfg!(windows))
+    let os = if cfg!(windows) {
+        Os::Windows
+    } else if cfg!(target_os = "macos") {
+        Os::MacOs
+    } else {
+        Os::Other
+    };
+    check_for(name, bin, outputs, os)
+}
+
+/// The rules a host's file system and launchers bring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    /// Launchers instead of links, and names that match in any case.
+    Windows,
+    /// Links, and names that match in any case on the default file system.
+    MacOs,
+    /// Links, and names that match exactly.
+    Other,
+}
+
+impl Os {
+    /// The rules for a registry host key, like `macos-aarch64`.
+    #[must_use]
+    pub fn of_host(host: &str) -> Self {
+        if host.starts_with("windows") {
+            Self::Windows
+        } else if host.starts_with("macos") {
+            Self::MacOs
+        } else {
+            Self::Other
+        }
+    }
 }
 
 /// [`check`] as it runs on Windows, or elsewhere.
@@ -122,17 +161,18 @@ pub fn check(name: &str, bin: &[String], outputs: &[String]) -> Result<()> {
 /// # Errors
 ///
 /// As [`check`].
-pub fn check_for(name: &str, bin: &[String], outputs: &[String], windows: bool) -> Result<()> {
+pub fn check_for(name: &str, bin: &[String], outputs: &[String], os: Os) -> Result<()> {
+    let windows = os == Os::Windows;
     let invalid = |entry: &str, reason: String| VendorError::InvalidBin {
         name: name.to_owned(),
         entry: entry.to_owned(),
         reason,
     };
     let same = |a: &str, b: &str| {
-        if windows {
-            a.eq_ignore_ascii_case(b)
-        } else {
+        if os == Os::Other {
             a == b
+        } else {
+            a.eq_ignore_ascii_case(b)
         }
     };
     let outputs: Vec<String> = outputs
@@ -142,6 +182,17 @@ pub fn check_for(name: &str, bin: &[String], outputs: &[String], windows: bool) 
     let mut taken: Vec<String> = Vec::new();
     for entry in bin {
         let target = normalized(entry).map_err(|reason| invalid(entry, reason))?;
+        // A launcher runs an .exe directly. A .cmd or a script would need its own launcher.
+        if windows
+            && !Path::new(&target)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        {
+            return Err(invalid(
+                entry,
+                "is not an .exe, which Windows needs".to_owned(),
+            ));
+        }
         if !target.contains('/') {
             return Err(invalid(
                 entry,
@@ -184,7 +235,13 @@ pub fn check_for(name: &str, bin: &[String], outputs: &[String], windows: bool) 
 /// device names like `con` whatever their extension.
 fn reserved(file: &str) -> Option<String> {
     let lower = file.to_ascii_lowercase();
-    if lower == crate::lockfile::LOCKFILE_NAME || lower.starts_with("vendor.") {
+    // A dot covers the staged copies vendor writes before renaming, like
+    // `.vendor-lock.json.vendorfiles-update`.
+    if lower.starts_with('.')
+        || lower == crate::lockfile::LOCKFILE_NAME
+        || lower.starts_with("vendor.")
+        || crate::config::CONFIG_FILE_NAMES.contains(&lower.as_str())
+    {
         return Some(format!(
             "would be linked as '{file}', which vendor writes itself"
         ));
@@ -220,22 +277,29 @@ pub fn is_in_place(folder: &Path, link: &Link) -> bool {
 }
 
 /// Whether the file at `path` is exactly what `link` would write.
-fn is_ours(path: &Path, link: &Link) -> bool {
+#[must_use]
+pub fn is_ours(path: &Path, link: &Link) -> bool {
     launcher(link).map_or_else(
         || std::fs::read_link(path).is_ok_and(|to| to == Path::new(&link.target)),
         |content| std::fs::read_to_string(path).is_ok_and(|held| held == content),
     )
 }
 
-/// Checks, before anything downloads, that no other file holds a link's name.
+/// Checks, before anything is removed or downloaded, that no other file holds a link's name.
+///
+/// A path is free when nothing is there, when it already holds this link, or when `owned`, the
+/// links the previous install recorded, says this dependency wrote it.
 ///
 /// # Errors
 ///
 /// Returns [`VendorError::BinInTheWay`] naming the first file in the way.
-pub async fn check_free(name: &str, folder: &Path, links: &[Link]) -> Result<()> {
+pub async fn check_free(name: &str, folder: &Path, links: &[Link], owned: &[String]) -> Result<()> {
     for link in links {
         let path = anchor(folder, &link.file);
-        if tokio::fs::symlink_metadata(&path).await.is_ok() && !is_ours(&path, link) {
+        if tokio::fs::symlink_metadata(&path).await.is_ok()
+            && !owned.contains(&link.file)
+            && !is_ours(&path, link)
+        {
             return Err(VendorError::BinInTheWay {
                 name: name.to_owned(),
                 path,
@@ -304,7 +368,7 @@ async fn write(path: &Path, link: &Link) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kind, Link, check_for, create, is_in_place, launcher, links, links_for};
+    use super::{Kind, Link, Os, check_for, create, is_in_place, launcher, links, links_for};
 
     fn bin(entries: &[&str]) -> Vec<String> {
         entries.iter().map(|&entry| entry.to_owned()).collect()
@@ -343,7 +407,7 @@ mod tests {
             ("libexec/go/bin/", "names a folder"),
             ("go", "already at the top"),
         ] {
-            let error = check_for("go", &bin(&[entry]), &[], false).expect_err(entry);
+            let error = check_for("go", &bin(&[entry]), &[], Os::Other).expect_err(entry);
             assert!(error.to_string().contains(reason), "{entry}: {error}");
         }
     }
@@ -354,7 +418,7 @@ mod tests {
             "go",
             &bin(&["libexec/go/bin/go"]),
             &["go".to_owned()],
-            false,
+            Os::Other,
         )
         .expect_err("a file holds that name");
         assert!(
@@ -368,27 +432,39 @@ mod tests {
             ("a/nul", "Windows reserves"),
             ("a/COM1.exe", "Windows reserves"),
             ("libexec/x/libexec", "a folder's name"),
+            (
+                "a/.vendor-lock.json.vendorfiles-update",
+                "vendor writes itself",
+            ),
+            ("a/package.json", "vendor writes itself"),
+            ("a/{version}/tool", "placeholder"),
+            ("~/bin/tool", "not a relative path"),
         ] {
-            let error = check_for("x", &bin(&[entry]), &[], false).expect_err(entry);
+            let error = check_for("x", &bin(&[entry]), &[], Os::Other).expect_err(entry);
             assert!(error.to_string().contains(reason), "{entry}: {error}");
         }
         let error = check_for(
             "x",
             &bin(&["t/bin/tool"]),
             &["tool/readme".to_owned()],
-            false,
+            Os::Other,
         )
         .expect_err("a folder holds that name");
         assert!(error.to_string().contains("a folder"), "{error}");
 
-        let error = check_for("x", &bin(&["a/tool", "b/tool"]), &[], false).expect_err("twice");
+        let error = check_for("x", &bin(&["a/tool", "b/tool"]), &[], Os::Other).expect_err("twice");
         assert!(error.to_string().contains("twice"), "{error}");
 
         // Windows names match in any case, and `.exe` drops out.
-        let error = check_for("x", &bin(&["a/Tool.exe", "b/tool.exe"]), &[], true)
+        let error = check_for("x", &bin(&["a/Tool.exe", "b/tool.exe"]), &[], Os::Windows)
             .expect_err("one name on Windows");
         assert!(error.to_string().contains("twice"), "{error}");
-        check_for("x", &bin(&["a/Tool", "b/tool"]), &[], false).expect("two names on Unix");
+        check_for("x", &bin(&["a/Tool", "b/tool"]), &[], Os::Other).expect("two names on Unix");
+        // macOS file systems match names in any case by default.
+        check_for("x", &bin(&["a/Tool", "b/tool"]), &[], Os::MacOs).expect_err("one name");
+        // A launcher runs an .exe; npm's npm.cmd would need a launcher of its own.
+        let error = check_for("x", &bin(&["node/npm.cmd"]), &[], Os::Windows).expect_err("cmd");
+        assert!(error.to_string().contains(".exe"), "{error}");
     }
 
     #[tokio::test]

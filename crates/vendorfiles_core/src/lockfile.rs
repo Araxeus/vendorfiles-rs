@@ -393,8 +393,10 @@ async fn read_existing(path: &Path) -> Result<Lockfile> {
     }
 }
 
-/// Marks `name`'s entry in the lockfile at `path` as pending, and adds `incoming` to its files and
-/// `links` to its `bin`.
+/// Marks `name`'s entry in the lockfile at `path` as pending and adds `incoming` to its files.
+///
+/// Links are left out: one is recorded only once it has been written, so a link that was refused
+/// never names someone else's file as this entry's.
 /// A missing file or entry leaves nothing to mark.
 ///
 /// The entry keeps its place, which keeps the lockfile's order stable across reinstalls.
@@ -403,22 +405,12 @@ async fn read_existing(path: &Path) -> Result<Lockfile> {
 ///
 /// Returns [`VendorError::UnreadableLockfile`] for a lockfile that cannot be parsed, or
 /// [`VendorError::SerializeConfig`] or [`VendorError::WriteFile`].
-pub async fn mark_pending(
-    name: &str,
-    path: &Path,
-    incoming: LockFiles,
-    links: &[String],
-) -> Result<()> {
+pub async fn mark_pending(name: &str, path: &Path, incoming: LockFiles) -> Result<()> {
     let mut lockfile = read_existing(path).await?;
     let Some(entry) = lockfile.get_mut(name) else {
         return Ok(());
     };
     entry.pending = true;
-    for link in links {
-        if !entry.bin.contains(link) {
-            entry.bin.push(link.clone());
-        }
-    }
     for (file, target) in incoming {
         match entry.files.get_mut(&file) {
             None => {
@@ -559,11 +551,7 @@ mod tests {
             error.to_string().contains("delete it to reinstall"),
             "{error}"
         );
-        assert!(
-            mark_pending("a", &path, LockFiles::new(), &[])
-                .await
-                .is_err()
-        );
+        assert!(mark_pending("a", &path, LockFiles::new()).await.is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
     }
 
@@ -583,9 +571,7 @@ mod tests {
             pending: false,
         };
 
-        mark_pending("a", &path, LockFiles::new(), &[])
-            .await
-            .unwrap();
+        mark_pending("a", &path, LockFiles::new()).await.unwrap();
         write_lockfile("a", entry, &path).await.unwrap();
 
         assert!(read_lockfile(&path).await.unwrap().contains_key("a"));
@@ -614,7 +600,7 @@ mod tests {
         );
         std::fs::write(&path, to_json(&lockfile).unwrap()).unwrap();
 
-        mark_pending("a", &path, config_files_to_lock_files(&files, "2"), &[])
+        mark_pending("a", &path, config_files_to_lock_files(&files, "2"))
             .await
             .unwrap();
 
