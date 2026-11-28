@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">
-  <rect x="4" y="4" width="412" height="252" rx="16" fill="#0e0e0e" stroke="#2f2f2f" stroke-width="2"/>
-  <circle cx="30" cy="28" r="6" fill="#ff5f57"/><circle cx="50" cy="28" r="6" fill="#febc2e"/><circle cx="70" cy="28" r="6" fill="#28c840"/>
-  <text x="28" y="84" fill="#8aa7f7">$ <tspan fill="#ffffff">vendor add rg fd</tspan></text>
-  <text x="28" y="110" fill="#828282"># ripgrep and fd, by name</text>
-  <text x="28" y="152" fill="#8aa7f7">$ <tspan fill="#ffffff">vendor sync</tspan></text>
-  <text x="28" y="178" fill="#828282"># every file your config lists</text>
-  <text x="28" y="220" fill="#8aa7f7">$ <tspan fill="#ffffff">vendor update</tspan><tspan fill="#ffffff" opacity="0.8"> ▍</tspan></text>
-</svg>

@@ -20,7 +20,7 @@ export default defineConfig({
     starlight({
       title: 'vendorfiles',
       description:
-        'Pull files from GitHub repositories and keep them up to date. Like a package manager, but for single files.',
+        'Get the files and tools you need from GitHub, releases and any URL, and keep them pinned and current.',
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/Araxeus/vendorfiles-rs' },
       ],
@@ -31,7 +31,7 @@ export default defineConfig({
       head: [{ tag: 'meta', attrs: { name: 'theme-color', content: '#8aa7f7' } }],
 
       customCss: ['./src/styles/custom.css'],
-      components: { Footer: './src/components/Footer.astro' },
+      components: { Footer: './src/components/Footer.astro', Hero: './src/components/Hero.astro' },
       plugins: [starlightThemeNext(), starlightLinksValidator()],
     }),
   ],

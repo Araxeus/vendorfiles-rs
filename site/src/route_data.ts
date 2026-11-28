@@ -2,7 +2,7 @@ import { defineRouteMiddleware } from '@astrojs/starlight/route-data';
 import { renderCard } from 'astro-cards/runtime';
 
 // The home page's title is the site name, which the card already shows.
-const HOME_TITLE = 'Like a package manager, but for single files.';
+const HOME_TITLE = 'Get the files and tools you need. Keep them pinned and current.';
 
 // Adds a per-page preview image to the Open Graph and Twitter tags Starlight writes.
 export const onRequest = defineRouteMiddleware(async (context) => {
