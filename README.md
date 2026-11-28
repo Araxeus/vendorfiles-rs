@@ -746,8 +746,8 @@ release. You can also [track commits](#tracking-commits-instead-of-releases) ins
 #### Release assets
 
 A file that starts with `{release}/` comes from the release's assets instead of the repository.
-`{version}` in a path expands to the version number in the release tag. That's the first `x.y.z`
-in the tag, or the tag with its leading `v`s removed:
+`{version}` in a path expands to the version number in the release tag. That's the first dotted
+run of numbers in the tag, like `1.2.3` or `2.16.60.2`, or the tag with its leading `v`s removed:
 
 <!-- formats -->
 <details open>
@@ -1078,7 +1078,7 @@ files = 'FPilot.exe'
   file expands to the `url` value.
 - Map a URL to a list to extract members under their own paths, like
   `"files": { "{url}": ["bin/tool.exe"] }`.
-- `{version}` is the version's `x.y.z`, as for releases. `{tag}` is the version exactly as found,
+- `{version}` is the version's dotted numbers, as for releases. `{tag}` is the version exactly as found,
   like `v1.2.3`.
 - `vendor` never sends your GitHub token to these sites.
 
@@ -1242,8 +1242,6 @@ versionJsonPointer = 'versions'
 </details>
 <!-- /formats -->
 
-- NuGet versions can have four parts, like `18.1.3.2`, so the example uses `{tag}`. `{version}`
-  keeps only `18.1.3`.
 - `data/0/version` reads `data[0].version`. A leading `/`, as the standard writes it, is optional.
   An empty pointer, `""`, is the whole answer.
 - A string or number there is the version, or what `versionRegex` searches.

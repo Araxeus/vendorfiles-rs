@@ -24,8 +24,8 @@ static GITHUB_URL: LazyLock<Regex> = LazyLock::new(|| {
 static REPO_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"github\.com/([^/]+)/([^/]+)").expect("valid regex"));
 
-static SEMVER_CORE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\d+\.\d+\.\d+").expect("valid regex"));
+static DOTTED_NUMBERS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d+(?:\.\d+)+").expect("valid regex"));
 
 static OWNER_REPO_SHORTHAND: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[^/]+/[^/]+$").expect("valid regex"));
@@ -81,16 +81,16 @@ pub fn trim_end_matches_str<'a>(mut s: &'a str, suffix: &str) -> &'a str {
     s
 }
 
-/// The value substituted for `{version}`: the first `x.y.z` found in the tag, or the tag with
-/// leading `v`s stripped.
+/// The value substituted for `{version}`: the first dotted run of numbers in the tag, like
+/// `2.16.60.2` or `26.06`, or the tag with leading `v`s stripped.
 #[must_use]
 pub fn version_token(version: &str) -> &str {
-    SEMVER_CORE
+    DOTTED_NUMBERS
         .find(version)
         .map_or_else(|| trim_start_matches_str(version, "v"), |m| m.as_str())
 }
 
-/// Replaces every `{version}` placeholder in `path` with the version's `x.y.z`, and every `{tag}`
+/// Replaces every `{version}` placeholder in `path` with the version's numbers, and every `{tag}`
 /// with the version unchanged.
 #[must_use]
 pub fn replace_version(path: &str, version: &str) -> String {
@@ -171,7 +171,7 @@ mod tests {
         );
         assert_eq!(
             replace_version("{version}-{tag}", "v1.2.3.4"),
-            "1.2.3-v1.2.3.4"
+            "1.2.3.4-v1.2.3.4"
         );
     }
 
@@ -228,10 +228,14 @@ mod tests {
     }
 
     #[test]
-    fn version_token_prefers_the_semver_core() {
+    fn version_token_takes_the_first_dotted_run_of_numbers() {
         assert_eq!(version_token("v1.2.3"), "1.2.3");
         assert_eq!(version_token("1.2.3-alpha.1"), "1.2.3");
         assert_eq!(version_token("release-2.0.0-rc"), "2.0.0");
+        assert_eq!(version_token("v2.16.60.2"), "2.16.60.2");
+        assert_eq!(version_token("26.06"), "26.06");
+        assert_eq!(version_token("jq-1.7"), "1.7");
+        assert_eq!(version_token("curl-8_10_0"), "curl-8_10_0");
         assert_eq!(version_token("vvnightly"), "nightly");
         assert_eq!(version_token(""), "");
     }
