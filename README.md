@@ -1842,7 +1842,6 @@ list is out of date.
 | [btop](https://github.com/aristocratos/btop) |  | Resource monitor for CPU, memory, disks, network and processes like htop | Linux |
 | [buf](https://github.com/bufbuild/buf) |  | Protobuf toolkit to lint, format, check breaking changes and generate | All |
 | [carapace](https://github.com/carapace-sh/carapace-bin) | `carapace-bin` | Shell completion for hundreds of commands in bash, zsh, fish and more | All |
-| [cloudflared](https://github.com/cloudflare/cloudflared) |  | Cloudflare Tunnel client that exposes local servers without open ports | Windows x64, macOS, Linux |
 | [cmake](https://github.com/Kitware/CMake) |  | C and C++ build system generator for make, ninja, MSBuild and Xcode | All |
 | [copyq](https://github.com/hluk/CopyQ) |  | Clipboard manager with searchable, editable history and scripting | Windows x64 (installer) |
 | [coreutils](https://github.com/uutils/coreutils) | `uutils` | Rust rewrite of GNU coreutils: ls, cp, mv, cat, sort and more | Windows, Linux |
@@ -1904,6 +1903,7 @@ list is out of date.
 | [hurl](https://github.com/Orange-OpenSource/hurl) |  | Run and test HTTP requests from plain text files, for APIs and CI | Windows x64, macOS, Linux |
 | [hyperfine](https://github.com/sharkdp/hyperfine) |  | Command-line benchmarking tool that times and compares commands | All |
 | [imageglass](https://github.com/d2phap/ImageGlass) |  | Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC | Windows (installer) |
+| [imagemagick](https://github.com/ImageMagick/ImageMagick) | `magick` | Create, edit, convert and resize images in 200+ formats with magick | Windows (installer) |
 | [jj](https://github.com/jj-vcs/jj) | `jujutsu` | Jujutsu, a Git-compatible version control system with undo and no index | All |
 | [jq](https://github.com/jqlang/jq) |  | Command-line JSON processor for querying, filtering and transforming | All |
 | [just](https://github.com/casey/just) |  | Command runner for project tasks and scripts, like make without builds | All |
@@ -1955,12 +1955,13 @@ list is out of date.
 | [pulumi](https://github.com/pulumi/pulumi) |  | Infrastructure as code in TypeScript, Python, Go or C# for any cloud | All |
 | [putty](https://the.earth.li/) |  | SSH and telnet client with PuTTYgen, Pageant, psftp and plink | Windows (installer) |
 | [pwsh](https://github.com/PowerShell/PowerShell) |  | PowerShell 7, the cross-platform shell and scripting language, portable | All |
-| [python](https://github.com/astral-sh/python-build-standalone) | `python3`, `cpython` | Python 3.15 interpreter with pip, a portable standalone build | All |
+| [python](https://github.com/astral-sh/python-build-standalone/releases/latest/download) | `python3`, `cpython` | Python interpreter with pip, the latest stable, as a portable build | All |
 | [qbittorrent](https://github.com/qbittorrent/qBittorrent) |  | BitTorrent client with a built-in search engine and no ads | Windows x64 (installer) |
 | [qsv](https://github.com/dathere/qsv) |  | Fast CSV toolkit to slice, join, sort, query, validate and convert data | Windows, macOS arm64, Linux |
 | [rainmeter](https://github.com/rainmeter/rainmeter) |  | Desktop customization with skins for widgets, clocks and system meters | Windows x64 (installer) |
 | [rclone](https://github.com/rclone/rclone) |  | rsync-style sync to cloud storage like S3, Google Drive and Dropbox | All |
 | [restic](https://github.com/restic/restic) |  | Fast, encrypted, deduplicating backups to local disk, S3, SFTP and more | Windows x64 |
+| [resvg](https://github.com/linebender/resvg) |  | Fast SVG renderer that converts SVG files to PNG images | All |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | Fast recursive regex search of file contents, like grep | All |
 | [ripgrep-all](https://github.com/phiresky/ripgrep-all) | `rga` | ripgrep that also searches PDFs, ebooks, Office docs, zip and sqlite | macOS, Linux |
 | [ruff](https://github.com/astral-sh/ruff) |  | Fast Python linter and code formatter | All |
@@ -1984,13 +1985,12 @@ list is out of date.
 | [system-informer](https://github.com/winsiderss/systeminformer) | `systeminformer`, `process-hacker` | Process monitor and task manager replacement, formerly Process Hacker | Windows (installer) |
 | [taplo](https://github.com/tamasfe/taplo) |  | TOML toolkit: formatter, linter and language server for TOML files | All |
 | [task](https://github.com/go-task/task) | `go-task` | Task runner and build tool driven by a Taskfile.yml, a simpler make | All |
-| [temurin](https://github.com/adoptium/temurin25-binaries) | `java`, `jdk`, `openjdk` | Eclipse Temurin OpenJDK 25 LTS: java, javac and the JDK tools | Windows x64, macOS, Linux |
+| [temurin](https://api.adoptium.net/) | `java`, `jdk`, `openjdk` | Eclipse Temurin OpenJDK, the latest LTS: java, javac and the JDK tools | Windows x64, macOS, Linux |
 | [termscp](https://github.com/veeso/termscp) |  | Terminal file transfer and explorer for SCP, SFTP, FTP, S3 and WebDAV | All |
 | [terraform](https://releases.hashicorp.com/) | `tf` | Infrastructure as code that plans and applies cloud resources from HCL | All |
 | [terragrunt](https://github.com/gruntwork-io/terragrunt) |  | Terraform and OpenTofu wrapper that keeps configs DRY across modules | Windows x64, macOS, Linux |
 | [tflint](https://github.com/terraform-linters/tflint) |  | Terraform linter that finds errors and enforces best practices in HCL | Windows x64, macOS, Linux |
 | [tmux](https://github.com/tmux/tmux-builds) |  | Terminal multiplexer with split panes and sessions that outlive detach | macOS, Linux |
-| [topgrade](https://github.com/topgrade-rs/topgrade) |  | Upgrade everything at once: system packages, brew, cargo, npm and more | Windows x64, macOS, Linux |
 | [trippy](https://github.com/fujiapple852/trippy) | `trip` | Network diagnostic tool combining traceroute and ping in a TUI | All |
 | [trivy](https://github.com/aquasecurity/trivy) |  | Scanner for vulnerabilities, secrets and misconfig in images and code | Windows x64, macOS, Linux |
 | [ttt](https://github.com/eugenioenko/ttt) |  | Terminal text editor that feels like a GUI one, such as VS Code | Windows x64, macOS, Linux |

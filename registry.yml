@@ -2295,6 +2295,19 @@ programs:
       linux-x86_64: linux-x86_64
       linux-aarch64: linux-arm64
 
+  resvg:
+    description: "Fast SVG renderer that converts SVG files to PNG images"
+    repository: https://github.com/linebender/resvg
+    asset: "{release}/resvg-{target}"
+    member: "resvg{exe}"
+    targets:
+      windows-x86_64: win-x86_64.zip
+      windows-aarch64: win-aarch64.zip
+      macos-x86_64: macos-x86_64.zip
+      macos-aarch64: macos-aarch64.zip
+      linux-x86_64: linux-x86_64.tar.gz
+      linux-aarch64: linux-aarch64.tar.gz
+
   # No windows-aarch64.
   freeze:
     description: "Generate images of code and terminal output as PNG, SVG or WebP"
@@ -3058,3 +3071,15 @@ programs:
     targets:
       windows-x86_64:
         asset: "{url}/krita-x64-{version}-setup.exe"
+
+  # The Q16 HDRI build with DLLs. Tags are like `7.1.2-36`, and the setup carries the whole tag.
+  imagemagick:
+    description: "Create, edit, convert and resize images in 200+ formats with magick"
+    aliases: [magick]
+    repository: https://github.com/ImageMagick/ImageMagick
+    installer: true
+    targets:
+      windows-x86_64:
+        asset: "{release}/ImageMagick-{tag}-Q16-HDRI-x64-dll.exe"
+      windows-aarch64:
+        asset: "{release}/ImageMagick-{tag}-Q16-HDRI-arm64-dll.exe"
