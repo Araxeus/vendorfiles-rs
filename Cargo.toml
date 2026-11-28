@@ -41,7 +41,7 @@ jsonc-parser = { version = "0.34.0", default-features = false, features = [
 # `path`-versus-`targets` rule fails the suite rather than only editor completion. Default features
 # off: they resolve remote `$ref`s over HTTPS and pull aws-lc-rs in to do it, and this schema
 # refers to nothing outside itself.
-jsonschema = { version = "0.60.2", default-features = false }
+jsonschema = { version = "0.63.1", default-features = false }
 # Credential storage is `keyring-core` plus exactly one native store per platform, pulled in
 # through `[target.'cfg(target_os = "…")'.dependencies]` in `crates/vendorfiles_core`. Depending on
 # the `keyring` facade instead would compile every backend's support code on every target and,
@@ -75,7 +75,7 @@ sevenz-rust2 = { version = "0.25.0", default-features = false, features = [
 # Installers on Windows: the Apps & Features (uninstall) keys are read through the safe registry
 # API, and `windows-sys` provides `ShellExecuteExW`, which raises the UAC prompt for an installer
 # that needs admin and hands back a process handle to wait on. Both are already in the tree.
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -121,7 +121,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "s
 # Reads a version out of an HTML page with a CSS selector (`versionSelector`). It parses like a
 # browser, so a selector picks what `document.querySelector` would. Default features off: they
 # build a CLI.
-scraper = { version = "0.24.0", default-features = false }
+scraper = { version = "0.29.0", default-features = false }
 secrecy = "0.10.3"
 # Swapping a running binary is platform work: on Windows the file is locked, so the old image has
 # to be moved aside and deleted after exit. `vendor` uses it when an install lands on top of
