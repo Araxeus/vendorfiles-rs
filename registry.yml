@@ -1063,16 +1063,15 @@ programs:
       windows-x86_64:
         asset: "{release}/qbittorrent_{version}_x64_setup.exe"
 
-  # Tags carry four parts (10.0.6.906) and {version} keeps only three, so the asset uses {tag}.
   imageglass:
     description: "Fast image viewer for 90+ formats, including WEBP, AVIF, JXL and HEIC"
     repository: https://github.com/d2phap/ImageGlass
     installer: true
     targets:
       windows-x86_64:
-        asset: "{release}/ImageGlass_{tag}_win-x64.msix"
+        asset: "{release}/ImageGlass_{version}_win-x64.msix"
       windows-aarch64:
-        asset: "{release}/ImageGlass_{tag}_win-arm64.msix"
+        asset: "{release}/ImageGlass_{version}_win-arm64.msix"
 
   # The per-user setup installs without admin.
   winmerge:
