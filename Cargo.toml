@@ -75,7 +75,7 @@ sevenz-rust2 = { version = "0.27.0", default-features = false, features = [
 # Installers on Windows: the Apps & Features (uninstall) keys are read through the safe registry
 # API, and `windows-sys` provides `ShellExecuteExW`, which raises the UAC prompt for an installer
 # that needs admin and hands back a process handle to wait on. Both are already in the tree.
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
