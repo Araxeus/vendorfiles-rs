@@ -32,8 +32,9 @@ const ADVERTISEMENT: &str = "application/x-git-upload-pack-advertisement";
 /// `diskanalyzer.com` often takes 30 to 45 seconds.
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// How much of a version page is read. A version sits near the top of anything sane.
-const MAX_VERSION_BODY: usize = 1 << 20;
+/// How much of a version page is read. A JSON listing is read whole, and GitHub's for a release
+/// with a thousand assets is about 2 MB.
+const MAX_VERSION_BODY: usize = 8 << 20;
 
 /// How much of a tag listing is read. The full advertisement of a large repository runs to tens
 /// of megabytes, and a host that never stops sending is cut off here.

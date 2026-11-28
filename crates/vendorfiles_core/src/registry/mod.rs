@@ -746,6 +746,60 @@ programs:
         None
     }
 
+    /// The comment that keeps an entry's archive out of the member check.
+    const SKIP_ARCHIVE_CHECK: &str = "# ci: skip-archive-check";
+
+    /// The programs whose key follows a [`SKIP_ARCHIVE_CHECK`] comment.
+    fn archive_check_skipped(text: &str) -> std::collections::HashSet<String> {
+        let mut skipped = std::collections::HashSet::new();
+        let mut marked = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == SKIP_ARCHIVE_CHECK {
+                marked = true;
+            } else if !trimmed.starts_with('#') {
+                if marked && let Some(name) = trimmed.strip_suffix(':') {
+                    skipped.insert(name.to_owned());
+                }
+                marked = false;
+            }
+        }
+        skipped
+    }
+
+    #[test]
+    fn the_skip_comment_names_the_entry_below_it() {
+        let text = "programs:
+  # Large.
+  # ci: skip-archive-check
+  # More.
+  llvm:
+                        description: x
+  zig:
+";
+        let skipped = archive_check_skipped(text);
+        assert_eq!(skipped.into_iter().collect::<Vec<_>>(), ["llvm"]);
+    }
+
+    /// Whether an archive holding `held` has `member`, or for a folder or pattern, any file of it.
+    ///
+    /// Resolved the way installation resolves it - `join_normalized` under the directory the
+    /// archive was unpacked into - rather than compared as raw spellings. That is what makes
+    /// `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on disk, so the gate
+    /// cannot fail an entry that installs perfectly well. A stand-in root is enough: both sides go
+    /// through the same one.
+    fn is_held(member: &str, tag: &str, held: &[String]) -> Result<bool, String> {
+        if let Some(selection) = crate::selection::Selection::of(member, None, tag) {
+            let selection = selection.map_err(|error| format!("{error:?}"))?;
+            return Ok(held.iter().any(|held| selection.matches(held)));
+        }
+        let root = std::path::Path::new("extracted");
+        let expected = crate::fsx::join_normalized(root, &[&replace_version(member, tag)]);
+        Ok(held
+            .iter()
+            .any(|held| crate::fsx::join_normalized(root, &[held]) == expected))
+    }
+
     /// One platform per entry, checked all the way into the archive.
     ///
     /// Verifying every host would mean downloading every asset for every platform - gigabytes. One
@@ -760,7 +814,9 @@ programs:
     async fn the_shipped_registry_names_members_that_exist() {
         use crate::template::owner_and_name_from_repo_url;
 
-        let registry = Registry::parse(&shipped()).expect("the shipped registry parses");
+        let text = shipped();
+        let registry = Registry::parse(&text).expect("the shipped registry parses");
+        let skipped = archive_check_skipped(&text);
         let github =
             crate::GitHubClient::new(crate::auth::resolve_token()).expect("a client, token or not");
         let mut problems: Vec<String> = Vec::new();
@@ -771,8 +827,8 @@ programs:
 
         for name in registry.names() {
             let (canonical, program) = registry.find(name).expect("just listed");
-            if program.path.is_some() {
-                continue; // A repository file: no archive to look inside.
+            if program.path.is_some() || skipped.contains(canonical) {
+                continue; // A repository file, or an archive too large to download each run.
             }
             let Some((host, archives)) =
                 member_bearing_host(canonical, program, &local_host, &mut problems)
@@ -834,19 +890,16 @@ programs:
                     }
                 };
 
-                // Resolved the way installation resolves it - `join_normalized` under the directory
-                // the archive was unpacked into - rather than compared as raw spellings. That is what
-                // makes `./bin/tool` and `/bin/tool` both land on `bin/tool`, exactly as they do on
-                // disk, so the gate cannot fail an entry that installs perfectly well. A stand-in root
-                // is enough: both sides go through the same one.
-                let root = std::path::Path::new("extracted");
-                let held_paths: Vec<_> = held
-                    .iter()
-                    .map(|held| crate::fsx::join_normalized(root, &[held]))
-                    .collect();
                 for member in wanted_members.keys() {
                     let expected = replace_version(member, &tag);
-                    if held_paths.contains(&crate::fsx::join_normalized(root, &[&expected])) {
+                    let found = match is_held(member, &tag, &held) {
+                        Ok(found) => found,
+                        Err(error) => {
+                            problems.push(format!("{canonical} for {host}: {error}"));
+                            continue;
+                        }
+                    };
+                    if found {
                         checked += 1;
                     } else {
                         problems.push(format!(

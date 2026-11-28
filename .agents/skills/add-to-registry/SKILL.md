@@ -89,22 +89,14 @@ command, such as `nvim --headless --clean` or `rg needle`.
 - A few companion files fit a `member` list, as `herdr` does, when the archive has no top folder.
   A list keeps every directory, so use a map to drop a top folder.
 - An optional companion binary, such as yazi's `ya`, is the maintainer's call, so report it.
-- A large tree does not fit the format. Stop before writing the entry and report, because the choice
-  belongs to the maintainer.
-
-These facts about large trees are already tested, so you need not reproduce them:
-
-- `member` takes exact file paths. A directory as `member` installs once, then the next update fails
-  with `Access is denied (os error 5)`, which looks like a locked file. The live test also rejects
-  directories.
-- Neovim needs about 2,130 files per host, and that list changes between releases.
-
-Offer these options:
-
-- Teach the engine to take directories, which means `vendor` deletes a folder an entry names.
-- Generate a full file list, about 2,130 lines per host, which goes stale between releases.
-- Use a single-file asset such as an AppImage, which covers Linux only.
-- Leave the program out.
+- A large tree fits a folder `member` ending in `/`, as `helix` and `go` do. Alone, the folder's
+  files land at the top of the vendor folder, so the archive's versioned folder drops out. `./`
+  takes an archive with no top folder, as `pwsh` does.
+- When the executable sits in a `bin/` folder, say so in a comment and in the report, because
+  that folder must go on `PATH` and the vendor folder alone is not enough.
+- Mark an archive of a gigabyte or more with `# ci: skip-archive-check` on its own line just
+  above the program's name, because the live test would download it on every run. Check its
+  members by hand instead, and report it.
 
 ## 3. Write the entry
 

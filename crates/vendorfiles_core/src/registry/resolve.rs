@@ -10,7 +10,7 @@ use super::schema::{Explicit, Member, Program, Target};
 use crate::error::{Result, VendorError};
 use crate::installer::InstallerKey;
 use crate::model::{FileEntry, FileTarget};
-use crate::selection::is_asset_pattern;
+use crate::selection::{is_asset_pattern, is_member_selection};
 use crate::template::{is_http_url, replace_version};
 
 /// The host key a registry entry is looked up under: `windows-x86_64`, `macos-aarch64`, …
@@ -410,6 +410,16 @@ fn extraction(
     // name on Unix, and never found. Normalising going in is also what keeps a `..` out of that
     // directory, which would otherwise move a file from outside it into the dependency's folder.
     let pairs: Vec<(String, String)> = match member {
+        // One folder or pattern lands at the root, which drops the archive's versioned folder.
+        Member::One(path) if is_member_selection(path) => {
+            if let Some(named) = named {
+                return Err(refuse(format!(
+                    "'member' names the files of '{path}', so there is no single file for 'as' \
+                     to rename to '{named}'"
+                )));
+            }
+            vec![(selection_input(name, path)?, "./".to_owned())]
+        }
         // One member is the executable: its own path going in, its basename coming out.
         Member::One(path) => vec![(
             member_path(name, path)?,
@@ -418,11 +428,30 @@ fn extraction(
         // A list is its own destination; a map says where each file goes instead.
         Member::Many(paths) => paths
             .iter()
-            .map(|path| member_path(name, path).map(|path| (path.clone(), path)))
+            .map(|path| {
+                if is_member_selection(path) {
+                    let input = selection_input(name, path)?;
+                    let output = selection_base(&input);
+                    Ok((input, output))
+                } else {
+                    member_path(name, path).map(|path| (path.clone(), path))
+                }
+            })
             .collect::<Result<_>>()?,
         Member::Mapped(paths) => paths
             .iter()
-            .map(|(input, output)| Ok((member_path(name, input)?, member_path(name, output)?)))
+            .map(|(input, output)| {
+                if !is_member_selection(input) {
+                    return Ok((member_path(name, input)?, member_path(name, output)?));
+                }
+                if !(output.ends_with('/') || output == ".") {
+                    return Err(refuse(format!(
+                        "'{input}' names several files, so its output '{output}' must be a \
+                         folder ending in '/'"
+                    )));
+                }
+                Ok((selection_input(name, input)?, selection_path(name, output)?))
+            })
             .collect::<Result<_>>()?,
     };
 
@@ -471,6 +500,47 @@ fn member_path(name: &str, member: &str) -> Result<String> {
         return Err(refuse());
     }
     Ok(segments.join("/"))
+}
+
+/// A folder or pattern member, checked like [`member_path`].
+///
+/// A folder keeps its trailing `/`, which is what marks it a folder. The archive root, written
+/// `./` or `.`, stays `./`.
+fn selection_path(name: &str, path: &str) -> Result<String> {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    if matches!(trimmed, "" | ".") {
+        return Ok("./".to_owned());
+    }
+    let checked = member_path(name, trimmed)?;
+    Ok(if trimmed.len() < path.len() {
+        format!("{checked}/")
+    } else {
+        checked
+    })
+}
+
+/// A folder or pattern to take out of an archive. The root, `./`, takes everything, as `**`.
+fn selection_input(name: &str, path: &str) -> Result<String> {
+    let checked = selection_path(name, path)?;
+    Ok(if checked == "./" {
+        "**".to_owned()
+    } else {
+        checked
+    })
+}
+
+/// Where a listed folder or pattern lands, so each file keeps its path from the archive root.
+///
+/// A folder lands under its own path. A pattern lands under the folders before its first
+/// wildcard, because the files it selects keep their paths below those folders.
+fn selection_base(input: &str) -> String {
+    if !input.contains(['*', '?']) {
+        return input.to_owned();
+    }
+    let literal = &input[..input.find(['*', '?']).unwrap_or(input.len())];
+    literal
+        .rfind('/')
+        .map_or_else(|| "./".to_owned(), |slash| literal[..=slash].to_owned())
 }
 
 /// The name the extracted member is written under: its basename.
@@ -1187,6 +1257,83 @@ programs:
                 ),
             ]
         );
+    }
+
+    fn tree(member: &str) -> crate::error::Result<Entry> {
+        let document = program(&format!(
+            "version: 3\nprograms:\n  tree:\n    repository: https://github.com/example/tree\n    \
+             targets:\n      linux-x86_64:\n        asset: '{{release}}/tree.tar.gz'\n        \
+             member: {member}\n"
+        ));
+        for_host("tree", &document.programs["tree"], "linux-x86_64")
+    }
+
+    #[test]
+    fn one_folder_member_lands_at_the_root() {
+        // The archive's versioned folder drops out, as it does for one file.
+        let entry = tree("'tree-{version}/'").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [("tree-{version}/".to_owned(), "./".to_owned())]
+        );
+    }
+
+    #[test]
+    fn the_archive_root_selects_every_file() {
+        for root in ["'./'", "'**'"] {
+            let entry = tree(root).unwrap();
+            assert_eq!(
+                extracted(&entry),
+                [("**".to_owned(), "./".to_owned())],
+                "{root}"
+            );
+        }
+    }
+
+    #[test]
+    fn listed_folders_and_patterns_keep_their_paths() {
+        let entry = tree("[bin/tree, share/, 'lib/*.so']").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("bin/tree".to_owned(), "bin/tree".to_owned()),
+                ("share/".to_owned(), "share/".to_owned()),
+                ("lib/*.so".to_owned(), "lib/".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_mapped_folder_lands_in_a_folder() {
+        let entry = tree("{ 'tree-{version}/': './', 'extra/': 'more/' }").unwrap();
+        assert_eq!(
+            extracted(&entry),
+            [
+                ("tree-{version}/".to_owned(), "./".to_owned()),
+                ("extra/".to_owned(), "more/".to_owned()),
+            ]
+        );
+        let error = tree("{ 'tree/': tree }").expect_err("a folder cannot become one file");
+        assert!(error.to_string().contains("must be a folder"), "{error}");
+    }
+
+    #[test]
+    fn a_folder_member_is_still_checked_for_escapes() {
+        for member in ["'../'", "'a/../../'", "'C:/'", "{ 'tree/': '../' }"] {
+            tree(member).expect_err(member);
+        }
+    }
+
+    #[test]
+    fn a_folder_member_beside_an_as_is_refused() {
+        let document = program(
+            "version: 3\nprograms:\n  tree:\n    repository: https://github.com/example/tree\n    \
+             targets:\n      linux-x86_64:\n        asset: '{release}/tree.tar.gz'\n        \
+             member: tree/\n        as: tree\n",
+        );
+        let error = for_host("tree", &document.programs["tree"], "linux-x86_64")
+            .expect_err("must be refused");
+        assert!(error.to_string().contains("'as'"), "{error}");
     }
 
     #[test]

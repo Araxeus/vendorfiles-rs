@@ -8,6 +8,10 @@
 # on one platform - the runner's own where the entry covers it. So a wrong `member` is caught, and
 # the failure lists what the archive actually holds.
 #
+# An archive too large to download on every run can skip that member check. Put the comment
+# `# ci: skip-archive-check` on its own line just above the program's name. Its asset names are
+# still checked.
+#
 # Test your entry before opening the PR:
 #
 #     VENDOR_REGISTRY=./registry.yml vendor add <name>
@@ -47,6 +51,11 @@
 # stands, directories included. A *map* is that layout with each destination spelled out, which is
 # how `x64/programz.exe` arrives as `program.exe`. Naming more than one file leaves `as` nothing
 # single to rename, so it is refused beside either.
+#
+# A `member` ending in `/` takes that whole folder, and one with `*` or `?` takes every file it
+# matches, for a program that needs its tree, like go or neovim. Alone, a folder's files land at
+# the top of the vendor folder, which drops the archive's versioned folder; `./` takes the whole
+# archive. In a list, a folder keeps its path. In a map, a folder's destination ends in `/`.
 #
 # A host may name *several assets* instead of one, as a list of `asset`/`member` blocks, for a
 # release that splits what one host needs across an archive and a loose file beside it.

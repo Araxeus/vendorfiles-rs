@@ -86,7 +86,7 @@ pub fn find_version(
 ///
 /// A string or number there is read like a page's text. An array is a list of versions, and the
 /// latest one wins, ranked like the tags of a `.git` `versionUrl`. There `versionRegex` says
-/// which versions count.
+/// which versions count, and a capture group in it says which part of each one is the version.
 ///
 /// A `*` segment stands for every item of an array or value of an object, so `/*/version`
 /// gathers each entry's version into one list.
@@ -112,12 +112,17 @@ pub fn find_json_version(
         }
         _ => found,
     };
+    let captured = regex.filter(|re| re.captures_len() > 1);
     let versions: Vec<String> = list
         .into_iter()
         .filter_map(scalar)
+        .filter_map(|entry| match captured {
+            Some(_) => extract_version(&entry, captured),
+            None => Some(entry),
+        })
         .filter(|version| super::is_plausible_version(version))
         .collect();
-    super::tags::latest_tag(&versions, regex)
+    super::tags::latest_tag(&versions, if captured.is_some() { None } else { regex })
 }
 
 /// The values `pointer` reaches in `json`, where a `*` segment reaches every child.
@@ -305,6 +310,25 @@ mod tests {
         assert_eq!(
             find_json_version(index, "/versions", Some(&re)).as_deref(),
             Some("18.1.3.2")
+        );
+    }
+
+    #[test]
+    fn a_capture_group_takes_the_version_out_of_each_entry() {
+        // python-build-standalone names every Python line in one release.
+        let release = r#"{"assets":[
+            {"name":"cpython-3.14.10+20261124-x86_64-pc-windows-msvc-install_only.tar.gz"},
+            {"name":"cpython-3.15.2+20261124-x86_64-pc-windows-msvc-install_only.tar.gz"},
+            {"name":"cpython-3.15.2+20261124-x86_64-unknown-linux-gnu-install_only.tar.gz"},
+            {"name":"cpython-3.16.0a2+20261124-x86_64-pc-windows-msvc-install_only.tar.gz"}
+        ]}"#;
+        let re = fancy_regex::Regex::new(
+            r"^cpython-(\d+\.\d+\.\d+\+\d+)-x86_64-pc-windows-msvc-install_only\.tar\.gz$",
+        )
+        .unwrap();
+        assert_eq!(
+            find_json_version(release, "/assets/*/name", Some(&re)).as_deref(),
+            Some("3.15.2+20261124")
         );
     }
 
