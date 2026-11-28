@@ -29,7 +29,7 @@ pub mod view;
 
 use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -273,6 +273,64 @@ impl Drop for Reporter {
     }
 }
 
+/// A line withheld until its dependency finishes.
+#[derive(Debug)]
+enum Pending {
+    Line(String),
+    Saved(PathBuf),
+}
+
+/// The most saved files listed one by one. A folder from an archive can hold thousands.
+const SAVED_LISTED: usize = 10;
+
+/// The withheld lines to print, with many saved files folded into one line where the first was.
+fn withheld_lines(pending: &[Pending]) -> Vec<String> {
+    let saved: Vec<&Path> = pending
+        .iter()
+        .filter_map(|line| match line {
+            Pending::Saved(path) => Some(path.as_path()),
+            Pending::Line(_) => None,
+        })
+        .collect();
+    let mut folded = (saved.len() > SAVED_LISTED).then(|| {
+        Some(format!(
+            "Saved {} files to {}",
+            saved.len(),
+            common_folder(&saved).display()
+        ))
+    });
+
+    let mut lines = Vec::with_capacity(pending.len());
+    for line in pending {
+        match (line, &mut folded) {
+            (Pending::Line(line), _) => lines.push(line.clone()),
+            (Pending::Saved(_), Some(summary)) => lines.extend(summary.take()),
+            (Pending::Saved(path), None) => lines.push(format!("Saved {}", path.display())),
+        }
+    }
+    lines
+}
+
+/// The deepest folder that holds every path.
+fn common_folder(paths: &[&Path]) -> PathBuf {
+    let mut common: Option<PathBuf> = None;
+    for path in paths {
+        let parent = path.parent().unwrap_or(path);
+        common = Some(common.map_or_else(
+            || parent.to_owned(),
+            |common| {
+                common
+                    .components()
+                    .zip(parent.components())
+                    .take_while(|(a, b)| a == b)
+                    .map(|(a, _)| a)
+                    .collect()
+            },
+        ));
+    }
+    common.unwrap_or_default()
+}
+
 /// The display for one dependency, plus the plain lines to emit if nothing is animating.
 #[derive(Debug)]
 pub struct Dependency {
@@ -283,7 +341,7 @@ pub struct Dependency {
     animated: bool,
     state: Arc<Mutex<RunState>>,
     /// `INFO:` lines withheld until this dependency finishes, so piped output stays ordered.
-    pending: Mutex<Vec<String>>,
+    pending: Mutex<Vec<Pending>>,
     /// The run's outcome lines, printed together when the region comes down.
     results: Arc<Mutex<Vec<String>>>,
     /// Downloads land in a temporary folder to be run, so they are not "saved" anywhere.
@@ -399,9 +457,9 @@ impl Dependency {
             self.status(format!("{verb} {name}"));
         } else if let Ok(mut pending) = self.pending.lock() {
             pending.push(if staged {
-                format!("Downloaded {name}")
+                Pending::Line(format!("Downloaded {name}"))
             } else {
-                format!("Saved {}", path.display())
+                Pending::Saved(path.to_owned())
             });
         }
     }
@@ -411,7 +469,7 @@ impl Dependency {
         if !self.animated
             && let Ok(mut pending) = self.pending.lock()
         {
-            pending.push(line);
+            pending.push(Pending::Line(line));
         }
     }
 
@@ -510,7 +568,7 @@ impl Dependency {
     /// Flushes withheld lines, in the order they happened.
     fn flush(&self) {
         if let Ok(mut pending) = self.pending.lock() {
-            for line in pending.drain(..) {
+            for line in withheld_lines(&std::mem::take(&mut *pending)) {
                 ui::info(line);
             }
         }
@@ -590,7 +648,9 @@ impl Drop for Transfer<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ACTIVE, Command, Reporter, column, print_out, restore_terminal};
+    use super::{
+        ACTIVE, Command, Pending, Reporter, column, print_out, restore_terminal, withheld_lines,
+    };
     use crate::progress::state::{Bytes, Outcome, RunState, Stage};
     use crate::progress::view::NAME_WIDTH;
     use std::path::Path;
@@ -619,6 +679,43 @@ mod tests {
             Stage::Active { bytes, .. } => bytes,
             other => panic!("expected an active stage, found {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_few_saved_files_are_listed_one_by_one() {
+        let lines = withheld_lines(&[
+            Pending::Saved("vendor/fzf/LICENSE".into()),
+            Pending::Line("note".to_owned()),
+            Pending::Saved("vendor/fzf/fzf.exe".into()),
+        ]);
+        assert_eq!(
+            lines,
+            [
+                format!("Saved {}", Path::new("vendor/fzf/LICENSE").display()),
+                "note".to_owned(),
+                format!("Saved {}", Path::new("vendor/fzf/fzf.exe").display()),
+            ]
+        );
+    }
+
+    #[test]
+    fn many_saved_files_fold_into_one_line_for_their_folder() {
+        let mut pending = vec![Pending::Line("before".to_owned())];
+        pending
+            .extend((0..12).map(|i| Pending::Saved(format!("vendor/hx/runtime/{i}.scm").into())));
+        pending.push(Pending::Saved("vendor/hx/hx.exe".into()));
+        pending.push(Pending::Line("after".to_owned()));
+        assert_eq!(
+            withheld_lines(&pending),
+            [
+                "before".to_owned(),
+                format!(
+                    "Saved 13 files to {}",
+                    Path::new("vendor").join("hx").display()
+                ),
+                "after".to_owned(),
+            ]
+        );
     }
 
     #[test]
